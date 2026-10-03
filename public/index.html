@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en-AU">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Same Gym</title>
+    <meta name="description" content="A small shared gym floor: train on your own, alongside whoever else is in." />
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span>Same Gym</a>
+      <p class="headcount" id="headcount" aria-live="polite"></p>
+      <nav>
+        <a href="/readme/">About</a>
+        <button type="button" class="link" id="pass-button" hidden>Gym pass</button>
+      </nav>
+    </header>
+
+    <main class="layout">
+      <!-- The stations are fixed parts of the room, so they're in the page
+           itself; app.js only places the people. -->
+      <section class="floor" id="floor" aria-label="The gym floor">
+        <div class="zone" data-station="pull">
+          <button type="button" class="zone-hit"><span class="zone-name">Cable Stack</span><span class="zone-kind">Pull</span></button>
+          <svg class="kit" viewBox="0 0 200 120" aria-hidden="true">
+            <rect x="24" y="26" width="34" height="70" rx="5" />
+            <rect x="32" y="34" width="18" height="40" rx="2" class="kit-light" />
+            <circle cx="41" cy="18" r="6" />
+            <rect x="142" y="26" width="34" height="70" rx="5" />
+            <rect x="150" y="34" width="18" height="40" rx="2" class="kit-light" />
+            <circle cx="159" cy="18" r="6" />
+            <path d="M41 18 L100 54 L159 18" class="kit-line" />
+            <rect x="88" y="70" width="24" height="30" rx="5" class="kit-light" />
+          </svg>
+          <div class="crowd"></div>
+        </div>
+
+        <div class="zone" data-station="chest">
+          <button type="button" class="zone-hit"><span class="zone-name">Bench</span><span class="zone-kind">Chest</span></button>
+          <svg class="kit" viewBox="0 0 200 120" aria-hidden="true">
+            <rect x="82" y="30" width="36" height="74" rx="10" class="kit-light" />
+            <path d="M30 40 H170" class="kit-bar" />
+            <rect x="30" y="26" width="10" height="28" rx="2" />
+            <rect x="42" y="30" width="7" height="20" rx="2" />
+            <rect x="160" y="26" width="10" height="28" rx="2" />
+            <rect x="151" y="30" width="7" height="20" rx="2" />
+            <rect x="72" y="32" width="6" height="16" rx="2" />
+            <rect x="122" y="32" width="6" height="16" rx="2" />
+          </svg>
+          <div class="crowd"></div>
+        </div>
+
+        <div class="zone" data-station="legs">
+          <button type="button" class="zone-hit"><span class="zone-name">Squat Rack</span><span class="zone-kind">Legs</span></button>
+          <svg class="kit" viewBox="0 0 200 120" aria-hidden="true">
+            <rect x="50" y="20" width="100" height="84" rx="6" class="kit-frame" />
+            <rect x="46" y="16" width="12" height="12" rx="2" />
+            <rect x="142" y="16" width="12" height="12" rx="2" />
+            <rect x="46" y="96" width="12" height="12" rx="2" />
+            <rect x="142" y="96" width="12" height="12" rx="2" />
+            <path d="M24 48 H176" class="kit-bar" />
+            <rect x="18" y="32" width="10" height="32" rx="2" />
+            <rect x="172" y="32" width="10" height="32" rx="2" />
+            <rect x="74" y="66" width="52" height="30" rx="3" class="kit-light" />
+          </svg>
+          <div class="crowd"></div>
+        </div>
+
+        <div class="zone" data-station="cardio">
+          <button type="button" class="zone-hit"><span class="zone-name">Cardio</span><span class="zone-kind">Engine</span></button>
+          <svg class="kit" viewBox="0 0 200 120" aria-hidden="true">
+            <rect x="26" y="22" width="40" height="84" rx="8" />
+            <rect x="32" y="40" width="28" height="60" rx="3" class="kit-belt" />
+            <rect x="80" y="22" width="40" height="84" rx="8" />
+            <rect x="86" y="40" width="28" height="60" rx="3" class="kit-belt" />
+            <rect x="140" y="30" width="16" height="76" rx="8" />
+            <circle cx="148" cy="30" r="12" class="kit-light" />
+          </svg>
+          <div class="crowd"></div>
+        </div>
+
+        <div class="zone zone-rest" data-station="rest">
+          <button type="button" class="zone-hit"><span class="zone-name">Stretch &amp; Rest</span><span class="zone-kind">Between sets</span></button>
+          <svg class="kit" viewBox="0 0 400 120" aria-hidden="true">
+            <rect x="40" y="30" width="90" height="34" rx="6" class="kit-mat" />
+            <rect x="150" y="70" width="90" height="34" rx="6" class="kit-mat kit-mat-b" />
+            <rect x="260" y="30" width="90" height="34" rx="6" class="kit-mat" />
+            <circle cx="370" cy="92" r="14" class="kit-light" />
+            <rect x="12" y="84" width="60" height="18" rx="9" />
+          </svg>
+          <div class="crowd"></div>
+        </div>
+      </section>
+
+      <aside class="panel" id="panel" aria-live="polite"></aside>
+    </main>
+
+    <!-- The way in: first visit, or coming back after leaving. -->
+    <div class="door" id="door" hidden>
+      <div class="door-card" role="dialog" aria-modal="true" aria-labelledby="door-title">
+        <div id="door-body"></div>
+      </div>
+    </div>
+
+    <noscript><p class="noscript">The gym floor needs JavaScript to show who's training.</p></noscript>
+  </body>
+</html>
