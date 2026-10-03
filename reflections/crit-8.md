@@ -1,25 +1,35 @@
 # Crit 8: It's alive!
 
-_Draft. Rewrite in your own words before the cutoff (Wed 7 Oct, 13:30)._
+_Draft built from what happened this week. Rewrite it in your own words before the
+cutoff (Wed 7 Oct, 13:30). Part 2 especially is a starting point to confirm or
+replace: only you can answer it._
 
 ## 1. What was the breakthrough that moved the work forward?
 
-The idea came together when I split "a gym with other people in it" from "a
-social fitness app". Once the design statement was written down (a good virtual
-gym should make individual training feel shared without turning exercise into a
-meeting, competition or social feed), most decisions answered themselves. Other
-people are shown on the floor, not in a list. Others see only your current state,
-not your history. There are no rankings. The same sentence is now the opening of
-the README, the first rule in `CLAUDE.md`, and the reason the privacy check in
-`spec/` exists.
+Writing the design statement before any code: a good virtual gym should make
+individual training feel shared without turning exercise into a meeting,
+competition or social feed. It became the yardstick for everything after it.
 
-On the technical side, the presence table was the key decision. Keeping one row
-per person, rewritten on every change, made "come back and find yourself where
-you were" fall out for free: the rest timer keeps counting from the server's clock
-after a reload. It's also exactly the payload a live floor will need to send at
-crit 9.
+The clearest example came in the review pass. The first build showed everyone's
+last set, weights included, on their label on the floor. It worked and looked
+good, but held against the statement it was a quiet leaderboard. Taking the numbers
+off the public floor was a one-line change in the query and a new check in
+`spec/`. What it really changed was what the app *is*: you can see what someone's
+doing, never how much. The same thing happened with the empty-gym view, which
+looked like a diagram until each station showed open spots for people who aren't
+there yet.
+
+The technical breakthrough was the presence table: one row per person, rewritten on
+every change. It's why coming back puts you where you were, with your rest timer
+still running from the server's clock, and it's the shape the floor will need to
+send once it updates live.
 
 ## 2. What did this work change about who I want to be as a software developer?
 
-_To write yourself: the brief asks for your own position here, and it isn't
-something the agent can supply._
+_Draft to confirm or replace:_ Most of my effort this week went into saying what
+the app must **not** be, and then checking whether it had drifted. My two prompts
+were mostly limits and a review brief, not feature requests, and the review found
+real drift that passing tests had not: numbers in public, totals on the welcome
+screen, labels that lied about where people rest. I want to be the developer who
+treats "it works" as the start of the review, not the end, and who turns each
+correction into a rule or a check so it can't drift back.

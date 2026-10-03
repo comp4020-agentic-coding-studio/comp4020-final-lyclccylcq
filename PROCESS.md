@@ -1,81 +1,127 @@
 # Process overview
 
-_Draft at crit 8. Per the brief, this gets rewritten at each crit rather than
-appended to._
+_Draft at crit 8. Per the brief, this gets rewritten at each crit, not appended to._
 
 ## From brief to idea
 
-The brief asks for a multi-user, real-time website that's good, and warns that
-the median answer is a chat room with the nouns swapped. My idea is a virtual gym.
-Spatial-presence products like Gather were the starting point, but a virtual
-office is still a meeting. What I wanted from a real gym is narrower: training on
-your own while seeing other people work nearby, with nobody asking anything of
-you. That gave the design statement in the README, and it gave a list of things
-the app must not become (Strava, Discord, a feed, a leaderboard, a coaching app).
-I wrote both into my opening prompt to the agent before any code existed, so the
-narrowing happened up front and wasn't a late correction.
+The brief asks for a multi-user, real-time website that's good, and warns that the
+median answer is a chat room with the nouns swapped. My idea is a virtual gym.
+Spatial-presence products like Gather were the starting point, but a virtual office
+is still a meeting. What I wanted from a real gym is narrower: training on your own
+while other people work nearby, with nobody asking anything of you. That gave the
+design statement in the README, and a list of things the app must not become:
+Strava, Discord, a feed, a leaderboard, a coaching app.
 
-## Harness and workflow
+A gym also suits a spatial interface better than most ideas, because where someone
+is standing already says what they're doing. Being at the squat rack *is* the
+status. So the floor is the main view, and logging is something you do at a station
+rather than in a form beside the map.
 
-The prompt asked the agent to inspect the starter before choosing anything, to
-explain the architecture first, and to keep the starter's contract (`/` returns
-200, `/readme/` publishes the README, and data lives on `/data`). `CLAUDE.md`
-turns the product statement into rules: presence on the floor, not in a list; no
-feeds, rankings or messaging; persistence on the server; phones as first-class. It
-also records the engineering rules the stack needs, such as erasable TypeScript
-only, additive schema changes, and the pass never appearing in public data.
+## How I directed the agent
+
+I worked in two passes, each starting from a long prompt I wrote before any code
+existed.
+
+**Build pass.** The prompt set out the concept, the scope limits (no AI, nutrition,
+rankings, messaging or heavy accounts), the crit 8 journey, and the rule that
+persistence must be server-side, with `localStorage` holding no more than a token. It
+told the agent to inspect the starter and explain the architecture before writing
+anything, and to put the course's requirements ahead of mine where they
+conflicted. The server and data model landed in
+[`00a5898`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/00a5898),
+the floor and panel in
+[`0e2b05b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/0e2b05b),
+and the checks in
+[`c024afc`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/c024afc).
+
+**Review pass.** I then told the agent to stop adding features and audit the result
+as a crit 8 submission in four areas: the crit requirements, persistence
+correctness, the product concept and the documentation. The prompt asked it to test
+the flow rather than assume it worked, and to remove anything that pushed toward a
+normal fitness tracker. The corrections it produced are below. Each one is a place
+where the first build had drifted from the README.
 
 ## Stack
 
 Plain Node 24 (`http` and `node:sqlite`) with a hand-written client and no runtime
 dependencies. The trade-offs are in
-[decision record 1](docs/decisions/0001-plain-node-and-sqlite.md). In short: the
-app is one page and an API on a 256 MB machine, so a framework would mostly sit
-unused, and built-in SQLite avoids compiling a native module in the image. The
-server and data model landed in
-[`00a5898`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/00a5898).
+[decision record 1](docs/decisions/0001-plain-node-and-sqlite.md). In short: the app
+is one page and an API on a 256 MB machine, so a framework would mostly sit unused,
+and built-in SQLite avoids compiling a native module in the image. Docker isn't
+installed on my machine, so the image hasn't been built locally. Instead, the
+review ran the server from exactly the files the `Dockerfile` copies, on an empty
+data directory with production settings, and the full check passed.
 
-## Persistence and identity
+## Identity and persistence
 
-Four tables: users, sessions (visits), sets and presence. Identity is an opaque id
-plus a 12-character gym pass, which works like a bearer secret. The browser keeps
-only the pass. Workout data is never kept in `localStorage`. Typing the pass on
-another device gives you back the same person, and the display name is only a
-label. A visit left open for three hours is closed at its last activity, so
-nobody appears to be "resting" for days. Presence is one row per person,
-rewritten on each change. Every change goes through four functions in
-`src/gym.ts` (enter, choose, set, leave), which are the events crit 9 will
-broadcast.
+There are four tables: users, sessions (visits), sets and presence, in one SQLite
+file at `/data/gym.db`. `/data` is the Fly volume, the only storage the course setup
+keeps across restarts and redeploys. A person is an opaque id plus a 12-character
+gym pass, which the browser sends as a bearer token. The browser stores the pass
+and nothing else. Typing the pass on another device brings back the same person;
+the display name is only a label. Presence is one row per person, rewritten on each
+change, and a visit left open for three hours is closed at its last activity. Every
+change goes through four functions in `src/gym.ts` (enter, choose, set, leave),
+which are the events crit 9 will broadcast.
 
-## Decisions narrowed or rejected
+I tested this in a real browser by driving headless Chrome: join, choose, log a set,
+refresh, navigate away and back, quit the browser, restart the server, reopen. Then
+I wiped `localStorage` and recovered using only the typed pass. At every step the
+person, their station, their set and a still-running rest timer came back.
 
-- **An event-log table** for crit 9 to tail was considered and left out. Nothing
-  would read it yet, and the four action functions already give a broadcast one
-  place to hook in.
-- **Polling the floor** would have made other people appear without a reload. I
-  held it back so crit 8 stays about persistence, and so the real-time choice is
-  made deliberately at crit 9. For now, others appear only when the page loads,
-  and the README says so.
-- **Cardio as weight × reps** didn't fit, so each station declares what it
-  measures: timed stations log minutes and no weight.
-- **Screenshots changed the layout.** The first render at 1440px squeezed the
-  weight and reps inputs until the numbers were cut off, and at 390px name tags
-  spilled into neighbouring zones. Fields now stack, people are kept away from
-  zone edges, and phones show only name and status. Those fixes are part of
-  [`0e2b05b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/0e2b05b).
+## What the review corrected
 
-## Checks
+- **Other people's weights were on the public floor.** The first build put each
+  person's last set on their label, so everyone's numbers sat side by side. That's
+  the comparison the README says the app avoids. Now others see who you are, where
+  you are, the exercise and whether you're training or resting. Your numbers appear
+  only to you
+  ([`427dad9`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/427dad9)).
+  This changes something my build prompt had asked for, so it's a correction I've
+  accepted, not one the agent made silently.
+- **Tracker drift.** The welcome-back screen showed running totals ("N sets over M
+  visits"). That's analytics, not presence, so it was removed (same commit).
+- **An empty gym didn't look like a shared space.** A first-time visitor at an empty
+  floor saw a diagram with one dot in it. Each station now draws open spots, and
+  people take a spot instead of a random point
+  ([`d1a481b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/d1a481b)).
+  That also fixed labels piling up.
+- **Mislabelled space.** The rest area was subtitled "Between sets", but people rest
+  at their own station, so it's now "Recovery". Newcomers standing there said
+  "Warming up"; they now say "Just arrived". "Split Squat" and "Incline Dumbbell
+  Press" became "Leg Press" and "Chest Press", so each exercise sits where you'd
+  look for it.
+- **Phones lost the activity.** To save space, phone labels had dropped the
+  exercise name, so the floor showed only that someone was resting. Now only the
+  numbers drop.
 
-[`c024afc`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/c024afc)
-adds checks for the README's testable promises. A new identity persists, and its
-pass recovers it in any case or spacing. Two people with the same name stay
-distinct. A set persists and puts you at its station. Leaving takes you off the
-floor but keeps your history. Seven kinds of bad set data are rejected with
-nothing saved. The public floor never contains a pass. The page carries every
-station without script.
+## Problems along the way
 
-One honest note: these checks were written after the implementation in the same
-session, so they never went red against a missing app. Persistence across a
-server restart was verified by hand locally (stop, start, `/api/me` returns the
-same set). It isn't in `spec/`, because the spec runs against an app it can't
-restart.
+- **Layout bugs only visible in screenshots.** At 1440px the first panel squeezed
+  the weight and reps inputs until the numbers were cut off, and at 390px name tags
+  spilled into neighbouring zones. Both were fixed in the build pass. In the review
+  the agent made this a sensor rather than a habit of looking:
+  `spec/viewports.test.ts` drives Chrome at both marking viewports
+  ([`9c92d5c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/9c92d5c)).
+- **The first version of that sensor passed with the bug still there.** It checked
+  the inputs at the cardio station, which has no weight field. Putting the old CSS
+  back showed it staying green, so it now checks a weighted station, and it goes
+  red when the old CSS is put back.
+- **A false alarm.** Full-page screenshots showed people faded at desktop width.
+  Measuring the computed opacity showed it was 1: the capture was replaying the
+  entrance animation. No change was needed.
+
+## Rejected or deferred
+
+- **An event-log table** for crit 9 to read from. Nothing would read it yet, and the
+  four action functions already give a broadcast one place to hook in.
+- **Polling the floor.** I held it back so crit 8 stays about persistence and the
+  real-time choice is made deliberately at crit 9. Others appear when the page
+  loads, and the README says exactly that.
+
+## Checks, honestly
+
+The first checks were written after the implementation in the same session, so
+they never failed against a missing app. The viewport sensor is the exception: it
+was shown to catch the bug it was written for. Restart persistence is verified by
+hand, not in `spec/`, because the spec runs against an app it can't restart.
