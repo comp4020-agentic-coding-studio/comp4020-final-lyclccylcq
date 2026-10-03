@@ -130,7 +130,7 @@ button {
   grid-template-columns: minmax(0, 1fr) 340px;
   gap: 20px;
   padding: 0 clamp(16px, 3vw, 32px) 32px;
-  max-width: 1400px;
+  max-width: 1720px;
   margin: 0 auto;
   align-items: start;
 }
@@ -237,7 +237,18 @@ button {
 .kit .kit-mat { fill: #3f3b5c; }
 .kit .kit-mat-b { fill: #3a4f55; }
 
-/* ---- people ---- */
+/* ---- people, and the open spots waiting for them ---- */
+
+.spot {
+  position: absolute;
+  left: clamp(var(--edge, 70px), var(--x), calc(100% - var(--edge, 70px)));
+  translate: -50% -50%;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px dashed color-mix(in srgb, var(--zc) 40%, transparent);
+  background: color-mix(in srgb, var(--zc) 6%, transparent);
+}
 
 .crowd {
   position: absolute;
@@ -248,9 +259,8 @@ button {
 .person {
   --c: var(--accent);
   /* kept far enough from the zone's edges that its label stays inside */
-  --edge: 110px;
   position: absolute;
-  left: clamp(var(--edge), var(--x), calc(100% - var(--edge)));
+  left: clamp(var(--edge, 70px), var(--x), calc(100% - var(--edge, 70px)));
   translate: -50% -50%;
   display: flex;
   flex-direction: column;
@@ -308,6 +318,10 @@ button {
   font-weight: 600;
   color: var(--c);
   margin-left: 3px;
+}
+
+.person .tag .set {
+  font-variant-numeric: tabular-nums;
 }
 
 .person .tag .status {
@@ -713,7 +727,7 @@ button {
       "pull chest"
       "legs cardio"
       "rest rest";
-    grid-auto-rows: minmax(170px, auto);
+    grid-auto-rows: minmax(220px, auto);
     gap: 10px;
     padding: 10px;
     min-height: 0;
@@ -732,26 +746,31 @@ button {
     opacity: 0.8;
   }
 
-  /* names stay, details drop: the panel carries your own */
   .person .tag {
     font-size: 0.66rem;
     padding: 3px 7px;
   }
 
-  .person {
-    --edge: 62px;
+  .zone {
+    --edge: 50px;
   }
 
-  .person .tag > span:not(.status),
+  .spot {
+    width: 28px;
+    height: 28px;
+  }
+
+  /* your numbers stay in the panel; what you're doing stays on the floor */
   .person .tag .set {
     display: none;
   }
 
   .person .tag {
-    max-width: 118px;
+    max-width: 96px;
   }
 
-  .person .tag b {
+  .person .tag b,
+  .person .tag .what {
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;

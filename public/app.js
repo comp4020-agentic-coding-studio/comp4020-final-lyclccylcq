@@ -65,23 +65,56 @@ function describeSet(set) {
   return `${weight} × ${set.amount}`;
 }
 
-// Where someone stands inside a station: stable for each person, so the room
-// doesn't reshuffle every time it redraws.
-function spot(id) {
+// Each station has a few places to stand, drawn as open spots when nobody's
+// in them, so even an empty floor reads as a room for several people. Phones
+// get fewer, staggered spots so labels don't collide in a narrow zone.
+const SPOTS = {
+  wide: { station: [[25, 44], [75, 44], [50, 72]], rest: [[16, 50], [39, 74], [62, 50], [85, 74]] },
+  narrow: { station: [[28, 45], [72, 69]], rest: [[18, 46], [50, 69], [82, 46]] },
+};
+const narrow = matchMedia("(max-width: 760px)");
+
+const hash = (id) => {
   let h = 2166136261;
   for (const c of id) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
-  const x = 12 + ((h >>> 0) % 76);
-  const y = 40 + ((h >>> 8) % 42);
-  return { x, y };
+  return h >>> 0;
+};
+
+// Who stands where: each person has a preferred spot (stable, so the room
+// doesn't reshuffle on every redraw) and takes the next free one if it's
+// taken. More people than spots spill onto the floor between them.
+function placeAll(stationId, people) {
+  const spots = SPOTS[narrow.matches ? "narrow" : "wide"][stationId === "rest" ? "rest" : "station"];
+  const taken = new Array(spots.length).fill(null);
+  const placed = [];
+  for (const p of [...people].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    const start = hash(p.id) % spots.length;
+    const free = spots.findIndex((_, i) => taken[(start + i) % spots.length] === null);
+    if (free === -1) {
+      const h = hash(p.id);
+      placed.push({ p, x: 15 + (h % 70), y: 40 + ((h >>> 8) % 25) });
+      continue;
+    }
+    const i = (start + free) % spots.length;
+    taken[i] = p;
+    placed.push({ p, x: spots[i][0], y: spots[i][1] });
+  }
+  const open = spots.filter((_, i) => taken[i] === null);
+  return { placed, open };
 }
 
 function statusLine(p) {
-  if (p.state === "resting") {
-    const set = p.lastSet ? `<span class="set">${esc(describeSet(p.lastSet))} · </span>` : "";
-    return `${set}Resting <time data-since="${p.since}">${clock(now() - p.since)}</time>`;
-  }
+  if (p.state === "resting") return `Resting <time data-since="${p.since}">${clock(now() - p.since)}</time>`;
   if (p.state === "training") return "Training";
-  return "Warming up";
+  return "Just arrived";
+}
+
+// Your own last set, on your own label only: the public floor carries no
+// numbers, so nobody's weights sit next to anyone else's.
+function ownSet(p) {
+  if (p.state !== "resting") return "";
+  const last = me.session?.sets.at(-1);
+  return last && last.exercise === p.exercise ? `<span class="set">${esc(describeSet(last))}</span>` : "";
 }
 
 // ---- the floor ----
@@ -90,26 +123,30 @@ function drawFloor() {
   const people = floor?.people ?? [];
   for (const zone of document.querySelectorAll(".zone")) {
     const here = people.filter((p) => p.station === zone.dataset.station);
+    const { placed, open } = placeAll(zone.dataset.station, here);
     zone.classList.toggle("is-busy", here.length > 0);
     zone.classList.toggle("is-open", openStation === zone.dataset.station);
-    zone.querySelector(".crowd").innerHTML = here
-      .map((p) => {
-        const { x, y } = spot(p.id);
-        const you = me && p.id === me.user.id;
-        return `<div class="person is-${p.state}${you ? " is-you" : ""}" style="--c:${esc(p.colour)};--x:${x}%;top:${y}%">
+    zone.querySelector(".crowd").innerHTML =
+      open.map(([x, y]) => `<span class="spot" style="--x:${x}%;top:${y}%"></span>`).join("") +
+      placed
+        .map(({ p, x, y }) => {
+          const you = me && p.id === me.user.id;
+          return `<div class="person is-${p.state}${you ? " is-you" : ""}" style="--c:${esc(p.colour)};--x:${x}%;top:${y}%">
           <span class="body" aria-hidden="true">${esc(p.name.slice(0, 1).toUpperCase())}</span>
-          <span class="tag"><b>${esc(p.name)}${you ? " <i>you</i>" : ""}</b>${p.exercise ? `<span>${esc(p.exercise)}</span>` : ""}<span class="status">${statusLine(p)}</span></span>
+          <span class="tag"><b>${esc(p.name)}${you ? " <i>you</i>" : ""}</b>${p.exercise ? `<span class="what">${esc(p.exercise)}</span>` : ""}${you ? ownSet(p) : ""}<span class="status">${statusLine(p)}</span></span>
         </div>`;
-      })
-      .join("");
+        })
+        .join("");
   }
   const others = people.filter((p) => !me || p.id !== me.user.id).length;
   const inGym = me && me.presence.state !== "away";
   $("#headcount").textContent =
     others === 0
-      ? inGym ? "Just you on the floor" : "The floor is quiet"
+      ? inGym ? "Just you on the floor so far" : "The floor is quiet right now"
       : `${others} ${others === 1 ? "other" : "others"} ${inGym ? "training with you" : "training now"}`;
 }
+
+narrow.addEventListener("change", drawFloor);
 
 // ---- the panel beside (or below) the floor ----
 
@@ -155,7 +192,7 @@ function drawPanel() {
   if (!station) {
     panel.innerHTML = `${passCard()}
       <h2>Pick a station</h2>
-      <p class="muted">Tap a part of the floor to start. Everyone else in the gym stands where they're training.</p>
+      <p class="muted">Tap a station on the floor to train there. The open spots are where other people stand when they're in.</p>
       <h3>This visit</h3>${sessionList()}
       <button type="button" class="leave" data-act="leave">Leave the gym</button>`;
     return;
@@ -226,9 +263,7 @@ function door(view, message = "") {
     const v = me.lastVisit;
     const when = v ? new Date(v.endedAt).toLocaleDateString(document.documentElement.lang, { weekday: "long", day: "numeric", month: "short" }) : "";
     box.innerHTML = `<h1 id="door-title">Welcome back, ${esc(me.user.name)}</h1>
-      <p class="lede">${
-        v ? `Last visit ${esc(when)}: ${v.sets} ${v.sets === 1 ? "set" : "sets"}.` : "Your spot's still here."
-      } ${me.totals.sets} ${me.totals.sets === 1 ? "set" : "sets"} over ${me.totals.visits} ${me.totals.visits === 1 ? "visit" : "visits"} so far.</p>
+      <p class="lede">${v ? `Last visit ${esc(when)}, ${v.sets} ${v.sets === 1 ? "set" : "sets"}. ` : ""}Walk back in and pick up where you like.</p>
       <p class="error" role="alert">${esc(message)}</p>
       <button type="button" class="primary" data-act="enter">Walk in</button>
       <button type="button" class="link" data-act="forget">Not ${esc(me.user.name)}? Start fresh</button>`;
@@ -246,7 +281,8 @@ async function refresh(next) {
   draw();
 }
 
-function forget() {
+function forget(ask = true) {
+  if (ask && me && !confirm(`Forget ${me.user.name} on this device? You'll need the gym pass ${me.pass} to come back as them.`)) return;
   pass = null;
   me = null;
   openStation = null;
@@ -260,7 +296,7 @@ async function act(fn) {
   try {
     await fn();
   } catch (err) {
-    if (err.status === 401) return forget();
+    if (err.status === 401) return forget(false);
     const slot = document.querySelector("#set-error") ?? document.querySelector("#door:not([hidden]) .error");
     if (slot) slot.textContent = err.message;
     else alert(err.message);
