@@ -13,12 +13,13 @@ interface Station {
 }
 
 // The floor. Every exercise belongs to one station, and that's where its
-// lifter stands; anyone between exercises stands in the rest area.
+// lifter stands, resting between sets included, as in a real gym. Someone who
+// has walked in but not chosen anything yet waits in the rest area.
 export const STATIONS: Station[] = [
   { id: "pull", name: "Cable Stack", measure: "reps", weighted: true, exercises: ["Lat Pulldown", "Seated Cable Row", "Face Pull"] },
-  { id: "chest", name: "Bench", measure: "reps", weighted: true, exercises: ["Bench Press", "Incline Dumbbell Press", "Push-up"] },
-  { id: "legs", name: "Squat Rack", measure: "reps", weighted: true, exercises: ["Squat", "Romanian Deadlift", "Split Squat"] },
-  { id: "cardio", name: "Cardio", measure: "min", weighted: false, exercises: ["Rower", "Bike", "Treadmill"] },
+  { id: "chest", name: "Bench", measure: "reps", weighted: true, exercises: ["Bench Press", "Chest Press", "Push-up"] },
+  { id: "legs", name: "Squat Rack", measure: "reps", weighted: true, exercises: ["Squat", "Leg Press", "Romanian Deadlift"] },
+  { id: "cardio", name: "Cardio", measure: "min", weighted: false, exercises: ["Treadmill", "Bike", "Rower"] },
   { id: "rest", name: "Stretch & Rest", measure: "min", weighted: false, exercises: ["Stretching", "Foam Rolling"] },
 ];
 
@@ -113,20 +114,14 @@ export function createGym(db: DatabaseSync) {
       from sessions s left join sets t on t.session_id = s.id
       where s.user_id = ? and s.ended_at is not null
       group by s.id order by s.id desc limit 1`),
-    totals: db.prepare(`
-      select (select count(*) from sessions where user_id = ?1) as visits,
-             (select count(*) from sets where user_id = ?1) as sets`),
     presence: db.prepare("select state, exercise, since from presence where user_id = ?"),
     putPresence: db.prepare(`
-      insert into presence (user_id, state, exercise, since, last_set_id) values (?, ?, ?, ?, ?)
+      insert into presence (user_id, state, exercise, since) values (?, ?, ?, ?)
       on conflict (user_id) do update set
-        state = excluded.state, exercise = excluded.exercise, since = excluded.since,
-        last_set_id = coalesce(excluded.last_set_id, presence.last_set_id)`),
+        state = excluded.state, exercise = excluded.exercise, since = excluded.since`),
     floor: db.prepare(`
-      select u.id, u.name, u.colour, p.state, p.exercise, p.since,
-             t.exercise as set_exercise, t.weight_kg, t.amount
+      select u.id, u.name, u.colour, p.state, p.exercise, p.since
       from presence p join users u on u.id = p.user_id
-      left join sets t on t.id = p.last_set_id
       where p.state != 'away' and p.since > ?
       order by p.since`),
   };
@@ -140,7 +135,7 @@ export function createGym(db: DatabaseSync) {
 
   function leaveAt(userId: string, at: number): void {
     q.closeSessions.run(at, userId);
-    q.putPresence.run(userId, "away", null, at, null);
+    q.putPresence.run(userId, "away", null, at);
   }
 
   // A visit left open for too long is closed at its last activity, so the
@@ -187,7 +182,6 @@ export function createGym(db: DatabaseSync) {
         lastByExercise: Object.fromEntries(
           (q.lastPerExercise.all(userId) as unknown as SetRow[]).map((s) => [s.exercise, setOut(s)]),
         ),
-        totals: q.totals.get(userId) as { visits: number; sets: number },
       };
     },
 
@@ -196,7 +190,7 @@ export function createGym(db: DatabaseSync) {
       settle(userId, now);
       sessionFor(userId, now);
       const p = presenceOf(userId);
-      if (!p || p.state === "away") q.putPresence.run(userId, "idle", null, now, null);
+      if (!p || p.state === "away") q.putPresence.run(userId, "idle", null, now);
       return this.me(userId);
     },
 
@@ -205,7 +199,7 @@ export function createGym(db: DatabaseSync) {
       const now = Date.now();
       settle(userId, now);
       sessionFor(userId, now);
-      q.putPresence.run(userId, "training", exercise as string, now, null);
+      q.putPresence.run(userId, "training", exercise as string, now);
       return this.me(userId);
     },
 
@@ -227,8 +221,8 @@ export function createGym(db: DatabaseSync) {
       const now = Date.now();
       settle(userId, now);
       const session = sessionFor(userId, now);
-      const setId = Number(q.insertSet.run(session, userId, input.exercise as string, weight, amount, now).lastInsertRowid);
-      q.putPresence.run(userId, "resting", input.exercise as string, now, setId);
+      q.insertSet.run(session, userId, input.exercise as string, weight, amount, now);
+      q.putPresence.run(userId, "resting", input.exercise as string, now);
       return this.me(userId);
     },
 
@@ -237,18 +231,13 @@ export function createGym(db: DatabaseSync) {
       return this.me(userId);
     },
 
-    // Everyone currently on the floor. Public: no passes, only what you'd see
-    // looking across a real gym.
+    // Everyone currently on the floor. Public, so it carries only what you'd
+    // see looking across a real gym: who, where, what, and whether they're
+    // between sets. No passes, and no weights or reps: nobody's numbers are
+    // set beside anyone else's.
     floor() {
       const now = Date.now();
-      const rows = q.floor.all(now - STALE_MS) as unknown as (PresenceRow & {
-        id: string;
-        name: string;
-        colour: string;
-        set_exercise: string | null;
-        weight_kg: number | null;
-        amount: number | null;
-      })[];
+      const rows = q.floor.all(now - STALE_MS) as unknown as (PresenceRow & { id: string; name: string; colour: string })[];
       return {
         now,
         stations: STATIONS,
@@ -261,8 +250,6 @@ export function createGym(db: DatabaseSync) {
           exercise: r.exercise,
           station: (r.exercise && stationOf.get(r.exercise)?.id) || "rest",
           since: r.since,
-          lastSet:
-            r.set_exercise === null ? null : { exercise: r.set_exercise, weightKg: r.weight_kg, amount: r.amount },
         })),
       };
     },

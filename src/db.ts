@@ -44,11 +44,10 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
     -- where each person is on the floor right now: one row per user, rewritten
     -- on every change, so it's also the shape a live broadcast will send
     create table if not exists presence (
-      user_id     text primary key references users(id),
-      state       text not null check (state in ('idle', 'training', 'resting', 'away')),
-      exercise    text,
-      since       integer not null,
-      last_set_id integer references sets(id)
+      user_id  text primary key references users(id),
+      state    text not null check (state in ('idle', 'training', 'resting', 'away')),
+      exercise text,
+      since    integer not null
     );
   `);
   return db;
