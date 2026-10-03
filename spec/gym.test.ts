@@ -78,7 +78,7 @@ describe("sets", () => {
     expect(floor.people.find((p: { id: string }) => p.id === user.id)).toMatchObject({
       station: "pull",
       state: "resting",
-      lastSet: { exercise: "Lat Pulldown", weightKg: 28.5, amount: 12 },
+      exercise: "Lat Pulldown",
     });
   });
 
@@ -117,6 +117,16 @@ describe("privacy on the floor", () => {
     const { pass } = await newPerson();
     const res = await fetch(new URL("/api/floor", baseUrl));
     expect(await res.text()).not.toContain(pass);
+  });
+
+  // nobody is ranked: others see what you're doing, never how much
+  it("the public floor carries no one's weights or reps", async () => {
+    const { pass, user } = await newPerson();
+    await call("/api/sets", { pass, body: { exercise: "Bench Press", weightKg: 82.5, amount: 7 } });
+    const { data: floor } = await call("/api/floor");
+    const me = floor.people.find((p: { id: string }) => p.id === user.id);
+    expect(me).toMatchObject({ exercise: "Bench Press", state: "resting" });
+    expect(JSON.stringify(me)).not.toMatch(/82\.5|weight|amount|"reps"/i);
   });
 });
 
