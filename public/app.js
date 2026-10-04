@@ -377,6 +377,7 @@ document.addEventListener("submit", (e) => {
         if (err.status === 401) return door("pass", "That pass doesn't match anyone here.");
         throw err;
       }
+      pass = me.pass;
       storePass(pass);
       await refresh();
       if (me.presence.state === "away") door("welcome");

@@ -19,8 +19,8 @@ rather than in a form beside the map.
 
 ## How I directed the agent
 
-I worked in two passes, each starting from a long prompt I wrote before any code
-existed.
+I worked in two passes, a build and a review, each starting from a long prompt I
+had written before any code existed. Then I ran the review again as a second audit.
 
 **Build pass.** The prompt set out the concept, the scope limits (no AI, nutrition,
 rankings, messaging or heavy accounts), the crit 8 journey, and the rule that
@@ -40,6 +40,25 @@ correctness, the product concept and the documentation. The prompt asked it to t
 the flow rather than assume it worked, and to remove anything that pushed toward a
 normal fitness tracker. The corrections it produced are below. Each one is a place
 where the first build had drifted from the README.
+
+**Second audit.** I ran the same review brief again in a fresh session, so the
+first review's write-up wasn't taken on trust. The agent drove a new user through
+the journey in headless Chrome on an empty database. The agent didn't use the
+existing tests for this, because those tests hadn't caught the problems the first
+review found. It found nothing wrong with the product direction, and two small
+gaps:
+
+- Recovering with a pass typed in lowercase worked, but the browser saved what was
+  typed rather than the server's canonical pass, so the pass card and the stored
+  pass could differ. The browser now stores the pass the server returns.
+- No check covered the path a returning person actually takes: join through the
+  door in a real browser, reload, and still be the same person. The API checks
+  used the pass directly. `spec/viewports.test.ts` now covers it and asserts the
+  pass is the only thing in `localStorage`. With the client broken on purpose to
+  save a wrong pass, the check went red.
+
+It also found the deployed URL doesn't answer: the repo is still private, so CI
+has never deployed, and there's no Fly token on this machine for a manual deploy.
 
 ## Stack
 
@@ -122,6 +141,7 @@ person, their station, their set and a still-running rest timer came back.
 ## Checks, honestly
 
 The first checks were written after the implementation in the same session, so
-they never failed against a missing app. The viewport sensor is the exception: it
-was shown to catch the bug it was written for. Restart persistence is verified by
+they never failed against a missing app. Two are exceptions: the viewport sensor
+and the returning-browser check were both shown to catch the bug they were written
+for. Restart persistence is verified by
 hand, not in `spec/`, because the spec runs against an app it can't restart.

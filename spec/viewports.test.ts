@@ -98,6 +98,37 @@ afterAll(async () => {
   chrome?.kill();
 });
 
+describe.skipIf(!chromePath)("a returning browser", () => {
+  it("joins through the door, and after a reload is the same person, with only the pass stored locally", async () => {
+    await open("/", VIEWPORTS[0]);
+    await evaluate(`localStorage.clear()`);
+    await send("Page.reload");
+    await sleep(900);
+    await evaluate(`(() => {
+      document.querySelector('#join-form input[name=name]').value = 'Spec Returner';
+      document.querySelector('#join-form').requestSubmit();
+    })()`);
+    await sleep(800);
+    const pass = await evaluate<string>(`localStorage.getItem("same-gym.pass")`);
+    expect(pass, "joining stored no pass").toBeTruthy();
+    passes.push(pass);
+
+    await send("Page.reload");
+    await sleep(1200);
+    const after = await evaluate<{ door: boolean; you: string | null; keys: string[] }>(`({
+      door: !document.querySelector('#door').hidden,
+      you: document.querySelector('.person.is-you .tag b')?.textContent ?? null,
+      keys: Object.keys(localStorage),
+    })`);
+    expect(after.door, "a returning browser was sent back to the door").toBe(false);
+    expect(after.you).toContain("Spec Returner");
+    expect(after.keys, "the browser should keep the pass and nothing else").toEqual(["same-gym.pass"]);
+
+    const res = await fetch(new URL("/api/me", baseUrl), { headers: { authorization: `Bearer ${pass}` } });
+    expect((await res.json()).user.name).toBe("Spec Returner");
+  }, 30_000);
+});
+
 describe.skipIf(!chromePath)("the gym at the marking viewports", () => {
   for (const vp of VIEWPORTS) {
     it(`${vp.name}: the floor fits, labels stay in their zones, logging is usable`, async () => {
