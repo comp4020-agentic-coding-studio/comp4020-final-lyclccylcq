@@ -3,16 +3,19 @@
 // browser only keeps the gym pass that lets it act as you. world.js turns what
 // people are doing into where they stand and how they move.
 //
-// You start a set from the equipment: tap a machine, set it up, Start set.
-// Finish set records it and you rest beside the machine until the next one.
+// The three places have three jobs. Reception (reception.js) gets you in.
+// The gym floor (this file and world.js) is what you're doing now: tap a
+// machine, set it up, Start set; Finish set records it. Your locker
+// (locker.js) is what the gym remembers about you.
 
+import { lockerDoorHtml, lockerHtml } from "./locker.js";
+import { checkInCard, doorHtml } from "./reception.js";
+import { esc, pad } from "./util.js";
 import { createWorld } from "./world.js";
 
 const PASS_KEY = "same-gym.pass";
 
 const $ = (sel) => document.querySelector(sel);
-const esc = (s) =>
-  String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 function storedPass() {
   try {
@@ -37,7 +40,8 @@ let floor = null; // GET /api/floor
 let clockOffset = 0; // server clock minus ours, so timers agree across devices
 let selected = null; // a machine you've tapped and are setting up, not yet started
 const choice = new Map(); // machine id → the exercise picked for it
-let showPass = false; // the pass card, shown once on joining and on request
+let showPass = false; // reception's card: shown once on checking in, and on request
+let lockerView = null; // a locker you've opened: yours (with what's in it) or someone else's door
 
 async function api(path, data) {
   const res = await fetch(path, {
@@ -84,8 +88,19 @@ const world = createWorld({
   canvas: $("#world-canvas"),
   layer: $("#people"),
   panel: $("#panel"),
+  onLocker(number) {
+    if (!inGym()) return;
+    selected = null;
+    if (number !== me.locker) {
+      lockerView = { number, taken: floor.lockers.find((l) => l.number === number)?.taken };
+      world.select(`locker:${number}`);
+      return drawPanel();
+    }
+    openLocker();
+  },
   onMachine(id) {
     if (!inGym()) return;
+    lockerView = null;
     selected = id === me.presence.machine && me.presence.state !== "idle" ? null : id;
     drawPanel();
     world.focusMachine(id);
@@ -115,7 +130,8 @@ function nameTag(p) {
 function drawWorld() {
   const people = floor?.people ?? [];
   world.setPeople(people, me?.user.id ?? null, nameTag, (exercise) => exerciseOf(exercise)?.pose ?? "");
-  world.select(selected);
+  world.setLockers(floor?.lockers ?? [], me?.locker ?? null, me?.user.colour ?? null);
+  world.select(lockerView ? `locker:${lockerView.number}` : selected);
   const others = people.filter((p) => !me || p.id !== me.user.id).length;
   $("#headcount").textContent =
     others === 0
@@ -136,18 +152,24 @@ function visit() {
     : `<p class="muted">No sets yet this visit.</p>`;
   return `<div class="foot">
     <details class="visit"><summary>This visit · ${sets.length} ${sets.length === 1 ? "set" : "sets"}</summary>${list}</details>
-    <button type="button" class="leave" data-act="leave">Leave the gym</button>
+    <div class="foot-links">${me.locker ? `<button type="button" class="leave" data-act="find-locker">Locker ${pad(me.locker)}</button>` : ""}<button type="button" class="leave" data-act="leave">Leave the gym</button></div>
   </div>`;
 }
 
-function passCard() {
-  if (!showPass) return "";
-  return `<div class="pass-card">
-    <p>Your gym pass</p>
-    <code>${esc(me.pass)}</code>
-    <p class="muted">This browser remembers you. On another device, use this pass to come back as yourself.</p>
-    <div class="row"><button type="button" class="link" data-act="hide-pass">Got it</button><button type="button" class="link" data-act="forget">Forget this device</button></div>
-  </div>`;
+const passCard = () => (showPass ? checkInCard(me) : "");
+
+// Open your locker: walk over to it if you're not on a machine, and read
+// what's inside from the server.
+async function openLocker() {
+  lockerView = { number: me.locker, mine: true, data: null };
+  world.select(`locker:${me.locker}`);
+  world.goToLocker(me.locker, me.user.id);
+  drawPanel();
+  await act(async () => {
+    const data = await api("/api/locker");
+    if (lockerView?.mine) lockerView.data = data;
+    drawPanel();
+  });
 }
 
 function stepper(name, label, value, step, unit) {
@@ -206,7 +228,20 @@ function setForm(machine, exercise, label) {
 
 function drawPanel() {
   const panel = $("#panel");
-  world.select(selected);
+  world.select(lockerView ? `locker:${lockerView.number}` : selected);
+  panel.classList.toggle("is-locker", Boolean(lockerView && inGym()));
+  if (lockerView && inGym()) {
+    document.body.classList.remove("is-choosing");
+    panel.hidden = false;
+    panel.dataset.view = "locker";
+    panel.innerHTML = lockerView.mine
+      ? lockerView.data
+        ? lockerHtml(lockerView.data, me, describe)
+        : `<p class="locker-empty">Opening locker ${pad(lockerView.number)}…</p>`
+      : lockerDoorHtml(lockerView.number, lockerView.taken);
+    world.relayout();
+    return;
+  }
   document.body.classList.toggle("is-choosing", Boolean(inGym() && me.presence.state === "idle" && !selected));
   if (!inGym()) {
     panel.hidden = true;
@@ -267,39 +302,9 @@ function draw() {
 // ---- the door ----
 
 function door(view, message = "") {
-  const box = $("#door-body");
   $("#door").hidden = false;
-  const colours = floor?.colours ?? [];
-  if (view === "new") {
-    box.innerHTML = `<h1 id="door-title">Walk into the gym</h1>
-      <p class="lede">A shared gym floor. Train on your own, alongside whoever else is in.</p>
-      <form id="join-form">
-        <label class="field"><span>Your name in the gym</span><input name="name" maxlength="24" autocomplete="nickname" required /></label>
-        <fieldset class="swatches"><legend>Your shirt</legend>${colours
-          .map((c, i) => `<label style="--c:${c}"><input type="radio" name="colour" value="${c}"${i === 0 ? " checked" : ""} /><span class="sr">${c}</span></label>`)
-          .join("")}</fieldset>
-        <p class="error" role="alert">${esc(message)}</p>
-        <button type="submit" class="primary">Walk in</button>
-      </form>
-      <button type="button" class="link" data-door="pass">Been here before? Use your gym pass</button>`;
-  } else if (view === "pass") {
-    box.innerHTML = `<h1 id="door-title">Come back in</h1>
-      <p class="lede">Enter the gym pass you were given on your first visit.</p>
-      <form id="pass-form">
-        <label class="field"><span>Gym pass</span><input name="pass" placeholder="XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" required /></label>
-        <p class="error" role="alert">${esc(message)}</p>
-        <button type="submit" class="primary">Come back in</button>
-      </form>
-      <button type="button" class="link" data-door="new">I'm new here</button>`;
-  } else {
-    const v = me.lastVisit;
-    const when = v ? new Date(v.endedAt).toLocaleDateString(document.documentElement.lang, { weekday: "long", day: "numeric", month: "short" }) : "";
-    box.innerHTML = `<h1 id="door-title">Welcome back, ${esc(me.user.name)}</h1>
-      <p class="lede">${v ? `Last visit ${esc(when)}, ${v.sets} ${v.sets === 1 ? "set" : "sets"}. ` : ""}Walk back in and pick up where you like.</p>
-      <p class="error" role="alert">${esc(message)}</p>
-      <button type="button" class="primary" data-act="enter">Walk in</button>
-      <button type="button" class="link" data-act="forget">Not ${esc(me.user.name)}? Start fresh</button>`;
-  }
+  const box = $("#door-body");
+  box.innerHTML = doorHtml(view, { colours: floor?.colours ?? [], me, message });
   box.querySelector("input, .primary")?.focus();
 }
 
@@ -318,6 +323,7 @@ function forget(ask = true) {
   pass = null;
   me = null;
   selected = null;
+  lockerView = null;
   showPass = false;
   storePass(null);
   draw();
@@ -361,6 +367,12 @@ document.addEventListener("click", (e) => {
     case "close":
       selected = null;
       return drawPanel();
+    case "close-locker":
+      lockerView = null;
+      return drawPanel();
+    case "find-locker":
+      world.focusLocker(me.locker);
+      return world.select(`locker:${me.locker}`);
     case "hide-pass":
       showPass = false;
       return drawPanel();
@@ -379,6 +391,7 @@ document.addEventListener("click", (e) => {
       return act(async () => {
         await refresh(await api("/api/leave", {}));
         selected = null;
+        lockerView = null;
         door("welcome");
       });
     case "enter":
@@ -435,6 +448,7 @@ document.addEventListener("submit", (e) => {
         amount: Number(data.amount),
       });
       selected = null;
+      lockerView = null;
       await refresh(next);
       world.focus(me.user.id);
     });

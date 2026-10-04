@@ -3,8 +3,9 @@
 > A good virtual gym should make individual training feel shared without turning exercise into a meeting, competition, or social feed.
 
 Same Gym is a persistent pixel-art gym on the web, where what you actually do in
-your workout controls what your character is doing. You walk in past the front desk
-as a small pixel person with a name and a shirt colour. The room is larger than your
+your workout controls what your character is doing. You check in at the front desk
+as a small pixel person with a name and a shirt colour, and you're given a gym pass
+and a locker of your own. The room is larger than your
 screen and holds 37 machines in one continuous space:
 - treadmills, bikes and rowers under the windows
 - a back-and-arms row with pulldowns, a cable row, cable stations, an assisted
@@ -24,6 +25,17 @@ and start pulling.
 
 Anyone else who is in is in the same room, doing their own thing on their own
 machine.
+
+> The gym floor shows what is happening now; the locker keeps what you've done before.
+
+There is no profile page and no stats dashboard. What the gym remembers about you
+is kept in your locker, in the locker room between reception and the floor. Walk
+over, open it, and it shows your recent visits and the sets you did on each, how
+many times you've trained in the past week, and your heaviest set of each lift.
+Other lockers in the room show only whether they're taken. Nobody else can open
+yours.
+
+![The locker room: your character in front of locker 33, the locker open in the corner showing this visit's bench press set](docs/locker.png)
 
 ![The gym on desktop: you mid-set on a flat bench, others on the next bench and the incline, with the set panel in the corner](docs/gym.png)
 
@@ -57,18 +69,28 @@ keeps only presence: a place, and people visibly doing things in it.
    running, pedalling, stretching. Finishing puts you in a resting pose beside it,
    and leaving the station sends you to the water. A label changing on its own
    isn't enough.
-4. **Your trace is still there.** Refresh, close the browser, or come back tomorrow
-   on another device with your gym pass. You're still you, back on the same machine
-   in the same state, with your sets. Rest timers run from the server's clock, so they
+4. **The floor is now; the locker is what's kept.** Where you are and what you're
+   doing is live, and it goes when you do. Finished sets and visits are kept, and
+   you look at them by opening your locker, not on a page outside the gym.
+   Reception checks you in and shows how the gym works; it doesn't hold your
+   history.
+5. **Your trace is still there.** Refresh, close the browser, or come back tomorrow
+   on another device with your gym pass. You're still you, with the same locker,
+   back on the same machine in the same state, with your sets. Rest timers run from the server's clock, so they
    keep counting while you're away. A set left unfinished (the tab closed mid-set)
    survives a reload, but after ten minutes it's dropped unrecorded and the
-   machine is freed. Nobody is left "training" forever.
-5. **One machine, one person.** The bench you're on is yours until you leave it or
+   machine is freed. Nobody is left "training" forever. If you close the tab
+   without leaving, you're shown as gone after 45 minutes with nothing happening,
+   and that visit is closed at your last set.
+6. **One machine, one person.** The bench you're on is yours until you leave it or
    rest too long. Someone else tapping it is told it's taken.
-6. **Nobody is ranked.** Other people see your exercise and whether you're training
+7. **Nobody is ranked.** Other people see your exercise and whether you're training
    or resting. They never see your weights or reps, and there are no scores, streaks
-   or public history. Your numbers are shown only to you.
-7. **It works on a phone.** On a phone the gym isn't shrunk to fit. The screen
+   or public history. Your numbers are shown only to you, on your name tag and in
+   your locker. "Heaviest set" is just that: the most weight you've finished a set
+   with, for lifts with weights. It isn't an estimate, and it's never compared with
+   anyone else's.
+8. **It works on a phone.** On a phone the gym isn't shrunk to fit. The screen
    becomes a camera onto the same room: you pan around it, it follows you when you
    walk, and the set panel slides up from the bottom.
 
@@ -101,6 +123,14 @@ Enforced by `spec/`:
 - An exercise must belong to its machine.
 - An abandoned set expires unrecorded and frees the machine.
 - Old database rows are read sensibly.
+- Each identity gets its own locker, and its pass brings back the same one.
+- The locker holds finished sets only, never started or cancelled ones.
+- The locker opens only for its owner. The room shows which lockers are taken,
+  not by whom.
+- Visits are kept apart, and the past-week count and heaviest sets are right.
+- Someone idle for 45 minutes is gone, with their visit closed.
+- When the room is full, a locker goes to a newcomer from whoever has been gone
+  longest.
 - A real browser that joins and reloads is still the same person, with only the
   pass stored locally.
 - Bad set data is rejected and nothing is saved.
@@ -112,6 +142,9 @@ Enforced by `spec/`:
   camera following.
 - The machine you're on visibly animates.
 - Finish set records the set and leaves you resting beside it.
+- Your locker opens from the room with the set in it, readable and fitting the
+  screen.
+- A reload marks the same locker as yours.
 - Neighbours' name tags don't overlap, and logging stays usable.
 
 Judged by people: whether the room feels shared, and whether logging feels light.

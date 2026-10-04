@@ -90,6 +90,8 @@ async function api(req: IncomingMessage, res: ServerResponse, route: string): Pr
   switch (route) {
     case "GET /api/me":
       return json(res, 200, gym.me(user.id));
+    case "GET /api/locker":
+      return json(res, 200, gym.locker(user.id));
     case "POST /api/enter":
       return json(res, 200, gym.enter(user.id));
     case "POST /api/start":

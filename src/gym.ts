@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { type Exercise, KINDS, MACHINES, kindById, machineById } from "./equipment.ts";
+import { createLockers } from "./lockers.ts";
 
 // idle: in the gym, not on a machine (or back at one after cancelling a set)
 // training: a set is under way on a machine
@@ -9,9 +10,11 @@ export type State = "idle" | "training" | "resting" | "away";
 
 export const COLOURS = ["#ff6b4a", "#ffb703", "#2ec4b6", "#4d7cfe", "#b15cff", "#ff5fa2"];
 
-// Someone who walked off without pressing Leave isn't still in the gym three
-// hours later: past this, their visit is closed at their last activity.
-const STALE_MS = 3 * 60 * 60 * 1000;
+// Someone standing about with nothing happening for this long has gone home
+// without pressing Leave (closed the tab, put the phone away): their visit is
+// closed at their last activity and they're no longer in the gym. Training
+// and resting have their own, shorter expiry below.
+const IDLE_MS = 45 * 60 * 1000;
 // A started set that's never finished (the tab closed, the phone died) is
 // dropped, not recorded, and frees the machine. Timed work gets its planned
 // minutes on top.
@@ -104,7 +107,8 @@ function cleanPlan(ex: Exercise, input: { weightKg?: unknown; amount?: unknown }
   return { weight, amount };
 }
 
-export function createGym(db: DatabaseSync, clock: () => number = Date.now) {
+export function createGym(db: DatabaseSync, clock: () => number = Date.now, opts: { lockers?: number } = {}) {
+  const lockers = createLockers(db, clock, opts.lockers);
   const q = {
     insertUser: db.prepare("insert into users (id, pass, name, colour, created_at) values (?, ?, ?, ?, ?)"),
     userByPass: db.prepare("select id, name, colour, created_at from users where pass = ?"),
@@ -117,11 +121,6 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now) {
     lastPerExercise: db.prepare(`
       select id, exercise, weight_kg, amount, done_at from sets
       where id in (select max(id) from sets where user_id = ? group by exercise)`),
-    lastVisit: db.prepare(`
-      select s.started_at, s.ended_at, count(t.id) as sets
-      from sessions s left join sets t on t.session_id = s.id
-      where s.user_id = ? and s.ended_at is not null
-      group by s.id order by s.id desc limit 1`),
     presence: db.prepare("select state, exercise, machine, since, plan_weight, plan_amount, expires_at from presence where user_id = ?"),
     putPresence: db.prepare(`
       insert into presence (user_id, state, exercise, machine, plan_weight, plan_amount, since, expires_at)
@@ -139,7 +138,7 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now) {
     floor: db.prepare(`
       select u.id, u.name, u.colour, p.state, p.exercise, p.machine, p.since
       from presence p join users u on u.id = p.user_id
-      where p.state != 'away' and p.since > ?
+      where p.state in ('training', 'resting') or (p.state = 'idle' and p.since > ?)
       order by p.since`),
   };
 
@@ -157,12 +156,12 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now) {
     put(userId, "away", at);
   }
 
-  // Bring stored state up to now: expired sets and rests first, then a visit
-  // left open too long is closed at its last activity.
+  // Bring live state up to now: expired sets and rests first, then someone
+  // idle for too long has gone home, their visit closed at their last activity.
   function settle(userId: string, now: number): void {
     q.expire.run(now);
     const p = presenceOf(userId);
-    if (p && p.state !== "away" && now - p.since > STALE_MS) leaveAt(userId, p.since);
+    if (p && p.state === "idle" && now - p.since > IDLE_MS) leaveAt(userId, p.since);
   }
 
   function inGym(userId: string): PresenceRow {
@@ -181,6 +180,7 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now) {
       const id = randomUUID();
       const pass = newPass();
       q.insertUser.run(id, pass, clean, colour, clock());
+      lockers.ensure(id);
       return { pass, user: this.userByPass(pass)! };
     },
 
@@ -195,11 +195,11 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now) {
       const user = q.userById.get(userId) as unknown as UserRow & { pass: string };
       const p = presenceOf(userId);
       const open = q.openSession.get(userId) as { id: number; started_at: number } | undefined;
-      const visit = q.lastVisit.get(userId) as { started_at: number; ended_at: number; sets: number } | undefined;
       return {
         now,
         user: { id: user.id, name: user.name, colour: user.colour, since: user.created_at },
         pass: user.pass,
+        locker: lockers.ensure(userId),
         presence: {
           state: p?.state ?? ("away" as State),
           exercise: p?.exercise ?? null,
@@ -211,7 +211,6 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now) {
         session: open
           ? { startedAt: open.started_at, sets: (q.setsIn.all(open.id) as unknown as SetRow[]).map(setOut) }
           : null,
-        lastVisit: visit ? { startedAt: visit.started_at, endedAt: visit.ended_at, sets: visit.sets } : null,
         lastByExercise: Object.fromEntries(
           (q.lastPerExercise.all(userId) as unknown as SetRow[]).map((s) => [s.exercise, setOut(s)]),
         ),
@@ -284,6 +283,13 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now) {
       return this.me(userId);
     },
 
+    // Your own locker and what's in it. Only ever the caller's: there is no
+    // way to ask for someone else's.
+    locker(userId: string) {
+      settle(userId, clock());
+      return lockers.contents(userId);
+    },
+
     leave(userId: string) {
       leaveAt(userId, clock());
       return this.me(userId);
@@ -296,12 +302,13 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now) {
     floor() {
       const now = clock();
       q.expire.run(now);
-      const rows = q.floor.all(now - STALE_MS) as unknown as (PresenceRow & { id: string; name: string; colour: string })[];
+      const rows = q.floor.all(now - IDLE_MS) as unknown as (PresenceRow & { id: string; name: string; colour: string })[];
       return {
         now,
         kinds: KINDS,
         machines: MACHINES,
         colours: COLOURS,
+        lockers: lockers.room(),
         people: rows.map((r) => ({
           id: r.id,
           name: r.name,

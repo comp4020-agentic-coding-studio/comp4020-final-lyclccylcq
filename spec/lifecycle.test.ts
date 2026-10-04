@@ -12,10 +12,10 @@ import { createGym } from "../src/gym.ts";
 // database with a clock the test moves.
 const MIN = 60_000;
 
-function gymAt(start = Date.UTC(2026, 9, 5, 9)) {
+function gymAt(start = Date.UTC(2026, 9, 5, 9), lockers?: number) {
   const dir = mkdtempSync(join(tmpdir(), "gym-spec-"));
   let t = start;
-  const gym = createGym(openDb(dir), () => t);
+  const gym = createGym(openDb(dir), () => t, { lockers });
   return { gym, dir, wait: (ms: number) => (t += ms) };
 }
 
@@ -86,5 +86,82 @@ describe("a database from before machines", () => {
     const me = gym.me("u1");
     expect(me.presence).toMatchObject({ state: "idle", machine: null, exercise: null });
     expect(me.lastByExercise["Bench Press"]).toMatchObject({ weightKg: 50, amount: 5 });
+  });
+});
+
+describe("someone who goes home without pressing Leave", () => {
+  it("is out of the gym after 45 idle minutes, their visit closed at their last set", () => {
+    const { gym, wait } = gymAt();
+    const id = person(gym);
+    gym.start(id, { machine: "rack-a", exercise: "Squat", weightKg: 80, amount: 5 });
+    wait(2 * MIN);
+    gym.finish(id);
+    wait(15 * MIN + 46 * MIN);
+    expect(gym.floor().people.some((p) => p.id === id)).toBe(false);
+    expect(gym.me(id).presence.state).toBe("away");
+    const visit = gym.locker(id).visits[0];
+    expect(visit.endedAt).not.toBeNull();
+    expect(visit.sets).toBe(1);
+  });
+});
+
+describe("the locker", () => {
+  const set = (gym: ReturnType<typeof createGym>, id: string, machine: string, exercise: string, weightKg: number, amount: number) => {
+    gym.start(id, { machine, exercise, weightKg, amount });
+    gym.finish(id);
+  };
+
+  it("keeps visits apart, newest first, and counts the past week", () => {
+    const { gym, wait } = gymAt();
+    const id = person(gym);
+    set(gym, id, "bench-a", "Bench Press", 60, 8);
+    set(gym, id, "bench-a", "Bench Press", 60, 8);
+    gym.leave(id);
+    wait(26 * 60 * MIN);
+    gym.enter(id);
+    set(gym, id, "pulldown-a", "Lat Pulldown", 28.5, 12);
+
+    const locker = gym.locker(id);
+    expect(locker.visits.map((v) => v.exercises.map((e) => `${e.exercise} ×${e.sets.length}`))).toEqual([["Lat Pulldown ×1"], ["Bench Press ×2"]]);
+    expect(locker.visits[0].endedAt).toBeNull();
+    expect(locker.visitsThisWeek).toBe(2);
+
+    gym.leave(id);
+    wait(6 * 24 * 60 * MIN);
+    expect(gym.locker(id).visitsThisWeek, "the bench visit is over a week old").toBe(1);
+  });
+
+  it("names the heaviest set of each weighted exercise, and nothing for cardio or bodyweight", () => {
+    const { gym } = gymAt();
+    const id = person(gym);
+    set(gym, id, "bench-a", "Bench Press", 60, 8);
+    set(gym, id, "bench-a", "Bench Press", 70, 3);
+    set(gym, id, "bench-a", "Bench Press", 70, 5);
+    set(gym, id, "bench-a", "Bench Press", 65, 10);
+    set(gym, id, "treadmill-a", "Treadmill", 0, 20);
+    set(gym, id, "pullup-a", "Assisted Pull-up", 0, 8);
+    expect(gym.locker(id).bests).toEqual([expect.objectContaining({ exercise: "Bench Press", weightKg: 70, amount: 5, fromLatestVisit: true })]);
+  });
+
+  it("stays with its owner, and only when the room is full goes to a newcomer from whoever has been gone longest", () => {
+    const { gym, wait } = gymAt(undefined, 2);
+    const a = person(gym, "A");
+    const b = person(gym, "B");
+    expect([gym.me(a).locker, gym.me(b).locker]).toEqual([1, 2]);
+    set(gym, a, "bench-a", "Bench Press", 60, 8);
+    gym.leave(a);
+    wait(60 * MIN);
+    gym.leave(b);
+    wait(24 * 60 * MIN);
+    expect(gym.me(a).locker, "a locker isn't taken back while there's room").toBe(1);
+
+    const c = person(gym, "C");
+    expect(gym.me(c).locker, "A has been gone longest").toBe(1);
+    expect(gym.me(b).locker).toBe(2);
+    expect(gym.locker(a).visits[0].exercises[0].exercise, "A's history stays theirs without a locker number").toBe("Bench Press");
+    // A comes back to a full room: B, out for a day, has been gone longest now
+    expect(gym.enter(a).locker).toBe(2);
+    gym.enter(c);
+    expect(gym.enter(b).locker, "everyone with a locker is in the gym").toBeNull();
   });
 });

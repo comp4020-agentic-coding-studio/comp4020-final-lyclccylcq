@@ -76,3 +76,4 @@ export const MACHINES: Machine[] = KINDS.flatMap((k) =>
 
 export const machineById = new Map(MACHINES.map((m) => [m.id, m]));
 export const kindById = new Map(KINDS.map((k) => [k.id, k]));
+export const exerciseByName = new Map(KINDS.flatMap((k) => k.exercises.map((e) => [e.name, e] as const)));

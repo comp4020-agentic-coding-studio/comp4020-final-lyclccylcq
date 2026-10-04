@@ -123,6 +123,9 @@ describe.skipIf(!chromePath)("a returning browser", () => {
     })`);
     expect(after.door, "a returning browser was sent back to the door").toBe(false);
     expect(after.you).toContain("Spec Returner");
+    const res0 = await fetch(new URL("/api/me", baseUrl), { headers: { authorization: `Bearer ${pass}` } });
+    const { locker } = await res0.json();
+    expect(await evaluate<string>(`document.querySelector(".locker-spot.is-mine")?.dataset.locker`), "the same locker isn't marked yours").toBe(String(locker));
     expect(after.keys, "the browser should keep the pass and nothing else").toEqual(["same-gym.pass"]);
 
     const res = await fetch(new URL("/api/me", baseUrl), { headers: { authorization: `Bearer ${pass}` } });
@@ -178,7 +181,7 @@ describe.skipIf(!chromePath)("the gym at the marking viewports", () => {
           larger: scroller.scrollWidth > scroller.clientWidth && scroller.scrollHeight > scroller.clientHeight,
           pixelated: getComputedStyle(canvas).imageRendering,
           scale: canvas.getBoundingClientRect().width / canvas.width,
-          hotspots: document.querySelectorAll(".hotspot[aria-label]").length,
+          hotspots: document.querySelectorAll(".hotspot[data-machine][aria-label]").length,
         };
       })()`);
       const { machines } = await (await fetch(new URL("/api/floor", baseUrl))).json();
@@ -263,6 +266,26 @@ describe.skipIf(!chromePath)("the gym at the marking viewports", () => {
       expect(await panelView()).toBe("resting");
       const after = await (await fetch(new URL("/api/me", baseUrl), { headers: { authorization: `Bearer ${you.pass}` } })).json();
       expect(after.session.sets.at(-1).exercise).toBe("Lat Pulldown");
+
+      // your locker: tap it in the room and the set is in there, readable,
+      // in a panel that fits; closing it puts you back in the gym
+      await evaluate(`document.querySelector(".locker-spot.is-mine").click()`);
+      await until(`document.querySelector("#panel .locker-visit")`);
+      const locker = await evaluate<{ view: string; text: string; panel: { top: number; bottom: number; right: number }; smallest: number; overflow: number }>(`(() => {
+        const p = document.querySelector("#panel");
+        const r = p.getBoundingClientRect();
+        const sizes = [...p.querySelectorAll(".locker-visit li, .locker-visit .sets span, .bests li")].map((el) => parseFloat(getComputedStyle(el).fontSize));
+        return { view: p.dataset.view, text: p.innerText, panel: { top: r.top, bottom: r.bottom, right: r.right }, smallest: Math.min(...sizes), overflow: document.documentElement.scrollWidth - innerWidth };
+      })()`);
+      expect(locker.view).toBe("locker");
+      expect(locker.text).toMatch(/Lat Pulldown/);
+      expect(locker.text).toMatch(/20 kg × 10/);
+      expect(locker.panel.bottom, "the locker panel runs off the screen").toBeLessThanOrEqual(vp.height);
+      expect(locker.panel.right).toBeLessThanOrEqual(vp.width);
+      expect(locker.smallest, "locker entries are too small to read").toBeGreaterThanOrEqual(12);
+      expect(locker.overflow).toBeLessThanOrEqual(0);
+      await evaluate(`document.querySelector('#panel [data-act="close-locker"]').click()`);
+      expect(await panelView()).toBe("resting");
 
       // free the machines for the next viewport's run
       for (const p of [other, you]) await post("/api/leave", {}, p.pass);

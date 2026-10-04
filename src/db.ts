@@ -41,8 +41,17 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
     );
     create index if not exists sets_by_user on sets(user_id, id);
 
-    -- where each person is on the floor right now: one row per user, rewritten
-    -- on every change, so it's also the shape a live broadcast will send
+    -- each person's locker: kept, like visits and sets
+    create table if not exists lockers (
+      number      integer primary key,
+      user_id     text not null unique references users(id),
+      assigned_at integer not null
+    );
+
+    -- The only live table. Where each person is and what they're doing right
+    -- now: one row per user, rewritten on every change and expired when it
+    -- goes stale, so it's also the shape a live broadcast will send. Nothing
+    -- in it is history; history is sessions and sets.
     create table if not exists presence (
       user_id  text primary key references users(id),
       state    text not null check (state in ('idle', 'training', 'resting', 'away')),

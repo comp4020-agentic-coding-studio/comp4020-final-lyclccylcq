@@ -28,6 +28,8 @@ export const P = {
   water: "#62b6f0",
   locker: "#4f6fa8",
   lockerD: "#3c5687",
+  lockerL: "#6a8bc4",
+  brass: "#d4b24a",
   green: "#4f9a52",
   greenD: "#3a7740",
   pot: "#b5643c",
@@ -886,17 +888,80 @@ export const DECOR = {
       }
     },
   },
-  lockers: {
-    fw: 1, fh: 2, w: 16, h: 42,
+  // a bench in the locker room, someone's bag and towel left on it
+  lockerBench: {
+    fw: 3, fh: 1, w: 48, h: 26,
     draw(r) {
-      r(1, 3, 14, 4, P.lockerD);
-      r(1, 7, 14, 33, P.locker);
-      for (let y = 7; y < 40; y += 11) {
-        r(1, y, 14, 1, P.lockerD);
-        r(11, y + 4, 2, 3, P.metal);
-        r(3, y + 2, 5, 1, P.lockerD);
-        r(3, y + 4, 5, 1, P.lockerD);
-      }
+      r(3, 12, 42, 5, P.woodL);
+      r(3, 16, 42, 1, P.woodD);
+      r(6, 17, 2, 7, P.metalD);
+      r(40, 17, 2, 7, P.metalD);
+      r(8, 5, 14, 8, "#3f6f9a");
+      r(8, 5, 14, 2, "#5a8ab4");
+      r(12, 3, 6, 2, P.iron);
+      r(30, 9, 8, 3, P.white);
+      r(30, 11, 8, 1, "#d9d2c4");
+    },
+  },
+  shoes: {
+    fw: 1, fh: 1, w: 16, h: 12, walk: true,
+    draw(r) {
+      r(2, 5, 5, 3, P.white);
+      r(2, 7, 6, 2, "#e2574c");
+      r(9, 4, 5, 3, P.white);
+      r(9, 6, 6, 2, "#e2574c");
+    },
+  },
+  towelRail: {
+    fw: 2, fh: 1, w: 32, h: 30,
+    draw(r) {
+      r(2, 6, 2, 22, P.metalD);
+      r(28, 6, 2, 22, P.metalD);
+      r(2, 6, 28, 2, P.metal);
+      r(6, 8, 8, 12, P.white);
+      r(6, 18, 8, 2, "#d9d2c4");
+      r(17, 8, 8, 10, "#5aaca0");
+      r(17, 16, 8, 2, "#468d83");
+    },
+  },
+  sink: {
+    fw: 2, fh: 1, w: 32, h: 36,
+    draw(r) {
+      r(3, 2, 26, 14, "#8a8aa6");
+      r(4, 3, 24, 12, "#b9d5e3");
+      r(7, 5, 2, 2, "#dcedf5");
+      r(9, 7, 2, 2, "#dcedf5");
+      r(1, 19, 30, 6, P.white);
+      r(1, 24, 30, 2, "#d9d2c4");
+      r(10, 20, 12, 3, "#9fc4d8");
+      r(15, 16, 2, 4, P.metal);
+      r(4, 26, 2, 8, P.metalD);
+      r(26, 26, 2, 8, P.metalD);
+    },
+  },
+  laundry: {
+    fw: 1, fh: 1, w: 16, h: 22,
+    draw(r) {
+      r(3, 8, 10, 12, "#7d6a55");
+      r(3, 8, 10, 1, "#9a8466");
+      r(4, 5, 4, 4, P.white);
+      r(8, 4, 4, 5, "#5aaca0");
+      r(5, 12, 6, 1, "#5f5040");
+    },
+  },
+  // the notice board at reception: how the gym works
+  board: {
+    fw: 2, fh: 1, w: 32, h: 34,
+    draw(r) {
+      r(1, 2, 30, 20, P.woodD);
+      r(2, 3, 28, 18, "#b98a55");
+      r(4, 5, 10, 7, P.white);
+      r(16, 5, 11, 5, "#f1c13b");
+      r(5, 14, 9, 5, "#9bd3f8");
+      r(17, 12, 9, 7, P.white);
+      letters(r, "HOW", 5, 6, INK);
+      r(6, 22, 2, 10, P.metalD);
+      r(24, 22, 2, 10, P.metalD);
     },
   },
   // the front desk: counter, a screen for the staff, a check-in tablet and
@@ -1052,6 +1117,33 @@ export const DECOR = {
   },
 };
 
+// One locker, seen from the front. Free ones stand slightly open; taken ones
+// are shut with a padlock; yours carries your colour above the number.
+export const LOCKER = { w: 16, h: 38 };
+
+export function lockerSprite(number, state, colour = null) {
+  return cached(`locker:${number}:${state}:${colour}`, () =>
+    make(LOCKER.w, LOCKER.h, (r) => {
+      r(1, 2, 14, 3, P.lockerD);
+      r(1, 5, 14, 31, P.locker);
+      r(2, 6, 12, 28, state === "free" ? P.locker : P.lockerL);
+      r(2, 6, 1, 28, P.lockerD);
+      if (state === "free") r(12, 6, 2, 28, "#1d2433");
+      for (const y of [9, 11, 13]) r(4, y, 8, 1, P.lockerD);
+      if (state === "mine") r(2, 6, 12, 2, colour);
+      r(3, 16, 9, 7, state === "free" ? "#c9ced6" : P.white);
+      letters(r, String(number).padStart(2, "0"), 4, 17, INK);
+      r(10, 25, 2, 4, P.metal);
+      if (state !== "free") {
+        r(7, 27, 1, 2, P.metal);
+        r(9, 27, 1, 2, P.metal);
+        r(6, 29, 5, 4, state === "mine" ? colour : P.brass);
+      }
+      r(1, 34, 14, 2, P.lockerD);
+    }),
+  );
+}
+
 export function decorSprite(kind) {
   return cached(`decor:${kind}`, () => make(DECOR[kind].w, DECOR[kind].h, DECOR[kind].draw));
 }
@@ -1070,6 +1162,7 @@ const FLOORS = {
   wood: ["#9a6440", "#8c5a39", 0],
   lounge: ["#8f7255", "#836749", 0],
   entry: ["#a59b8c", "#978d7e", 2],
+  locker: ["#a9b6c2", "#9aa7b4", 0],
   doormat: ["#6b4a3a", "#5e4033", 0],
 };
 
@@ -1092,6 +1185,11 @@ export function paintFloor(g, kind, tx, ty, tw, th) {
         g.fillRect(px, py + 7, T, 1);
         g.fillRect(px, py + 15, T, 1);
         g.fillRect(px + (hash(x, y) % 12) + 2, py + ((x + y) % 2 ? 0 : 8), 1, 7);
+      } else if (kind === "locker") {
+        g.fillRect(px, py + 7, T, 1);
+        g.fillRect(px, py + 15, T, 1);
+        g.fillRect(px + 7, py, 1, T);
+        g.fillRect(px + 15, py, 1, T);
       } else if (kind === "lobby") {
         g.fillStyle = (x + y) % 2 ? base : "#c8bdab";
         g.fillRect(px, py, T, T);
@@ -1116,6 +1214,24 @@ export function paintLight(g, x, w, depth) {
   for (let i = 0; i < depth; i++) {
     g.fillStyle = `rgba(255, 246, 214, ${0.075 - i * 0.006})`;
     g.fillRect(x * T + 4 - i * 2, 3 * T + i * 8, w * T - 8 + i * 4, 8);
+  }
+}
+
+// A wall inside the building, seen from above: a cap, and for walls that run
+// across the room, the face below it.
+export function paintInnerWall(g, tx, ty, across) {
+  const x = tx * T;
+  const y = ty * T;
+  g.fillStyle = "#2c2a3f";
+  g.fillRect(x, y, T, across ? 6 : T);
+  if (across) {
+    g.fillStyle = "#5d5a7a";
+    g.fillRect(x, y + 6, T, 8);
+    g.fillStyle = "#3c3a52";
+    g.fillRect(x, y + 14, T, 2);
+  } else {
+    g.fillStyle = "#3c3a52";
+    g.fillRect(x + T - 2, y, 2, T);
   }
 }
 
@@ -1234,6 +1350,16 @@ const GLYPHS = {
   Y: ["#.#", "#.#", ".#.", ".#.", ".#."],
   "&": [".#.", "#.#", ".#.", "#.#", ".##"],
   " ": ["..", "..", "..", "..", ".."],
+  0: ["###", "#.#", "#.#", "#.#", "###"],
+  1: [".#.", "##.", ".#.", ".#.", "###"],
+  2: ["###", "..#", "###", "#..", "###"],
+  3: ["###", "..#", ".##", "..#", "###"],
+  4: ["#.#", "#.#", "###", "..#", "..#"],
+  5: ["###", "#..", "###", "..#", "###"],
+  6: ["###", "#..", "###", "#.#", "###"],
+  7: ["###", "..#", ".#.", ".#.", ".#."],
+  8: ["###", "#.#", "###", "#.#", "###"],
+  9: ["###", "#.#", "###", "..#", "###"],
 };
 
 export function paintText(g, text, x, y, colour, scale = 2) {

@@ -130,6 +130,51 @@ visual polish pass, and said explicitly not to begin crit 9.
   - The water and rest corner is where people go when they step off a machine.
   - A small limb-drawing helper made seated, reclined and lying poses possible.
 
+**The locker.** The next question was where the gym keeps what you've done. The
+obvious answers were a profile page or a history screen at reception. I ruled both
+out in my prompt:
+- A profile page is the first piece of a fitness dashboard, the thing the README
+  says this isn't.
+- Reception is where you get in, not where you look back.
+
+So history went into a place in the room: your own locker, in a locker room between
+reception and the floor. That gave the app a clear spatial rule, which the
+README now states. The floor is what's happening now. The locker is what the gym
+remembers. Reception gets you in.
+
+- **Lockers are rows of their own** (number, owner), not a column on the user. The
+  room can then show all 36 doors, and later other people's, while
+  `GET /api/locker` only ever returns the caller's own. The public floor carries
+  only which numbers are taken.
+- **Assignment is automatic:** the lowest free number on checking in, or on the
+  next read for identities from before lockers existed. The rule for a full room
+  was the agent's call, not mine, and I've kept it: the locker of whoever has been
+  gone longest goes to the newcomer, and their history stays with them. I've
+  flagged it as something to revisit if the gym outgrows a class.
+- **What's inside was kept small:**
+  - recent visits, each with its sets grouped by exercise
+  - visits in the last 7 days
+  - the heaviest finished set of each weighted lift
+
+  "This week" became "the last 7 days" because the server doesn't know where your
+  week starts. "Best" stayed the plain heaviest set, with no 1RM estimate.
+- **Reception lost the history it had.** The welcome-back screen used to say
+  "Last visit Sunday, 6 sets". Now it says your locker is still yours, and
+  check-in hands you your pass, your locker number and two lines on how the gym
+  works.
+- **Live state got shorter.** "When I leave, my live presence disappears" didn't
+  hold for someone who just closed the tab: they stayed in the gym for three
+  hours. Someone idle for 45 minutes is now gone, and their visit is closed at
+  their last set. Training and resting already expired sooner.
+- **Walking to your locker is local for now.** Your character walks over when you
+  open it, but nothing is stored, so others won't see you at your locker until
+  that's part of presence.
+- **The code follows the places:**
+  - `src/lockers.ts` holds what's kept.
+  - `src/gym.ts` holds what's live.
+  - `public/reception.js` gets you in.
+  - `public/locker.js` shows your history.
+
 ## Stack
 
 Plain Node 24 (`http` and `node:sqlite`) with a hand-written client and no runtime
@@ -143,8 +188,9 @@ data directory with production settings, and the full check passed.
 
 ## Identity and persistence
 
-There are four tables: users, sessions (visits), sets and presence, in one SQLite
-file at `/data/gym.db`. `/data` is the Fly volume, the only storage the course setup
+There are five tables in one SQLite file at `/data/gym.db`. Users, lockers,
+sessions (visits) and sets are history and are kept. Presence is the only live
+table, and it expires. `/data` is the Fly volume, the only storage the course setup
 keeps across restarts and redeploys. A person is an opaque id plus a 12-character
 gym pass, which the browser sends as a bearer token. The browser stores the pass
 and nothing else. Typing the pass on another device brings back the same person;
@@ -224,6 +270,15 @@ person, their station, their set and a still-running rest timer came back.
 - **Art covering art.** The seated dumbbell press's name tag hid the arms doing
   the press, and the water station sat on the "WATER & REST" floor lettering.
   Both were found in screenshots and moved.
+- **Furniture in front of lockers.** The first locker-room layout put a sink, a
+  towel rail and a plant on the row in front of the bottom bank. The layout
+  script, which checks that every machine, locker and lounge spot can be reached
+  from the door, flagged eleven lockers nobody could stand at. They were moved.
+- **A wrong test, not wrong code.** The full-room locker test expected a returning
+  member to get nothing. The rule gave them the locker of someone who had been
+  away a day, which is what the rule says. The test was fixed, not the code.
+- **Counting the wrong buttons.** The "every machine is tappable" check started
+  counting locker doors too. It now counts machines only.
 - **A false alarm.** Full-page screenshots showed people faded at desktop width.
   Measuring the computed opacity showed it was 1: the capture was replaying the
   entrance animation. No change was needed.

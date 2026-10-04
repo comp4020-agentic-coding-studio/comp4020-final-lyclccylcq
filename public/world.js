@@ -6,7 +6,7 @@
 // animation plays. Nothing about position or frames is stored; reloading
 // derives the same picture.
 
-import { DECOR, KINDS, PERSON, T, decorSprite, paintAisleEdges, paintFloor, paintLight, paintText, paintWalls, personSprite, stationSprite } from "./sprites.js";
+import { DECOR, KINDS, LOCKER, PERSON, T, decorSprite, lockerSprite, paintAisleEdges, paintFloor, paintInnerWall, paintLight, paintText, paintWalls, personSprite, stationSprite } from "./sprites.js";
 
 export const W = 72;
 export const H = 46;
@@ -18,7 +18,8 @@ const ZONES = [
   { name: "BACK & ARMS", floor: "machines", x: 25, y: 3, w: 24, h: 12 },
   { name: "FREE WEIGHTS", floor: "free", x: 49, y: 3, w: 22, h: 12 },
   { floor: "aisle", x: 1, y: 15, w: 70, h: 2, edges: true },
-  { name: "RECEPTION", floor: "lobby", x: 1, y: 17, w: 14, h: 28 },
+  { floor: "locker", x: 1, y: 18, w: 13, h: 14 },
+  { name: "RECEPTION", floor: "lobby", x: 1, y: 33, w: 13, h: 12 },
   { floor: "entry", x: 5, y: 40, w: 5, h: 5 },
   { floor: "aisle", x: 15, y: 17, w: 1, h: 28, edges: true },
   { name: "CHEST", floor: "bench", x: 16, y: 17, w: 23, h: 12 },
@@ -42,6 +43,25 @@ const WALL = [
   { kind: "mirror", x: 49, w: 22 },
 ];
 const LIGHT = [[2, 5], [12, 5], [18, 5]];
+
+// Walls inside the building, with their doorways: the locker room sits
+// between reception and the gym floor. [x, y, length, across?, gaps]
+const INNER_WALLS = [
+  [1, 17, 13, true, []],
+  [1, 32, 13, true, [[11, 2]]],
+  [14, 17, 28, false, [[19, 2], [36, 2]]],
+];
+const wallTiles = INNER_WALLS.flatMap(([x, y, n, across, gaps]) =>
+  Array.from({ length: n }, (_, i) => (across ? [x + i, y] : [x, y + i]))
+    .filter(([tx, ty]) => !gaps.some(([g, len]) => (across ? tx : ty) >= g && (across ? tx : ty) < g + len))
+    .map(([tx, ty]) => [tx, ty, across]),
+);
+
+// The locker room: three banks of twelve along the room, numbered from 1.
+export const LOCKER_SPOTS = Array.from({ length: 36 }, (_, i) => {
+  const [tx, ty] = [2 + (i % 12), 18 + Math.floor(i / 12) * 5];
+  return { number: i + 1, tx, ty, stand: [tx, ty + 2] };
+});
 
 // Where each machine stands: the top-left tile of its footprint, in the
 // order of the server's machines (bench A, bench B, …).
@@ -76,9 +96,11 @@ const FURNITURE = [
   ["rollers", 31, 33], ["ball", 36, 33], ["ball", 37, 36], ["rollers", 31, 39], ["towels", 40, 33], ["plant", 43, 43], ["bin", 41, 39],
   ["water", 60, 32], ["bin", 64, 33], ["sofa", 55, 33], ["vending", 66, 32], ["plant", 69, 36],
   ["bench", 48, 38], ["bench", 56, 38], ["plant", 62, 41], ["towels", 64, 38],
-  ...[18, 20, 22, 24, 26, 28, 30].map((y) => ["lockers", 1, y]),
-  ["bench", 4, 25], ["towels", 11, 18], ["plant", 13, 18], ["sofa", 6, 21], ["plant", 11, 21], ["bin", 13, 30],
-  ["counter", 6, 34], ["stool", 9, 32], ["kiosk", 12, 38],
+  // the locker room
+  ["lockerBench", 3, 21], ["lockerBench", 9, 21], ["lockerBench", 3, 26], ["lockerBench", 9, 26],
+  ["shoes", 7, 22], ["shoes", 13, 27], ["laundry", 13, 21], ["sink", 6, 26], ["towelRail", 12, 26],
+  // reception
+  ["counter", 6, 34], ["stool", 9, 33], ["board", 11, 33], ["kiosk", 12, 38],
   ["turnstile", 5, 39], ["turnstile", 9, 39], ["plant", 2, 42], ["plant", 12, 42],
 ];
 
@@ -112,6 +134,8 @@ block(0, 0, W, 3);
 block(0, 0, 1, H);
 block(W - 1, 0, 1, H);
 block(0, H - 1, W, 1);
+for (const [x, y] of wallTiles) block(x, y, 1, 1);
+for (const l of LOCKER_SPOTS) block(l.tx, l.ty, 1, 2);
 for (const [kind, x, y] of FURNITURE) if (!DECOR[kind].walk) block(x, y, DECOR[kind].fw, DECOR[kind].fh);
 for (const s of STATIONS) if (!KINDS[s.kind].inPlace) block(s.tx, s.ty, KINDS[s.kind].fw, KINDS[s.kind].fh);
 
@@ -147,7 +171,7 @@ export function route(from, to) {
 }
 
 // for the layout check in spec/
-export const LAYOUT = { FURNITURE, LOUNGE, SPAWN, blocked };
+export const LAYOUT = { FURNITURE, LOUNGE, SPAWN, blocked, wallTiles };
 
 const tileOf = (e) => [Math.round((e.x - 8) / T), Math.round((e.y - 13) / T)];
 
@@ -159,7 +183,7 @@ const hashId = (id) => {
 
 // ---- the world ----
 
-export function createWorld({ scroller, sizer, world, canvas, layer, panel, onMachine }) {
+export function createWorld({ scroller, sizer, world, canvas, layer, panel, onMachine, onLocker }) {
   const g = canvas.getContext("2d");
   canvas.width = W * T;
   canvas.height = H * T;
@@ -177,6 +201,9 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onMa
   let follow = null;
   let poseOf = () => "";
   const entities = new Map();
+  let lockerState = new Map(); // number → "free" | "taken" | "mine"
+  let mineColour = null;
+  let visiting = null; // your locker, if you've walked over to it
 
   // One button per machine, over the machine itself.
   const hotspots = new Map();
@@ -190,6 +217,17 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onMa
     b.innerHTML = `<span></span>`;
     spots.append(b);
     hotspots.set(s.id, b);
+  }
+  const lockerButtons = new Map();
+  for (const l of LOCKER_SPOTS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "hotspot locker-spot is-free";
+    b.dataset.locker = l.number;
+    b.setAttribute("aria-label", `Locker ${l.number}`);
+    b.innerHTML = `<span>Locker ${String(l.number).padStart(2, "0")}</span>`;
+    spots.append(b);
+    lockerButtons.set(l.number, b);
   }
 
   // ---- scale and layout ----
@@ -206,6 +244,14 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onMa
         top: `${s.box.y * T * S}px`,
         width: `${s.box.w * T * S}px`,
         height: `${s.box.h * T * S}px`,
+      });
+    }
+    for (const l of LOCKER_SPOTS) {
+      Object.assign(lockerButtons.get(l.number).style, {
+        left: `${l.tx * T * S}px`,
+        top: `${l.ty * T * S}px`,
+        width: `${T * S}px`,
+        height: `${2 * T * S}px`,
       });
     }
     pad();
@@ -284,7 +330,10 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onMa
     const present = new Set();
     for (const p of people) {
       present.add(p.id);
-      const place = out.get(p.id);
+      let place = out.get(p.id);
+      // walking over to your own locker is yours alone to see for now
+      if (p.id === me && visiting && p.state === "idle" && !p.machine) place = visiting;
+      else if (p.id === me) visiting = null;
       let e = entities.get(p.id);
       if (!e) {
         const at = feet(seen ? SPAWN : place.stand);
@@ -378,7 +427,8 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onMa
   world.addEventListener("click", (ev) => {
     if (performance.now() - dragEnded < 100) return;
     const b = ev.target.closest(".hotspot");
-    if (b) onMachine(b.dataset.machine);
+    if (b?.dataset.machine) onMachine(b.dataset.machine);
+    else if (b?.dataset.locker) onLocker(Number(b.dataset.locker));
   });
 
   // ---- drawing ----
@@ -424,6 +474,10 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onMa
       const img = user ? stationSprite(s.kind, user.person.colour, tick(k.ms, user), poseOf(user.person.exercise)) : stationSprite(s.kind, null, 0);
       // a mat or rubber spot lies under whoever rests on it
       items.push({ y: s.anchor.y - (k.inPlace ? 3 : 0), z: 0, img, x: s.anchor.x });
+    }
+    for (const l of LOCKER_SPOTS) {
+      const state = lockerState.get(l.number) ?? "free";
+      items.push({ y: (l.ty + 2) * T - 1, z: 0, img: lockerSprite(l.number, state, state === "mine" ? mineColour : null), x: l.tx * T + 8 });
     }
     for (const e of entities.values()) {
       const mode = modeOf(e);
@@ -476,9 +530,11 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onMa
     // cardio lanes between the treadmills
     gg.fillStyle = "rgba(255, 255, 255, 0.08)";
     for (const [x] of MACHINES_AT.treadmill.slice(1)) gg.fillRect(x * T - 9, 5 * T, 2, 3 * T);
+    for (const [x, y, across] of wallTiles) paintInnerWall(gg, x, y, across);
+    paintText(gg, "LOCKER ROOM", 2 * T + 2, 31 * T + 4, "rgba(40, 50, 70, 0.4)");
     for (const z of ZONES) if (z.name) paintText(gg, z.name, z.x * T + 6, z.y * T + 4, z.floor === "lobby" ? "rgba(60,50,40,0.35)" : "rgba(255,255,255,0.22)");
     // the gym's name on the reception floor
-    paintText(gg, "SAME GYM", 4 * T + 2, 28 * T, "rgba(255, 107, 74, 0.55)", 3);
+    paintText(gg, "SAME GYM", 2 * T + 2, 37 * T + 1, "rgba(255, 107, 74, 0.5)", 3);
     paintWalls(gg, W, H, WALL, DOOR);
     const sorted = [...FURNITURE].sort((a, b) => a[2] + DECOR[a[0]].fh - (b[2] + DECOR[b[0]].fh));
     for (const [kind, tx, ty] of sorted) {
@@ -502,6 +558,33 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onMa
     },
     select(id) {
       for (const [mid, b] of hotspots) b.classList.toggle("is-selected", mid === id);
+      for (const [n, b] of lockerButtons) b.classList.toggle("is-selected", `locker:${n}` === id);
+    },
+    // which lockers are taken, and which one is yours
+    setLockers(room, mine, colour) {
+      mineColour = colour;
+      lockerState = new Map(room.map((l) => [l.number, l.number === mine ? "mine" : l.taken ? "taken" : "free"]));
+      for (const [n, b] of lockerButtons) {
+        const state = lockerState.get(n) ?? "free";
+        for (const c of ["free", "taken", "mine"]) b.classList.toggle(`is-${c === "taken" ? "busy" : c}`, c === state);
+        b.querySelector("span").textContent = `${state === "mine" ? "Your locker" : "Locker"} ${String(n).padStart(2, "0")}`;
+      }
+    },
+    // walk over to your locker, if you're not on a machine
+    goToLocker(number, meId) {
+      const l = LOCKER_SPOTS[number - 1];
+      const e = entities.get(meId);
+      if (!l || !e || e.person.state !== "idle" || e.person.machine) return;
+      visiting = { key: `locker:${number}`, stand: l.stand };
+      e.place = visiting;
+      walkTo(e, l.stand);
+      follow = { id: meId, until: performance.now() + 1500 };
+    },
+    focusLocker(number) {
+      const l = LOCKER_SPOTS[number - 1];
+      if (!l) return;
+      follow = null;
+      scroller.scrollTo({ ...aim(feet(l.stand)), behavior: "smooth" });
     },
     name(names) {
       for (const [id, b] of hotspots) {

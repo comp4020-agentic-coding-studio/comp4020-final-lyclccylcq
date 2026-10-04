@@ -127,8 +127,10 @@ describe("sets", () => {
     expect(floor.people.some((p: { id: string }) => p.id === user.id)).toBe(false);
     const { data: me } = await call("/api/me", { pass });
     expect(me.presence.state).toBe("away");
-    expect(me.lastVisit.sets).toBe(1);
     expect(me.lastByExercise.Squat).toMatchObject({ weightKg: 60, amount: 5 });
+    const { data: locker } = await call("/api/locker", { pass });
+    expect(locker.visits[0]).toMatchObject({ sets: 1, exercises: [{ exercise: "Squat" }] });
+    expect(locker.visits[0].endedAt).not.toBeNull();
   });
 
   it.each([
@@ -147,6 +149,45 @@ describe("sets", () => {
     const { data: me } = await call("/api/me", { pass });
     expect(me.presence).toMatchObject({ state: "idle", machine: null });
     expect(me.session?.sets ?? []).toEqual([]);
+  });
+});
+
+describe("lockers", () => {
+  it("a new identity gets its own locker, and its pass brings back the same one", async () => {
+    const a = await newPerson("Alice");
+    const b = await newPerson("Alice");
+    const { data: meA } = await call("/api/me", { pass: a.pass });
+    const { data: meB } = await call("/api/me", { pass: b.pass });
+    expect(meA.locker).toBeGreaterThan(0);
+    expect(meB.locker).not.toBe(meA.locker);
+    const { data: again } = await call("/api/me", { pass: a.pass.toLowerCase() });
+    expect(again).toMatchObject({ user: { id: a.user.id }, locker: meA.locker });
+  });
+
+  it("holds finished sets only: not a set under way, not a cancelled one", async () => {
+    const { pass } = await newPerson();
+    const empty = async () => (await call("/api/locker", { pass })).data.visits;
+    await start(pass, "bench-a", "Bench Press", 60, 8);
+    expect(await empty(), "a started set is already in the locker").toEqual([]);
+    await call("/api/cancel", { pass, body: {} });
+    expect(await empty(), "a cancelled set is in the locker").toEqual([]);
+
+    await start(pass, "bench-a", "Bench Press", 60, 8);
+    await call("/api/finish", { pass, body: {} });
+    const { data } = await call("/api/locker", { pass });
+    expect(data.visits).toHaveLength(1);
+    expect(data.visits[0].exercises).toEqual([{ exercise: "Bench Press", sets: [expect.objectContaining({ weightKg: 60, amount: 8 })] }]);
+    expect(data.bests[0]).toMatchObject({ exercise: "Bench Press", weightKg: 60, amount: 8 });
+  });
+
+  it("opens only for its owner; the room shows which lockers are taken, not by whom", async () => {
+    const { pass, user } = await newPerson("Private Pat");
+    expect((await call("/api/locker")).status).toBe(401);
+    const { data: me } = await call("/api/me", { pass });
+    const res = await fetch(new URL("/api/floor", baseUrl));
+    const floor = await res.json();
+    expect(floor.lockers.find((l: { number: number }) => l.number === me.locker)).toEqual({ number: me.locker, taken: true });
+    expect(JSON.stringify(floor.lockers)).not.toMatch(new RegExp(`${user.id}|Private Pat`));
   });
 });
 

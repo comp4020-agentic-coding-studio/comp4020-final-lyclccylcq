@@ -260,6 +260,17 @@ body.gym {
   opacity: 1;
 }
 
+/* lockers: only yours carries marks, and its name is always shown */
+.locker-spot.is-free,
+.locker-spot.is-busy {
+  background: none;
+}
+
+.locker-spot.is-mine span {
+  opacity: 1;
+  background: var(--accent);
+}
+
 /* ---- name tags over each person ---- */
 
 .people {
@@ -691,6 +702,12 @@ body.gym {
   margin: 6px 0 0;
 }
 
+.foot-links {
+  display: flex;
+  flex: none;
+  gap: 14px;
+}
+
 .leave {
   flex: none;
   padding: 0;
@@ -724,6 +741,17 @@ body.gym {
   color: #6f5a35;
 }
 
+.howto {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: 0.86rem;
+  color: #5c4a2c;
+}
+
+.howto li + li {
+  margin-top: 4px;
+}
+
 .pass-card code {
   display: block;
   margin-top: 4px;
@@ -735,6 +763,190 @@ body.gym {
   display: flex;
   gap: 16px;
   margin-top: 8px;
+}
+
+/* ---- your locker: the panel turns into its open door ---- */
+
+.panel.is-locker {
+  --metal: #2f3d5c;
+  background: var(--metal);
+  color: #eef2f8;
+  border-color: #121827;
+  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.45), inset 0 0 0 3px #3e5078;
+}
+
+.panel.is-locker .eyebrow,
+.panel.is-locker .link {
+  color: #a9b8d4;
+}
+
+.panel.is-locker h3 {
+  margin: 18px 0 8px;
+  font: 700 0.7rem/1 var(--pixel);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #a9b8d4;
+}
+
+.locker-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.locker-head > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.locker-head h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.locker-head .link {
+  align-self: flex-start;
+}
+
+.plate {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 34px;
+  background: #f4efe6;
+  color: var(--ink);
+  border: 3px solid #121827;
+  font: 700 1.1rem/1 var(--pixel);
+  box-shadow: 2px 2px 0 #121827;
+}
+
+.plate.is-shut {
+  background: #c9ced6;
+}
+
+.locker-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.locker-stats > div {
+  padding: 10px 12px;
+  background: #24304a;
+  border: 2px solid #121827;
+}
+
+.locker-stats b {
+  display: block;
+  font: 700 1.3rem/1.1 var(--pixel);
+  color: #fff;
+}
+
+.locker-stats span {
+  font-size: 0.8rem;
+  color: #c3cde0;
+}
+
+.locker-visit {
+  margin-bottom: 8px;
+  background: #24304a;
+  border: 2px solid #121827;
+}
+
+.locker-visit summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.locker-visit summary span:last-child {
+  font-weight: 400;
+  color: #c3cde0;
+  white-space: nowrap;
+}
+
+.locker-visit ul,
+.bests {
+  margin: 0;
+  padding: 0 10px 8px;
+  list-style: none;
+}
+
+.locker-visit li {
+  padding: 6px 0;
+  border-top: 1px solid #3a4867;
+  font-size: 0.9rem;
+}
+
+.locker-visit li b {
+  display: block;
+  font-weight: 600;
+}
+
+.locker-visit .sets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 3px;
+}
+
+.locker-visit .sets span {
+  padding: 1px 6px;
+  background: #3a4867;
+  font: 0.82rem/1.5 var(--pixel);
+  font-variant-numeric: tabular-nums;
+}
+
+.bests {
+  padding: 0;
+}
+
+.bests li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #3a4867;
+  font-size: 0.9rem;
+}
+
+.bests li span {
+  flex: 1;
+  min-width: 0;
+}
+
+.bests li b {
+  font: 700 0.86rem/1.4 var(--pixel);
+  white-space: nowrap;
+}
+
+.bests em,
+.bests i {
+  font-style: normal;
+  font-size: 0.75rem;
+  color: #a9b8d4;
+  white-space: nowrap;
+}
+
+.bests i {
+  padding: 0 5px;
+  background: #ffd166;
+  color: var(--ink);
+  font: 700 0.68rem/1.6 var(--pixel);
+  text-transform: uppercase;
+}
+
+.locker-empty {
+  margin: 4px 0 2px;
+  color: #c3cde0;
+  font-size: 0.92rem;
 }
 
 /* ---- the door ---- */
@@ -759,6 +971,10 @@ body.gym {
   background: var(--card);
   border: 3px solid var(--ink);
   box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.45);
+}
+
+.door-card .eyebrow {
+  margin-bottom: 4px;
 }
 
 .door-card h1 {

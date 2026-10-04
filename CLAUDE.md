@@ -26,6 +26,18 @@ quietly change the product.
   machine and plays its pose; finishing puts them in the resting pose beside it;
   stepping off sends them to the water. Never let a change of activity show only
   as text.
+- **The floor is now; the locker is what's kept.** Current activity (presence,
+  machine, state) is live and expires. History (visits, sets, heaviest sets) is
+  kept and is read by opening your own locker in the locker room. Don't add a
+  profile page, an account dashboard or a global "history" button. Reception
+  checks you in and explains the gym; it doesn't show history.
+- **Lockers are entities.** `lockers` rows are a number and an owner. The room
+  shows numbers and whether each is taken, never who has it. `GET /api/locker`
+  returns only the caller's own. Never key a locker or anything else by display
+  name. When other people are live (crit 9), keep their lockers shut.
+- **Don't widen the locker into a fitness platform.** No charts, calories, body
+  weight, streaks or 1RM estimates. A "best" is the heaviest finished set of a
+  weighted lift, nothing computed.
 - **Spatial presence before social networking.** Other people appear in the
   room, on the machine they're using. Never in a sidebar list, a roster or a
   feed.
@@ -62,7 +74,11 @@ quietly change the product.
   route, pose and frame are derived in `world.js` and never stored.
 - **Nobody trains forever.** An unfinished set expires unrecorded after 10 minutes
   (plus its planned minutes if timed), and a rest after 15. Both free the machine.
-  Expiry happens when state is read; there is no background job.
+  Someone idle for 45 minutes has gone home: they're marked away and their visit
+  closes at their last activity. Expiry happens when state is read; there is no
+  background job.
+- **`presence` is the only live table.** Everything else (users, lockers,
+  sessions, sets) is history and is never rewritten by expiry.
 - **Phones are first-class.** Every change must work at 390px wide. On a phone
   the screen is a camera onto the same gym at 2× pixels (3× on desktop). Never
   shrink the world to fit. Check both widths before calling UI work done.
@@ -104,7 +120,8 @@ loads. When it arrives:
 - **Stack:** Node 24's own `http` server and `node:sqlite`, TypeScript run directly
   by Node (type stripping, so only erasable syntax: no `enum`, no parameter
   properties, and imports end in `.ts`). The client is hand-written HTML, CSS
-  and JS in `public/`, with no build step: `app.js` (API, door, panel),
+  and JS in `public/`, with no build step: `reception.js` (check-in, how-to),
+  `locker.js` (your history), `app.js` (the floor's panel and wiring),
   `world.js` (layout, people, routes, camera, the canvas loop) and `sprites.js`
   (the art). **Add no runtime dependency without
   asking.**
