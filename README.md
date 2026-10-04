@@ -6,22 +6,30 @@ Same Gym is a persistent pixel-art gym on the web, where what you actually do in
 your workout controls what your character is doing. You check in at the front desk
 as a small pixel person with a name and a shirt colour, and you're given a gym pass
 and a locker of your own. The room is larger than your
-screen and holds 37 machines in one continuous space:
-- treadmills, bikes and rowers under the windows
+screen and holds 41 machines in one continuous space:
+- treadmills, bikes, rowers and stair climbers under the windows
 - a back-and-arms row with pulldowns, a cable row, cable stations, an assisted
-  pull-up, a shoulder press and a preacher curl
+  pull-up and dip machine, a shoulder press and a preacher curl
 - free weights in front of the mirror
 - flat and incline benches
-- squat racks on wooden platforms, leg presses, a leg curl and a leg extension
+- squat racks and lifting platforms (deadlifts, barbell rows) on wood, leg
+  presses, a leg curl and a leg extension
 - stretching mats
 - a water-and-rest corner
 
-You start a set from the equipment. Tap an empty bench and it asks what you're
-doing: weight and reps. Press **Start set** and your character walks over, lies
-down and starts pressing. Press **Finish set** and the set is recorded. They stand
-up beside the bench with a towel and a water bottle while your rest timer runs,
-and the next set is one tap away. Walk over to the lat pulldown and they sit down
-and start pulling.
+You walk in at the entrance. Tap an empty bench and your character walks over to
+it; only when they're standing beside it does the bench ask what you're doing:
+set 1, weight and target reps. Press **Start set 1** and they lie down and start
+pressing. Press **Finish set 1**, correcting the reps if you fell short, and the
+set is recorded. They stand up beside the bench with a towel and a water bottle
+while your rest timer runs, and set 2 is ready with the same numbers to change
+or keep. Tap the lat pulldown and they walk across the gym, and sit down only
+when you start.
+
+Each machine asks for what it measures. Barbells and machines take weight and
+reps. The assisted pull-up takes assistance and reps, and more assistance is
+easier, so it never counts as weight lifted. Cardio takes minutes and, where the
+machine has one, a speed or level.
 
 Anyone else who is in is in the same room, doing their own thing on their own
 machine.
@@ -60,15 +68,21 @@ keeps only presence: a place, and people visibly doing things in it.
    in a small panel over it, because the panel is only a way to act in the room.
    Other people appear in the room, on the machine they're using, never in a list
    beside it.
-2. **The equipment is how you start.** You don't pick an exercise from a list. You
-   tap a machine, set up the set it's for (a cable station offers pushdowns, curls
-   or face pulls, never squats), and press Start. A set exists only once you
-   finish it. Cancel, and nothing is recorded.
-3. **What you do is what your character does.** Starting a set walks you to that
-   machine and plays its movement: pressing, squatting, pulling, rowing, curling,
-   running, pedalling, stretching. Finishing puts you in a resting pose beside it,
-   and leaving the station sends you to the water. A label changing on its own
-   isn't enough.
+2. **You walk, then you set up.** You don't pick an exercise from a list or fill
+   in a form first. Tap a machine and you walk to it; its setup opens when you
+   arrive, offering only what's done on it (a cable station offers pushdowns,
+   curls or face pulls, never squats). The workout is set by set: each set has
+   its number and its own numbers, open to change before you start it and
+   correctable when you finish it. A set exists only once you finish it. Cancel,
+   and nothing is recorded. Walking off mid-set isn't possible; leaving a station
+   between sets asks first.
+3. **What you do is what your character does.** Starting a set plays its
+   movement on that machine: pressing, squatting, deadlifting, rowing, pulling,
+   dipping, curling, running, pedalling, climbing stairs, stretching. Finishing
+   puts you in a resting pose beside it, and leaving the station sends you to the
+   water. A label changing on its own isn't enough. The panel is yours to close at
+   any time; closing it never changes what you're doing, and a small button in
+   the top bar brings it back.
 4. **The floor is now; the locker is what's kept.** Where you are and what you're
    doing is live, and it goes when you do. Finished sets and visits are kept, and
    you look at them by opening your locker, not on a page outside the gym.
@@ -118,6 +132,13 @@ Enforced by `spec/`:
 - Identity and sets survive across requests, and a pass recovers the same person.
 - Starting a set records nothing, finishing records it, and cancelling records
   nothing.
+- Finishing records what you actually did. Consecutive sets keep their own
+  numbers, and the next set starts from the last one's.
+- Walking over to a machine holds nothing, and you can't walk off mid-set.
+- Assisted work records assistance apart from load and is never a heaviest lift.
+  Cardio takes minutes and an optional setting.
+- Opening the gym afresh starts you at the entrance and drops an unfinished set.
+  A refresh in the same tab keeps you where you were.
 - One machine holds one person, and a second set can't start while one is under
   way.
 - An exercise must belong to its machine.
@@ -137,11 +158,14 @@ Enforced by `spec/`:
 - The public floor never shows a pass, weights or reps.
 - At 1920×1080 and 390×844, the gym is larger than the screen and drawn with crisp
   pixels, and isn't shrunk below 2× scale.
-- Every machine is tappable.
-- Tapping the lat pulldown only sets it up. Start set walks you there, with the
-  camera following.
+- Every machine is tappable, and you start at the entrance.
+- Tapping the lat pulldown walks you there, with the camera following. The setup
+  opens only on arrival.
 - The machine you're on visibly animates.
-- Finish set records the set and leaves you resting beside it.
+- Closing the panel mid-set keeps the set going, and the top-bar button brings
+  the panel back.
+- Finish set records the reps you corrected. Set 2 can be heavier, and both are
+  kept as they were.
 - Your locker opens from the room with the set in it, readable and fitting the
   screen.
 - A reload marks the same locker as yours.

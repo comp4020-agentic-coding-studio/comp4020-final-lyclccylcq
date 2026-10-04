@@ -63,10 +63,14 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
   // Added when sets gained a start and a finish: which machine someone is on,
   // the set they've started (weight, reps or minutes), and when an unfinished
   // set or a rest stops holding the machine.
-  const have = new Set((db.prepare("pragma table_info(presence)").all() as { name: string }[]).map((c) => c.name));
-  for (const [name, type] of [["machine", "text"], ["plan_weight", "real"], ["plan_amount", "integer"], ["expires_at", "integer"]]) {
-    if (!have.has(name)) db.exec(`alter table presence add column ${name} ${type}`);
-  }
+  // Later: a set's one extra number (assistance kg, or a cardio machine's
+  // speed or level), and where someone not on a machine is standing.
+  const add = (table: string, columns: [string, string][]) => {
+    const have = new Set((db.prepare(`pragma table_info(${table})`).all() as { name: string }[]).map((c) => c.name));
+    for (const [name, type] of columns) if (!have.has(name)) db.exec(`alter table ${table} add column ${name} ${type}`);
+  };
+  add("presence", [["machine", "text"], ["plan_weight", "real"], ["plan_amount", "integer"], ["expires_at", "integer"], ["plan_setting", "real"], ["spot", "text"]]);
+  add("sets", [["setting", "real"]]);
   // rows from before machines existed say what someone did, not where: they
   // become someone standing about, which is the honest reading
   db.exec(`update presence set state = 'idle', exercise = null where state in ('training', 'resting') and machine is null`);

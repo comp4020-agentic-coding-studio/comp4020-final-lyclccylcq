@@ -96,8 +96,12 @@ async function api(req: IncomingMessage, res: ServerResponse, route: string): Pr
       return json(res, 200, gym.enter(user.id));
     case "POST /api/start":
       return json(res, 200, gym.start(user.id, await body(req)));
+    case "POST /api/arrive":
+      return json(res, 200, gym.arrive(user.id));
+    case "POST /api/approach":
+      return json(res, 200, gym.approach(user.id, await body(req)));
     case "POST /api/finish":
-      return json(res, 201, gym.finish(user.id));
+      return json(res, 201, gym.finish(user.id, await body(req)));
     case "POST /api/cancel":
       return json(res, 200, gym.cancel(user.id));
     case "POST /api/step-off":

@@ -3,9 +3,11 @@ import type { DatabaseSync } from "node:sqlite";
 import { type Exercise, KINDS, MACHINES, kindById, machineById } from "./equipment.ts";
 import { createLockers } from "./lockers.ts";
 
-// idle: in the gym, not on a machine (or back at one after cancelling a set)
+// idle: in the gym, not mid-set: at the entrance, by the water, or standing
+//   at a machine you've walked over to (or cancelled a set on)
 // training: a set is under way on a machine
 // resting: a set is finished; still at the machine, between sets
+// All of it is live state: where you stand is never history.
 export type State = "idle" | "training" | "resting" | "away";
 
 export const COLOURS = ["#ff6b4a", "#ffb703", "#2ec4b6", "#4d7cfe", "#b15cff", "#ff5fa2"];
@@ -44,7 +46,9 @@ interface PresenceRow {
   since: number;
   plan_weight: number | null;
   plan_amount: number | null;
+  plan_setting: number | null;
   expires_at: number | null;
+  spot: string | null; // where an idle person not at a machine stands: entrance or lounge
 }
 
 interface SetRow {
@@ -52,6 +56,7 @@ interface SetRow {
   exercise: string;
   weight_kg: number;
   amount: number;
+  setting: number | null;
   done_at: number;
 }
 
@@ -60,6 +65,7 @@ const setOut = (s: SetRow) => ({
   exercise: s.exercise,
   weightKg: s.weight_kg,
   amount: s.amount,
+  setting: s.setting,
   doneAt: s.done_at,
 });
 
@@ -89,22 +95,32 @@ function cleanName(raw: unknown): string {
   return name;
 }
 
-// The set someone is about to do, checked against what the exercise measures.
-function cleanPlan(ex: Exercise, input: { weightKg?: unknown; amount?: unknown }) {
-  let weight = 0;
-  if (ex.weighted) {
-    weight = Number(input.weightKg);
-    if (input.weightKg === null || input.weightKg === "" || !Number.isFinite(weight) || weight < 0 || weight > 500) {
-      throw new InputError("Weight should be between 0 and 500 kg.");
+// A set, checked against how its exercise is measured (equipment.ts). Load
+// goes in weight; assistance or a cardio setting goes in setting.
+function cleanPlan(ex: Exercise, input: { weightKg?: unknown; assistKg?: unknown; amount?: unknown; setting?: unknown }) {
+  const kg = (raw: unknown, max: number, what: string) => {
+    const n = Number(raw);
+    if (raw === null || raw === undefined || raw === "" || !Number.isFinite(n) || n < 0 || n > max) {
+      throw new InputError(`${what} should be between 0 and ${max} kg.`);
     }
-    weight = Math.round(weight * 100) / 100;
+    return Math.round(n * 100) / 100;
+  };
+  let weight = 0;
+  let setting: number | null = null;
+  if (ex.metric === "load") weight = kg(input.weightKg, 500, "Weight");
+  if (ex.metric === "assist") setting = kg(input.assistKg, 200, "Assistance");
+  if (ex.metric === "time" && ex.setting && input.setting !== undefined && input.setting !== null && input.setting !== "") {
+    const { label, min, max } = ex.setting;
+    const n = Number(input.setting);
+    if (!Number.isFinite(n) || n < min || n > max) throw new InputError(`${label} should be between ${min} and ${max}.`);
+    setting = Math.round(n * 10) / 10;
   }
   const amount = Number(input.amount);
-  const max = ex.measure === "reps" ? 100 : 180;
+  const max = ex.metric === "time" ? 180 : 100;
   if (!Number.isInteger(amount) || amount < 1 || amount > max) {
-    throw new InputError(ex.measure === "reps" ? `Reps should be a whole number from 1 to ${max}.` : `Minutes should be a whole number from 1 to ${max}.`);
+    throw new InputError(ex.metric === "time" ? `Minutes should be a whole number from 1 to ${max}.` : `Reps should be a whole number from 1 to ${max}.`);
   }
-  return { weight, amount };
+  return { weight, amount, setting };
 }
 
 export function createGym(db: DatabaseSync, clock: () => number = Date.now, opts: { lockers?: number } = {}) {
@@ -116,27 +132,28 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now, opts
     openSession: db.prepare("select id, started_at from sessions where user_id = ? and ended_at is null order by id desc limit 1"),
     insertSession: db.prepare("insert into sessions (user_id, started_at) values (?, ?)"),
     closeSessions: db.prepare("update sessions set ended_at = ? where user_id = ? and ended_at is null"),
-    insertSet: db.prepare("insert into sets (session_id, user_id, exercise, weight_kg, amount, done_at) values (?, ?, ?, ?, ?, ?)"),
-    setsIn: db.prepare("select id, exercise, weight_kg, amount, done_at from sets where session_id = ? order by id"),
+    insertSet: db.prepare("insert into sets (session_id, user_id, exercise, weight_kg, amount, setting, done_at) values (?, ?, ?, ?, ?, ?, ?)"),
+    setsIn: db.prepare("select id, exercise, weight_kg, amount, setting, done_at from sets where session_id = ? order by id"),
     lastPerExercise: db.prepare(`
-      select id, exercise, weight_kg, amount, done_at from sets
+      select id, exercise, weight_kg, amount, setting, done_at from sets
       where id in (select max(id) from sets where user_id = ? group by exercise)`),
-    presence: db.prepare("select state, exercise, machine, since, plan_weight, plan_amount, expires_at from presence where user_id = ?"),
+    presence: db.prepare("select state, exercise, machine, since, plan_weight, plan_amount, plan_setting, expires_at, spot from presence where user_id = ?"),
     putPresence: db.prepare(`
-      insert into presence (user_id, state, exercise, machine, plan_weight, plan_amount, since, expires_at)
-      values (?, ?, ?, ?, ?, ?, ?, ?)
+      insert into presence (user_id, state, exercise, machine, plan_weight, plan_amount, plan_setting, since, expires_at, spot)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       on conflict (user_id) do update set
         state = excluded.state, exercise = excluded.exercise, machine = excluded.machine,
-        plan_weight = excluded.plan_weight, plan_amount = excluded.plan_amount,
-        since = excluded.since, expires_at = excluded.expires_at`),
-    // unfinished sets and long rests let go of their machine
+        plan_weight = excluded.plan_weight, plan_amount = excluded.plan_amount, plan_setting = excluded.plan_setting,
+        since = excluded.since, expires_at = excluded.expires_at, spot = excluded.spot`),
+    // unfinished sets and long rests let go of their machine: the person has
+    // wandered off to the water
     expire: db.prepare(`
-      update presence set state = 'idle', exercise = null, machine = null,
-        plan_weight = null, plan_amount = null, since = expires_at, expires_at = null
+      update presence set state = 'idle', exercise = null, machine = null, spot = 'lounge',
+        plan_weight = null, plan_amount = null, plan_setting = null, since = expires_at, expires_at = null
       where state in ('training', 'resting') and expires_at <= ?`),
     holder: db.prepare("select user_id from presence where machine = ? and state in ('training', 'resting') and user_id != ?"),
     floor: db.prepare(`
-      select u.id, u.name, u.colour, p.state, p.exercise, p.machine, p.since
+      select u.id, u.name, u.colour, p.state, p.exercise, p.machine, p.spot, p.since
       from presence p join users u on u.id = p.user_id
       where p.state in ('training', 'resting') or (p.state = 'idle' and p.since > ?)
       order by p.since`),
@@ -144,7 +161,11 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now, opts
 
   const presenceOf = (userId: string) => q.presence.get(userId) as PresenceRow | undefined;
   const put = (userId: string, state: State, at: number, o: Partial<Omit<PresenceRow, "state" | "since">> = {}) =>
-    q.putPresence.run(userId, state, o.exercise ?? null, o.machine ?? null, o.plan_weight ?? null, o.plan_amount ?? null, at, o.expires_at ?? null);
+    q.putPresence.run(
+      userId, state, o.exercise ?? null, o.machine ?? null,
+      o.plan_weight ?? null, o.plan_amount ?? null, o.plan_setting ?? null,
+      at, o.expires_at ?? null, o.spot ?? null,
+    );
 
   function sessionFor(userId: string, now: number): number {
     const open = q.openSession.get(userId) as { id: number } | undefined;
@@ -204,9 +225,10 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now, opts
           state: p?.state ?? ("away" as State),
           exercise: p?.exercise ?? null,
           machine: p?.machine ?? null,
+          spot: p?.spot ?? null,
           since: p?.since ?? user.created_at,
           expiresAt: p?.expires_at ?? null,
-          plan: p?.plan_amount != null ? { weightKg: p.plan_weight ?? 0, amount: p.plan_amount } : null,
+          plan: p?.plan_amount != null ? { weightKg: p.plan_weight ?? 0, amount: p.plan_amount, setting: p.plan_setting } : null,
         },
         session: open
           ? { startedAt: open.started_at, sets: (q.setsIn.all(open.id) as unknown as SetRow[]).map(setOut) }
@@ -222,7 +244,32 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now, opts
       settle(userId, now);
       sessionFor(userId, now);
       const p = presenceOf(userId);
-      if (!p || p.state === "away") put(userId, "idle", now);
+      if (!p || p.state === "away") put(userId, "idle", now, { spot: "entrance" });
+      return this.me(userId);
+    },
+
+    // Opening the gym again (a new tab, another device, tomorrow) starts you
+    // at the entrance. Where you stood last time was live state, not history;
+    // a set you'd started and never finished is dropped, not recorded.
+    arrive(userId: string) {
+      const now = clock();
+      settle(userId, now);
+      const p = presenceOf(userId);
+      if (p && p.state !== "away") put(userId, "idle", now, { spot: "entrance" });
+      return this.me(userId);
+    },
+
+    // Walk over to a machine to set it up. You're standing there, not using
+    // it: nothing is held and nothing recorded until Start set.
+    approach(userId: string, input: { machine?: unknown }) {
+      const machine = typeof input.machine === "string" ? machineById.get(input.machine) : undefined;
+      if (!machine) throw new InputError("That isn't a machine in this gym.");
+      const now = clock();
+      settle(userId, now);
+      const p = inGym(userId);
+      if (p.state === "training") throw new InputError("Finish or cancel the set you're on first.", 409);
+      if (q.holder.get(machine.id, userId)) throw new InputError("Someone's on that machine.", 409);
+      put(userId, "idle", now, { machine: machine.id });
       return this.me(userId);
     },
 
@@ -233,31 +280,49 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now, opts
       if (!machine) throw new InputError("That isn't a machine in this gym.");
       const ex = kindById.get(machine.kind)!.exercises.find((e) => e.name === input.exercise);
       if (!ex) throw new InputError(`That isn't something you do on the ${machine.name}.`);
-      const { weight, amount } = cleanPlan(ex, input);
+      const { weight, amount, setting } = cleanPlan(ex, input);
       const now = clock();
       settle(userId, now);
       const p = inGym(userId);
       if (p.state === "training" && p.machine !== machine.id) throw new InputError("Finish or cancel the set you're on first.", 409);
       if (q.holder.get(machine.id, userId)) throw new InputError("Someone's on that machine.", 409);
       sessionFor(userId, now);
-      const limit = SET_MS + (ex.measure === "min" ? amount * 60_000 : 0);
-      put(userId, "training", now, { exercise: ex.name, machine: machine.id, plan_weight: weight, plan_amount: amount, expires_at: now + limit });
+      const limit = SET_MS + (ex.metric === "time" ? amount * 60_000 : 0);
+      put(userId, "training", now, {
+        exercise: ex.name,
+        machine: machine.id,
+        plan_weight: weight,
+        plan_amount: amount,
+        plan_setting: setting,
+        expires_at: now + limit,
+      });
       return this.me(userId);
     },
 
-    // Finish the set under way: this is when it's recorded.
-    finish(userId: string) {
+    // Finish the set under way: this is when it's recorded, with what you
+    // actually did if it differed from what you set out to do.
+    finish(userId: string, input: { weightKg?: unknown; assistKg?: unknown; amount?: unknown; setting?: unknown } = {}) {
       const now = clock();
       settle(userId, now);
       const p = inGym(userId);
       if (p.state !== "training") throw new InputError("There's no set under way to finish.", 409);
+      const ex = KINDS.flatMap((k) => k.exercises).find((e) => e.name === p.exercise)!;
+      const planned = { weightKg: p.plan_weight, assistKg: p.plan_setting, amount: p.plan_amount, setting: p.plan_setting };
+      const has = (k: keyof typeof input) => input[k] !== undefined;
+      const done = cleanPlan(ex, {
+        weightKg: has("weightKg") ? input.weightKg : planned.weightKg,
+        assistKg: has("assistKg") ? input.assistKg : planned.assistKg,
+        amount: has("amount") ? input.amount : planned.amount,
+        setting: has("setting") ? input.setting : planned.setting,
+      });
       const session = sessionFor(userId, now);
-      q.insertSet.run(session, userId, p.exercise!, p.plan_weight ?? 0, p.plan_amount!, now);
+      q.insertSet.run(session, userId, ex.name, done.weight, done.amount, done.setting, now);
       put(userId, "resting", now, {
-        exercise: p.exercise,
+        exercise: ex.name,
         machine: p.machine,
-        plan_weight: p.plan_weight,
-        plan_amount: p.plan_amount,
+        plan_weight: done.weight,
+        plan_amount: done.amount,
+        plan_setting: done.setting,
         expires_at: now + REST_MS,
       });
       return this.me(userId);
@@ -279,7 +344,7 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now, opts
       settle(userId, now);
       const p = inGym(userId);
       if (p.state === "training") throw new InputError("Finish or cancel the set you're on first.", 409);
-      put(userId, "idle", now);
+      put(userId, "idle", now, { spot: "lounge" });
       return this.me(userId);
     },
 
@@ -316,6 +381,7 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now, opts
           state: r.state,
           exercise: r.exercise,
           machine: r.machine && machineById.has(r.machine) ? r.machine : null,
+          spot: r.spot,
           since: r.since,
         })),
       };

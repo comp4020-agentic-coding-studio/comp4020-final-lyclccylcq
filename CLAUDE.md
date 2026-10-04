@@ -16,9 +16,25 @@ quietly change the product.
 - **The gym is the main view.** The pixel room fills the screen; the set panel is
   a small card over it (a bottom sheet on phones). Don't add dashboards, stats rows
   or history pages that compete with the room.
-- **The equipment starts the workout.** Tapping a machine opens its setup
-  (exercise if it has several, weight, reps or minutes). Nothing changes until
-  Start set. Don't bring back an exercise list as the main way in.
+- **Walk first, then set up.** Tapping a free machine walks you to it
+  (`/api/approach`: you stand there, nothing held or recorded); its setup opens
+  only when you arrive. Never open the setup on tap, and don't bring back an
+  exercise list as the main way in.
+- **Set by set.** The setup is for the next set only: its number (counted from
+  this visit's sets of that exercise), and its own values, prefilled from the last
+  set and always editable. Finish can correct what was actually done. No "number
+  of sets" field, no workout planning.
+- **Each exercise asks for its own metric** (`src/equipment.ts`): load (weight ×
+  reps), assist (assistance × reps; more assistance is easier, so it's never
+  weight or a "best"), or time (minutes + an optional speed or level). A new
+  exercise picks one of these; don't add a new set schema.
+- **You arrive at the entrance.** Opening the gym afresh (a new tab: no
+  `sessionStorage` flag) calls `/api/arrive`, which puts you at the entrance and
+  drops any unfinished set unrecorded. A refresh in the same tab keeps you where
+  you were. Where you stood is never restored from history.
+- **The panel never decides anything.** Closing it hides it; whatever you're doing
+  carries on, and the top-bar button reopens it. Leaving a station between sets
+  asks first; walking off mid-set isn't allowed.
 - **Idle → training → resting.** Start set stores the plan and nothing else.
   Finish set records the set and moves you to resting at the machine. Cancel
   records nothing. Never create a set anywhere but `finish`.
@@ -103,8 +119,8 @@ quietly change the product.
 Real-time is still to come: right now other people appear only when the page
 loads. When it arrives:
 
-- Broadcast from the action functions in `src/gym.ts` (enter, start, finish,
-  cancel, stepOff, leave), sending the same public
+- Broadcast from the action functions in `src/gym.ts` (enter, arrive, approach,
+  start, finish, cancel, stepOff, leave), sending the same public
   shape as `/api/floor` (never a pass, never numbers).
 - Feed it to `world.setPeople()`, which already treats everyone as an entity: a
   newcomer walks in from the door, a changed exercise walks to the new machine,
@@ -132,8 +148,8 @@ loads. When it arrives:
 - **Identity:** a user is an opaque id. The display name is a label: never look
   anyone up by name. The gym pass is a secret. It is returned only to its owner
   (`/api/me`) and must never appear in `/api/floor` or anything public.
-- **Every state change goes through `src/gym.ts`** (enter, start, finish, cancel,
-  stepOff, leave). They
+- **Every state change goes through `src/gym.ts`** (enter, arrive, approach,
+  start, finish, cancel, stepOff, leave). They
   are the events the live floor will broadcast, so keep them as single functions
   rather than scattering writes.
 - **Validate on the server.** The client's checks are a convenience; the server

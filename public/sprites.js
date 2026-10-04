@@ -207,6 +207,18 @@ function front(r, c, o = {}) {
       r(cx - 1, S + 3, 2, 3, P.metal);
       r(cx - 2, S + 6, 4, 2, P.iron);
       break;
+    case "dip": // hands on dip bars at barY: straight arms at the top, elbows out at the bottom
+      sleeves();
+      if (barY > S + 3) {
+        r(cx - 7, S + 2, 2, barY - S - 1, P.skin);
+        r(cx + 5, S + 2, 2, barY - S - 1, P.skin);
+      } else {
+        r(cx - 9, S - 3, 3, 4, P.skin);
+        r(cx + 6, S - 3, 3, 4, P.skin);
+        r(cx - 9, S + 1, 2, Math.max(1, barY - S), P.skin);
+        r(cx + 7, S + 1, 2, Math.max(1, barY - S), P.skin);
+      }
+      break;
     case "reach": // both hands up on a bar at barY
       sleeves();
       r(cx - 7, barY, 2, S - barY, P.skin);
@@ -347,6 +359,37 @@ function lying(r, c, f, weight) {
   }
 }
 
+// A person in profile, facing right, posed by their joints: [x, y] for the
+// ankle, knee, hip, shoulder and hand (and elbow, and a far leg, if bent
+// differently). One figure, many lifts.
+function jointed(r, c, j) {
+  if (j.knee2) {
+    seg(r, ...j.hip, ...j.knee2, 2, P.skinD);
+    seg(r, ...j.knee2, ...j.ankle2, 2, P.skinD);
+    r(j.ankle2[0] - 1, j.ankle2[1], 4, 2, P.shoe);
+  }
+  seg(r, ...j.hip, ...j.knee, 3, P.skin);
+  seg(r, ...j.knee, ...j.ankle, 2, P.skin);
+  r(j.ankle[0] - 1, j.ankle[1], 5, 2, P.shoe);
+  r(j.hip[0] - 2, j.hip[1] - 2, 6, 5, P.shorts);
+  seg(r, ...j.hip, ...j.shoulder, 4, c);
+  const dx = j.shoulder[0] - j.hip[0];
+  const dy = j.shoulder[1] - j.hip[1];
+  const len = Math.hypot(dx, dy) || 1;
+  headR(r, Math.round(j.shoulder[0] + (dx / len) * 3) - 1, Math.round(j.shoulder[1] + (dy / len) * 3) - 6);
+  seg(r, ...j.shoulder, ...(j.elbow ?? j.hand), 2, shade(c));
+  if (j.elbow) seg(r, ...j.elbow, ...j.hand, 2, P.skin);
+}
+
+// A barbell seen end-on, as it is when its lifter faces sideways: the near
+// plate, the bar going back into the room, and the far plate behind.
+function plates(r, x, y) {
+  disc(r, x + 3, y - 3, 6, P.ironL);
+  r(x, y - 3, 3, 2, P.metal);
+  disc(r, x, y, 6, P.iron);
+  r(x - 1, y - 1, 3, 3, P.metal);
+}
+
 // Weight stack with its guide rods, as on every pin-loaded machine.
 const stack = (r, x, y, w, h) => {
   r(x, y, w, h, P.iron);
@@ -432,6 +475,53 @@ export const KINDS = {
       seg(r, sx0, sy0, ...hand, 2, P.skin);
       r(hand[0] + 2, hand[1] - 1, 1, 4, P.iron);
       seg(r, hand[0] + 3, hand[1] + 1, 49, 20, 1, P.metal);
+    },
+  },
+  stairs: {
+    fw: 2, fh: 2, w: 40, h: 54, label: 50, ms: 360,
+    draw(r, c, f) {
+      r(3, 48, 34, 4, P.metalD);
+      r(29, 8, 4, 41, P.metalD);
+      r(24, 4, 13, 6, P.metal);
+      r(25, 5, 11, 3, c ? P.screen : P.screenOff);
+      r(16, 20, 15, 2, P.metal);
+      r(16, 20, 2, 10, P.metal);
+      // the turning staircase: treads step down a little each frame
+      const shift = c ? f * 2 : 0;
+      for (let i = 0; i < 6; i++) {
+        const y = 44 - i * 5 + shift;
+        r(5 + i * 3, y, 10, 2, P.iron);
+        r(5 + i * 3, y, 10, 1, P.ironL);
+      }
+      r(4, 20, 3, 28, P.metalD);
+      if (!c) return;
+      jointed(r, c, f
+        ? { ankle2: [11, 40], knee2: [16, 33], hip: [13, 26], knee: [19, 25], ankle: [20, 31], shoulder: [16, 13], hand: [24, 20] }
+        : { ankle2: [19, 32], knee2: [19, 26], hip: [14, 27], knee: [17, 33], ankle: [14, 40], shoulder: [17, 14], hand: [24, 20] });
+    },
+  },
+  platform: {
+    fw: 4, fh: 2, w: 64, h: 46, label: 34, ms: 750,
+    draw(r, c, f, pose) {
+      r(2, 38, 12, 6, P.iron);
+      r(50, 38, 12, 6, P.iron);
+      r(14, 38, 36, 6, P.wood);
+      r(14, 38, 36, 1, P.woodL);
+      for (const x of [23, 32, 41]) r(x, 39, 1, 5, P.woodD);
+      if (!c) return plates(r, 40, 31);
+      const ankle = [28, 36];
+      let j;
+      if (pose === "barbell-row") {
+        j = f
+          ? { ankle, knee: [32, 30], hip: [25, 24], shoulder: [35, 18], elbow: [29, 20], hand: [33, 24] }
+          : { ankle, knee: [32, 30], hip: [25, 24], shoulder: [35, 18], hand: [35, 29] };
+      } else {
+        j = f
+          ? { ankle, knee: [30, 29], hip: [28, 23], shoulder: [29, 12], hand: [31, 23] }
+          : { ankle, knee: [33, 30], hip: [24, 27], shoulder: [33, 19], hand: [34, 31] };
+      }
+      jointed(r, c, j);
+      plates(r, j.hand[0] + 1, j.hand[1]);
     },
   },
   bench: {
@@ -748,7 +838,7 @@ export const KINDS = {
   },
   pullup: {
     fw: 2, fh: 2, w: 36, h: 58, label: 52, ms: 700,
-    draw(r, c, f) {
+    draw(r, c, f, pose) {
       r(3, 2, 3, 53, P.metalD);
       r(30, 2, 3, 53, P.metalD);
       r(3, 2, 30, 3, P.metalD);
@@ -756,9 +846,14 @@ export const KINDS = {
       r(6, 6, 4, 2, P.iron);
       r(26, 6, 4, 2, P.iron);
       stack(r, 15, 34, 6, 18);
-      const py = c ? (f ? 34 : 42) : 44;
+      // dip handles, out from the frame at chest height
+      r(5, 30, 8, 2, P.iron);
+      r(23, 30, 8, 2, P.iron);
+      const dip = pose === "dip";
+      const py = c ? (dip ? (f ? 41 : 46) : f ? 34 : 42) : 44;
       r(17, py + 3, 2, 52 - py, P.metal);
-      if (c) front(r, c, { cx: 18, fy: py - 1, arms: "reach", barY: 6 });
+      if (c && dip) front(r, c, { cx: 18, fy: py - 1, arms: "dip", barY: 30 });
+      else if (c) front(r, c, { cx: 18, fy: py - 1, arms: "reach", barY: 6 });
       r(10, py, 16, 3, P.pad);
       r(10, py, 16, 1, P.padL);
     },

@@ -119,6 +119,26 @@ button {
   padding: 0;
 }
 
+.activity {
+  padding: 4px 9px;
+  border: 2px solid #f4efe6;
+  background: transparent;
+  color: #f4efe6;
+  font: 700 0.72rem/1.2 var(--pixel);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.activity[data-state="training"] {
+  border-color: var(--accent);
+  color: #ffb4a3;
+}
+
+.activity time {
+  font-variant-numeric: tabular-nums;
+}
+
 .top nav a,
 .top .link {
   color: rgba(244, 239, 230, 0.75);
@@ -260,6 +280,30 @@ body.gym {
   opacity: 1;
 }
 
+/* where you're walking to: the outline marches until you arrive */
+.is-walking .hotspot.is-selected {
+  outline-style: dashed;
+  animation: march 0.6s steps(2) infinite;
+}
+
+@keyframes march {
+  50% {
+    outline-color: #fff;
+  }
+}
+
+/* you've arrived: one bright flash before the setup opens */
+.hotspot.is-arrived {
+  animation: arrived 0.7s steps(3);
+}
+
+@keyframes arrived {
+  0%,
+  66% {
+    background-color: rgba(255, 209, 102, 0.45);
+  }
+}
+
 /* lockers: only yours carries marks, and its name is always shown */
 .locker-spot.is-free,
 .locker-spot.is-busy {
@@ -387,6 +431,41 @@ body.gym {
   margin: 0 0 12px;
 }
 
+.close {
+  flex: none;
+  align-self: flex-start;
+  width: 32px;
+  height: 32px;
+  margin: -4px -6px 0 0;
+  padding: 0;
+  border: 2px solid currentColor;
+  background: transparent;
+  color: var(--muted);
+  font: 700 1.2rem/1 var(--pixel);
+}
+
+.close:hover {
+  color: var(--ink);
+}
+
+.panel.is-locker .close {
+  color: #a9b8d4;
+}
+
+.set-no {
+  margin: 10px 0 0;
+  font: 700 0.72rem/1 var(--pixel);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.field > span em {
+  font-style: normal;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .eyebrow {
   margin: 0 0 2px;
   font: 700 0.66rem/1.2 var(--pixel);
@@ -434,11 +513,20 @@ body.gym {
   font-size: 1.05rem;
 }
 
-.plan span {
+.plan i {
   font: 600 0.7rem/1 var(--pixel);
+  font-style: normal;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #2f8f6a;
+}
+
+.plan span {
+  margin-right: 4px;
+  font: 600 0.7rem/1 var(--pixel);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .secondary {
@@ -1109,6 +1197,26 @@ body.gym {
 
   /* your numbers stay in the panel; what you're doing stays in the gym */
   .tag .set {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .brand-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .activity {
+    max-width: 44vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .activity:not([hidden]) ~ a {
     display: none;
   }
 }

@@ -175,6 +175,60 @@ remembers. Reception gets you in.
   - `public/reception.js` gets you in.
   - `public/locker.js` shows your history.
 
+**A usability pass: walk, then set up.** After shipping crit 8 I sent a
+correction list:
+- new arrivals should start at the entrance
+- the character should walk to a machine before its setup opens
+- the corner panel should close
+- the barbells should be usable
+- add a stair climber and an assisted pull-up
+- sets "appear not to be adjustable"
+
+I asked the agent to reproduce that last one before deciding what it was.
+
+- **The set problem wasn't what it looked like.** Driving Chrome with real mouse
+  clicks and typing at both screen sizes, the next set's weight and reps could be
+  edited, and `60×8` then `65×6` were saved as two separate sets. So the bug as
+  reported didn't reproduce. The agent found three gaps that made it feel that
+  way instead:
+  - Once Start was pressed, the set was frozen. Finish recorded the target, and
+    the only way to log fewer reps was to cancel.
+  - There was no set number. Between sets the form looked like the first setup
+    again, labelled "Reps", so it wasn't clear you were setting up the next set.
+  - Every machine took weight + reps or minutes, so there was nowhere for
+    treadmill speed, stair-climber level or pull-up assistance.
+
+  The fix:
+  - Each set shows its number, counted from this visit.
+  - Finish takes the reps or minutes you actually did.
+  - Each exercise now asks for one of three metrics: load, assist or time.
+- **Walking became a real step.** `/api/approach` notes that you're standing at a
+  machine, without holding it or recording anything. The client walks you there
+  and opens the setup only on arrival. Between sets, tapping another machine asks
+  "Leave your station?"; mid-set, it says to finish or cancel first.
+- **Arriving.** A new spot column says where an idle person stands: the entrance
+  or the lounge. Opening the gym in a new tab calls `/api/arrive`, which starts
+  you at the entrance and drops an unfinished set unrecorded. The agent proposed
+  keeping your place on a refresh in the same tab (a `sessionStorage` flag that
+  holds no data); I accepted it. Without it, a refresh mid-set would lose the
+  set.
+- **Equipment.**
+  - Two lifting platforms for deadlifts and barbell rows, replacing a decorative
+    barbell.
+  - Two stair climbers.
+  - A dip mode on the existing assisted pull-up machine.
+  - A small jointed-figure helper draws the side-on lifts from joint positions,
+    instead of a hand-placed rectangle for every frame.
+- **The panel closes.** Closing it only hides it. A small button in the top bar
+  says what you're doing ("Set in progress 00:42") and brings it back.
+
+Problems in this pass:
+- A test collision: one test left its person mid-set on the bench the next test
+  needed. Each test now uses its own machine.
+- On a phone, the new top-bar button pushed "Gym pass" off the screen. Narrow
+  screens now show only the logo, without the gym's name.
+- The walk-first check was shown to go red when the setup opened on tap.
+
 ## Stack
 
 Plain Node 24 (`http` and `node:sqlite`) with a hand-written client and no runtime

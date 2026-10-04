@@ -12,7 +12,7 @@ function minutes(ms) {
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
 }
 
-// describe(exercise, weightKg, amount) formats a set the way the gym does
+// describe(exercise, set) formats a set the way the gym does
 export function lockerHtml(data, me, describe) {
   const head = `<div class="locker-head">
       <span class="plate" aria-hidden="true">${pad(data.number)}</span>
@@ -37,7 +37,7 @@ export function lockerHtml(data, me, describe) {
       const rows = v.exercises
         .map(
           (g) =>
-            `<li><b>${esc(g.exercise)}</b><span class="sets">${g.sets.map((s) => `<span>${esc(describe(g.exercise, s.weightKg, s.amount))}</span>`).join("")}</span></li>`,
+            `<li><b>${esc(g.exercise)}</b><span class="sets">${g.sets.map((s) => `<span>${esc(describe(g.exercise, s))}</span>`).join("")}</span></li>`,
         )
         .join("");
       return `<details class="locker-visit"${i < 2 ? " open" : ""}>
@@ -51,7 +51,7 @@ export function lockerHtml(data, me, describe) {
     ? `<h3>Heaviest sets</h3><ul class="bests">${data.bests
         .map(
           (b) =>
-            `<li><span>${esc(b.exercise)}</span><b>${esc(describe(b.exercise, b.weightKg, b.amount))}</b>${b.fromLatestVisit ? `<i>new</i>` : `<em>${esc(day(b.doneAt))}</em>`}</li>`,
+            `<li><span>${esc(b.exercise)}</span><b>${esc(describe(b.exercise, b))}</b>${b.fromLatestVisit ? `<i>new</i>` : `<em>${esc(day(b.doneAt))}</em>`}</li>`,
         )
         .join("")}</ul>`
     : "";

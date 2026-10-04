@@ -106,8 +106,8 @@ describe("someone who goes home without pressing Leave", () => {
 });
 
 describe("the locker", () => {
-  const set = (gym: ReturnType<typeof createGym>, id: string, machine: string, exercise: string, weightKg: number, amount: number) => {
-    gym.start(id, { machine, exercise, weightKg, amount });
+  const set = (gym: ReturnType<typeof createGym>, id: string, machine: string, exercise: string, weightKg: number, amount: number, extra = {}) => {
+    gym.start(id, { machine, exercise, weightKg, amount, ...extra });
     gym.finish(id);
   };
 
@@ -131,7 +131,7 @@ describe("the locker", () => {
     expect(gym.locker(id).visitsThisWeek, "the bench visit is over a week old").toBe(1);
   });
 
-  it("names the heaviest set of each weighted exercise, and nothing for cardio or bodyweight", () => {
+  it("names the heaviest set of each lift with a load, and nothing for cardio or assisted work", () => {
     const { gym } = gymAt();
     const id = person(gym);
     set(gym, id, "bench-a", "Bench Press", 60, 8);
@@ -139,7 +139,7 @@ describe("the locker", () => {
     set(gym, id, "bench-a", "Bench Press", 70, 5);
     set(gym, id, "bench-a", "Bench Press", 65, 10);
     set(gym, id, "treadmill-a", "Treadmill", 0, 20);
-    set(gym, id, "pullup-a", "Assisted Pull-up", 0, 8);
+    set(gym, id, "pullup-a", "Assisted Pull-up", 0, 8, { assistKg: 40 });
     expect(gym.locker(id).bests).toEqual([expect.objectContaining({ exercise: "Bench Press", weightKg: 70, amount: 5, fromLatestVisit: true })]);
   });
 

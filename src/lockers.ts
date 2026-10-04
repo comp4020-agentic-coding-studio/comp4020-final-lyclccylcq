@@ -26,6 +26,7 @@ interface SetRow {
   exercise: string;
   weight_kg: number;
   amount: number;
+  setting: number | null;
   done_at: number;
 }
 
@@ -45,7 +46,7 @@ export function createLockers(db: DatabaseSync, clock: () => number, count = LOC
       select s.id, s.started_at, s.ended_at, count(t.id) as sets, max(t.done_at) as last_set
       from sessions s join sets t on t.session_id = s.id
       where s.user_id = ? group by s.id order by s.id desc limit ?`),
-    setsFrom: db.prepare("select session_id, exercise, weight_kg, amount, done_at from sets where user_id = ? and session_id >= ? order by id"),
+    setsFrom: db.prepare("select session_id, exercise, weight_kg, amount, setting, done_at from sets where user_id = ? and session_id >= ? order by id"),
     visitsSince: db.prepare(`
       select count(distinct s.id) as n from sessions s join sets t on t.session_id = s.id
       where s.user_id = ? and s.started_at >= ?`),
@@ -82,8 +83,8 @@ export function createLockers(db: DatabaseSync, clock: () => number, count = LOC
     },
 
     // What's inside, for its owner only: recent visits with their sets, how
-    // many visits this past week, and the heaviest set of each weighted
-    // exercise.
+    // many visits this past week, and the heaviest set of each lift with a
+    // load (never assistance, which is the opposite of load).
     contents(userId: string) {
       const number = ensure(userId);
       const now = clock();
@@ -93,7 +94,7 @@ export function createLockers(db: DatabaseSync, clock: () => number, count = LOC
 
       const byExercise = new Map<string, { weight_kg: number; amount: number; done_at: number }>();
       for (const s of q.heaviest.all(userId) as unknown as SetRow[]) {
-        if (!byExercise.has(s.exercise) && exerciseByName.get(s.exercise)?.weighted) byExercise.set(s.exercise, s);
+        if (!byExercise.has(s.exercise) && exerciseByName.get(s.exercise)?.metric === "load") byExercise.set(s.exercise, s);
       }
       const latestVisit = visits[0]?.started_at ?? Infinity;
 
@@ -102,11 +103,11 @@ export function createLockers(db: DatabaseSync, clock: () => number, count = LOC
         number,
         visitsThisWeek: (q.visitsSince.get(userId, now - WEEK_MS) as { n: number }).n,
         visits: visits.map((v) => {
-          const exercises: { exercise: string; sets: { weightKg: number; amount: number; doneAt: number }[] }[] = [];
+          const exercises: { exercise: string; sets: { weightKg: number; amount: number; setting: number | null; doneAt: number }[] }[] = [];
           for (const s of sets.filter((s) => s.session_id === v.id)) {
             let group = exercises.find((g) => g.exercise === s.exercise);
             if (!group) exercises.push((group = { exercise: s.exercise, sets: [] }));
-            group.sets.push({ weightKg: s.weight_kg, amount: s.amount, doneAt: s.done_at });
+            group.sets.push({ weightKg: s.weight_kg, amount: s.amount, setting: s.setting, doneAt: s.done_at });
           }
           return { id: v.id, startedAt: v.started_at, endedAt: v.ended_at, lastSetAt: v.last_set, sets: v.sets, exercises };
         }),

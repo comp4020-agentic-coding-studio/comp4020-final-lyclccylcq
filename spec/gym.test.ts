@@ -133,6 +133,68 @@ describe("sets", () => {
     expect(locker.visits[0].endedAt).not.toBeNull();
   });
 
+  it("walking over to a machine holds nothing; someone else can still start there", async () => {
+    const a = await newPerson("Walker");
+    const b = await newPerson("Starter");
+    const over = await call("/api/approach", { pass: a.pass, body: { machine: "legcurl-a" } });
+    expect(over.status).toBe(200);
+    expect(over.data.presence).toMatchObject({ state: "idle", machine: "legcurl-a" });
+    expect((await start(b.pass, "legcurl-a", "Leg Curl", 30, 10)).status).toBe(200);
+    expect((await call("/api/approach", { pass: a.pass, body: { machine: "legcurl-a" } })).status, "it's taken now").toBe(409);
+  });
+
+  it("you can't walk off mid-set", async () => {
+    const { pass } = await newPerson();
+    await start(pass, "preacher-a", "Preacher Curl", 20, 10);
+    expect((await call("/api/approach", { pass, body: { machine: "rack-a" } })).status).toBe(409);
+  });
+
+  it("finishing records what you actually did, and each set keeps its own numbers", async () => {
+    const { pass } = await newPerson();
+    await start(pass, "bench-b", "Bench Press", 60, 8);
+    await call("/api/finish", { pass, body: {} });
+    await start(pass, "bench-b", "Bench Press", 65, 6);
+    await call("/api/finish", { pass, body: {} });
+    await start(pass, "bench-b", "Bench Press", 60, 8);
+    await call("/api/finish", { pass, body: { amount: 7 } });
+    const { data: me } = await call("/api/me", { pass });
+    expect(me.session.sets.map((s: { weightKg: number; amount: number }) => `${s.weightKg}x${s.amount}`)).toEqual(["60x8", "65x6", "60x7"]);
+    expect(me.presence.plan, "the next set starts from what you just did").toMatchObject({ weightKg: 60, amount: 7 });
+  });
+
+  it("assisted work records the assistance apart from load, and never as a heaviest lift", async () => {
+    const { pass } = await newPerson();
+    expect((await call("/api/start", { pass, body: { machine: "pullup-a", exercise: "Assisted Pull-up", assistKg: 30, amount: 8 } })).status).toBe(200);
+    await call("/api/finish", { pass, body: {} });
+    const { data: me } = await call("/api/me", { pass });
+    expect(me.session.sets[0]).toMatchObject({ exercise: "Assisted Pull-up", weightKg: 0, setting: 30, amount: 8 });
+    expect((await call("/api/locker", { pass })).data.bests).toEqual([]);
+    await call("/api/step-off", { pass, body: {} });
+  });
+
+  it("cardio takes minutes and an optional setting, never weight", async () => {
+    const { pass } = await newPerson();
+    await call("/api/start", { pass, body: { machine: "stairs-b", exercise: "Stair Climber", amount: 15, setting: 8 } });
+    await call("/api/finish", { pass, body: {} });
+    await call("/api/start", { pass, body: { machine: "stairs-b", exercise: "Stair Climber", amount: 5 } });
+    await call("/api/finish", { pass, body: {} });
+    const { data: me } = await call("/api/me", { pass });
+    expect(me.session.sets.map((s: { amount: number; setting: number | null; weightKg: number }) => [s.amount, s.setting, s.weightKg])).toEqual([
+      [15, 8, 0],
+      [5, null, 0],
+    ]);
+  });
+
+  it("opening the gym afresh starts you at the entrance, dropping an unfinished set", async () => {
+    const { pass } = await newPerson();
+    await start(pass, "row-a", "Seated Cable Row", 40, 10);
+    const back = await call("/api/arrive", { pass, body: {} });
+    expect(back.data.presence).toMatchObject({ state: "idle", machine: null, spot: "entrance", plan: null });
+    expect(back.data.session.sets).toEqual([]);
+    const { data: floor } = await call("/api/floor");
+    expect(floor.people.some((p: { machine: string }) => p.machine === "row-a")).toBe(false);
+  });
+
   it.each([
     ["a machine that doesn't exist", { machine: "smith-a", exercise: "Squat", weightKg: 10, amount: 10 }],
     ["an exercise that isn't done on that machine", { machine: "cable-b", exercise: "Squat", weightKg: 10, amount: 10 }],
@@ -142,6 +204,8 @@ describe("sets", () => {
     ["zero reps", { machine: "bench-c", exercise: "Bench Press", weightKg: 40, amount: 0 }],
     ["fractional reps", { machine: "bench-c", exercise: "Bench Press", weightKg: 40, amount: 2.5 }],
     ["an absurd number of reps", { machine: "bench-c", exercise: "Bench Press", weightKg: 40, amount: 5000 }],
+    ["assisted work without the assistance", { machine: "pullup-a", exercise: "Assisted Pull-up", amount: 8 }],
+    ["a cardio level off the dial", { machine: "stairs-a", exercise: "Stair Climber", amount: 10, setting: 99 }],
   ])("rejects %s, and changes nothing", async (_, body) => {
     const { pass } = await newPerson();
     const { status } = await call("/api/start", { pass, body });
@@ -211,10 +275,10 @@ describe("privacy on the floor", () => {
 });
 
 describe("the gym", () => {
-  it("someone who has walked in but chosen nothing is on no machine", async () => {
+  it("someone who has walked in but chosen nothing is on no machine, at the entrance", async () => {
     const { user } = await newPerson();
     const { data: floor } = await call("/api/floor");
-    expect(floor.people.find((p: { id: string }) => p.id === user.id)).toMatchObject({ state: "idle", machine: null });
+    expect(floor.people.find((p: { id: string }) => p.id === user.id)).toMatchObject({ state: "idle", machine: null, spot: "entrance" });
   });
 
   it("every machine is of a kind with its own exercises, and each exercise belongs to one kind", async () => {
