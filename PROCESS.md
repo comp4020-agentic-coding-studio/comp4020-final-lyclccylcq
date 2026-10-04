@@ -60,6 +60,42 @@ gaps:
 It also found the deployed URL doesn't answer: the repo is still private, so CI
 has never deployed, and there's no Fly token on this machine for a manual deploy.
 
+**Visual direction correction.** After the second audit I looked at the running
+app again and decided the direction itself was wrong, even though every check
+passed. Five dashed zones with round dots and a big panel beside them read as a
+workout tracker with a gym theme. I redirected the agent with a long prompt: a
+large pixel-art gym that feels like walking into a real one, with Gather as a
+reference for spatial scale and presence only, and none of its assets, maps or
+code. The main constraint was that it be "a persistent virtual gym in which real
+workout activity controls what your pixel character is doing". Choosing Bench Press
+has to put your character on a bench, pressing. Changing the label isn't enough.
+
+I asked the agent to inspect the code and explain any renderer choice before
+building it. It proposed one hand-drawn canvas, no engine and no image files, with
+the words kept as HTML on top
+([decision record 2](docs/decisions/0002-canvas-pixel-world.md)). The changes:
+
+- **The room.** A 60×38-tile gym, drawn at 3× on desktop and 2× on phones and
+  never shrunk to fit, so it's larger than the screen. Zones: cardio by the
+  windows, machines, free weights by the mirror, benches, squat racks on wooden
+  platforms, stretch and recovery, and a lobby with lockers and the front door. The
+  furniture (leg press, cable crossover, rowers, plate trees, sofa, vending machine)
+  is there for density and isn't interactive.
+- **Exercises cut to what the gym can show.** The server's stations went from
+  five areas with twelve exercises to seven stations with one exercise each: bench
+  press, squat, lat pulldown, dumbbell curl, treadmill, bike and stretching. Each
+  has two or three machines and a two-frame animation. Exercises with no animation
+  (seated cable row, leg press, push-up, rower and others) were removed rather than
+  shown as text. Someone who hasn't chosen yet now stands in the lobby, not at a
+  "rest" station.
+- **Meaning stored, picture derived.** Persistence didn't change: the server still
+  stores exercise, state and since when. `world.js` turns that into a machine, a
+  walking route (breadth-first over the tile grid) and a pose, so a reload puts
+  you back on the same machine without storing anything visual. Every person,
+  including you, is an entity in `setPeople()`. A newcomer walks in from the
+  door, a change of exercise walks to the new machine, and someone leaving walks
+  out, which is what crit 9's live feed needs.
+
 ## Stack
 
 Plain Node 24 (`http` and `node:sqlite`) with a hand-written client and no runtime
@@ -126,6 +162,22 @@ person, their station, their set and a still-running rest timer came back.
   the inputs at the cardio station, which has no weight field. Putting the old CSS
   back showed it staying green, so it now checks a weighted station, and it goes
   red when the old CSS is put back.
+- **Walking slowed to a crawl near the machine.** On the phone screenshot the
+  character was still walking three seconds after choosing the pulldown. Walking
+  speed was recalculated each frame from the distance left, so it decayed as the
+  character got closer. It's now set once when the walk starts.
+- **Furniture covered the floor's zone names.** The dumbbell racks and lockers
+  stood on the painted "FREE WEIGHTS" and "LOBBY" in the first full-room
+  screenshot. They were moved down a row. A script then checked that nothing
+  overlaps and that every machine and lobby spot can be reached from the door.
+- **A failing check that was right.** The new viewport check failed with you
+  "idle" at the pulldown. My earlier hand-testing had left two people on both
+  pulldown machines, so the app had correctly put you in line beside them. Instead
+  of weakening the check, the agent made waiting visible ("Waiting for a machine")
+  and ran the checks on a fresh database, as CI does.
+- **The panel squeezed the inputs again.** The old viewport check caught the
+  weight input at 48px in the new desktop panel. The panel was widened and the
+  stepper buttons narrowed.
 - **A false alarm.** Full-page screenshots showed people faded at desktop width.
   Measuring the computed opacity showed it was 1: the capture was replaying the
   entrance animation. No change was needed.
@@ -134,6 +186,10 @@ person, their station, their set and a still-running rest timer came back.
 
 - **An event-log table** for crit 9 to read from. Nothing would read it yet, and the
   four action functions already give a broadcast one place to hook in.
+- **Free roaming (WASD) and a character creator.** You walk where your workout
+  takes you, and everyone has one body in their own shirt colour. Both can come
+  later without changing the data model.
+- **A game engine or sprite image files.** See decision record 2.
 - **Polling the floor.** I held it back so crit 8 stays about persistence and the
   real-time choice is made deliberately at crit 9. Others appear when the page
   loads, and the README says exactly that.
@@ -141,7 +197,8 @@ person, their station, their set and a still-running rest timer came back.
 ## Checks, honestly
 
 The first checks were written after the implementation in the same session, so
-they never failed against a missing app. Two are exceptions: the viewport sensor
+they never failed against a missing app. Three are exceptions: the viewport sensor
 and the returning-browser check were both shown to catch the bug they were written
-for. Restart persistence is verified by
+for. The pixel-world check was shown to go red when animation is switched off.
+Restart persistence is verified by
 hand, not in `spec/`, because the spec runs against an app it can't restart.

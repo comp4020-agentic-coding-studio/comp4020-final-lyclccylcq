@@ -1,6 +1,9 @@
-// The gym floor. The server holds everything that matters (who you are, your
-// visits, your sets, where you're standing); this browser only keeps the gym
-// pass that lets it act as you.
+// The gym page. The server holds everything that matters (who you are, your
+// visits, your sets, what you're doing); this browser only keeps the gym pass
+// that lets it act as you. world.js turns what people are doing into where
+// they stand and how they move.
+
+import { createWorld } from "./world.js";
 
 const PASS_KEY = "same-gym.pass";
 
@@ -29,7 +32,7 @@ let pass = storedPass();
 let me = null; // GET /api/me
 let floor = null; // GET /api/floor
 let clockOffset = 0; // server clock minus ours, so rest timers agree across devices
-let openStation = null; // the station whose panel is showing
+let picking = false; // the panel is showing where to go next
 let showPass = false; // the pass card, shown once on joining and on request
 
 async function api(path, data) {
@@ -50,6 +53,7 @@ async function api(path, data) {
 const now = () => Date.now() + clockOffset;
 const stations = () => floor?.stations ?? [];
 const stationOf = (exercise) => stations().find((s) => s.exercises.includes(exercise));
+const inGym = () => me && me.presence.state !== "away";
 
 function clock(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -65,43 +69,26 @@ function describeSet(set) {
   return `${weight} × ${set.amount}`;
 }
 
-// Each station has a few places to stand, drawn as open spots when nobody's
-// in them, so even an empty floor reads as a room for several people. Phones
-// get fewer, staggered spots so labels don't collide in a narrow zone.
-const SPOTS = {
-  wide: { station: [[25, 44], [75, 44], [50, 72]], rest: [[16, 50], [39, 74], [62, 50], [85, 74]] },
-  narrow: { station: [[28, 45], [72, 69]], rest: [[18, 46], [50, 69], [82, 46]] },
-};
-const narrow = matchMedia("(max-width: 760px)");
+// ---- the world ----
 
-const hash = (id) => {
-  let h = 2166136261;
-  for (const c of id) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
-  return h >>> 0;
-};
-
-// Who stands where: each person has a preferred spot (stable, so the room
-// doesn't reshuffle on every redraw) and takes the next free one if it's
-// taken. More people than spots spill onto the floor between them.
-function placeAll(stationId, people) {
-  const spots = SPOTS[narrow.matches ? "narrow" : "wide"][stationId === "rest" ? "rest" : "station"];
-  const taken = new Array(spots.length).fill(null);
-  const placed = [];
-  for (const p of [...people].sort((a, b) => (a.id < b.id ? -1 : 1))) {
-    const start = hash(p.id) % spots.length;
-    const free = spots.findIndex((_, i) => taken[(start + i) % spots.length] === null);
-    if (free === -1) {
-      const h = hash(p.id);
-      placed.push({ p, x: 15 + (h % 70), y: 40 + ((h >>> 8) % 25) });
-      continue;
+const world = createWorld({
+  scroller: $("#world-scroll"),
+  sizer: $("#world-size"),
+  world: $("#world"),
+  canvas: $("#world-canvas"),
+  layer: $("#people"),
+  panel: $("#panel"),
+  onStation(id) {
+    if (!inGym()) return;
+    const station = stations().find((s) => s.id === id);
+    if (!station) return;
+    if (station.exercises.includes(me.presence.exercise)) {
+      picking = false;
+      return drawPanel();
     }
-    const i = (start + free) % spots.length;
-    taken[i] = p;
-    placed.push({ p, x: spots[i][0], y: spots[i][1] });
-  }
-  const open = spots.filter((_, i) => taken[i] === null);
-  return { placed, open };
-}
+    choose(station.exercises[0]);
+  },
+});
 
 function statusLine(p) {
   if (p.state === "resting") return `Resting <time data-since="${p.since}">${clock(now() - p.since)}</time>`;
@@ -109,7 +96,7 @@ function statusLine(p) {
   return "Just arrived";
 }
 
-// Your own last set, on your own label only: the public floor carries no
+// Your own last set, on your own name tag only: the public floor carries no
 // numbers, so nobody's weights sit next to anyone else's.
 function ownSet(p) {
   if (p.state !== "resting") return "";
@@ -117,47 +104,38 @@ function ownSet(p) {
   return last && last.exercise === p.exercise ? `<span class="set">${esc(describeSet(last))}</span>` : "";
 }
 
-// ---- the floor ----
-
-function drawFloor() {
-  const people = floor?.people ?? [];
-  for (const zone of document.querySelectorAll(".zone")) {
-    const here = people.filter((p) => p.station === zone.dataset.station);
-    const { placed, open } = placeAll(zone.dataset.station, here);
-    zone.classList.toggle("is-busy", here.length > 0);
-    zone.classList.toggle("is-open", openStation === zone.dataset.station);
-    zone.querySelector(".crowd").innerHTML =
-      open.map(([x, y]) => `<span class="spot" style="--x:${x}%;top:${y}%"></span>`).join("") +
-      placed
-        .map(({ p, x, y }) => {
-          const you = me && p.id === me.user.id;
-          return `<div class="person is-${p.state}${you ? " is-you" : ""}" style="--c:${esc(p.colour)};--x:${x}%;top:${y}%">
-          <span class="body" aria-hidden="true">${esc(p.name.slice(0, 1).toUpperCase())}</span>
-          <span class="tag"><b>${esc(p.name)}${you ? " <i>you</i>" : ""}</b>${p.exercise ? `<span class="what">${esc(p.exercise)}</span>` : ""}${you ? ownSet(p) : ""}<span class="status">${statusLine(p)}</span></span>
-        </div>`;
-        })
-        .join("");
-  }
-  const others = people.filter((p) => !me || p.id !== me.user.id).length;
-  const inGym = me && me.presence.state !== "away";
-  $("#headcount").textContent =
-    others === 0
-      ? inGym ? "Just you on the floor so far" : "The floor is quiet right now"
-      : `${others} ${others === 1 ? "other" : "others"} ${inGym ? "training with you" : "training now"}`;
+function nameTag(p) {
+  const you = me && p.id === me.user.id;
+  return `<span class="tag" style="--c:${esc(p.colour)}"><b>${esc(p.name)}${you ? " <i>you</i>" : ""}</b>${
+    p.exercise ? `<span class="what">${esc(p.exercise)}</span>` : ""
+  }${you ? ownSet(p) : ""}<span class="status">${statusLine(p)}</span></span>`;
 }
 
-narrow.addEventListener("change", drawFloor);
+function drawWorld() {
+  const people = floor?.people ?? [];
+  world.setPeople(people, me?.user.id ?? null, nameTag);
+  const others = people.filter((p) => !me || p.id !== me.user.id).length;
+  $("#headcount").textContent =
+    others === 0
+      ? inGym() ? "Just you in the gym so far" : "The gym is quiet right now"
+      : `${others} ${others === 1 ? "other" : "others"} ${inGym() ? "training with you" : "training now"}`;
+}
 
-// ---- the panel beside (or below) the floor ----
+// ---- the panel over the gym ----
 
-function sessionList() {
+function visit() {
   const sets = me.session?.sets ?? [];
-  if (!sets.length) return `<p class="muted">No sets yet this visit.</p>`;
-  return `<ol class="log">${sets
-    .slice()
-    .reverse()
-    .map((s) => `<li><span>${esc(s.exercise)}</span><span>${esc(describeSet(s))}</span></li>`)
-    .join("")}</ol>`;
+  const list = sets.length
+    ? `<ol class="log">${sets
+        .slice()
+        .reverse()
+        .map((s) => `<li><span>${esc(s.exercise)}</span><span>${esc(describeSet(s))}</span></li>`)
+        .join("")}</ol>`
+    : `<p class="muted">No sets yet this visit.</p>`;
+  return `<div class="foot">
+    <details class="visit"><summary>This visit · ${sets.length} ${sets.length === 1 ? "set" : "sets"}</summary>${list}</details>
+    <button type="button" class="leave" data-act="leave">Leave the gym</button>
+  </div>`;
 }
 
 function passCard() {
@@ -182,52 +160,57 @@ function stepper(name, label, value, step, unit) {
 
 function drawPanel() {
   const panel = $("#panel");
-  if (!me || me.presence.state === "away") {
-    panel.innerHTML = `<p class="muted">Walk in to take a spot on the floor.</p>`;
+  document.body.classList.toggle("is-picking", Boolean(inGym() && (picking || !stationOf(me.presence.exercise))));
+  if (!inGym()) {
+    panel.hidden = true;
+    world.relayout();
     return;
   }
+  panel.hidden = false;
   const { presence } = me;
-  const station = stations().find((s) => s.id === openStation);
+  const station = stationOf(presence.exercise);
 
-  if (!station) {
+  if (picking || !station) {
     panel.innerHTML = `${passCard()}
-      <h2>Pick a station</h2>
-      <p class="muted">Tap a station on the floor to train there. The open spots are where other people stand when they're in.</p>
-      <h3>This visit</h3>${sessionList()}
-      <button type="button" class="leave" data-act="leave">Leave the gym</button>`;
+      <div class="panel-head"><h2>Where to?</h2>${station ? `<button type="button" class="link" data-act="close">Back</button>` : ""}</div>
+      <p class="hint">Tap any machine in the gym, or pick one here. You'll walk over to it.</p>
+      <div class="picks">${stations()
+        .flatMap((s) =>
+          s.exercises.map(
+            (e) =>
+              `<button type="button" class="pick${e === presence.exercise ? " is-on" : ""}" data-exercise="${esc(e)}"><b>${esc(e)}</b><span>${esc(s.name)}</span></button>`,
+          ),
+        )
+        .join("")}</div>
+      ${visit()}`;
+    world.relayout();
     return;
   }
 
-  const current = presence.exercise && station.exercises.includes(presence.exercise) ? presence.exercise : null;
-  const last = current ? me.lastByExercise[current] : null;
-  const resting = presence.state === "resting" && current;
-  const weighted = station.weighted;
+  const exercise = presence.exercise;
+  const last = me.lastByExercise[exercise];
   const minutes = station.measure === "min";
-
   panel.innerHTML = `${passCard()}
-    <div class="panel-head"><h2>${esc(station.name)}</h2><button type="button" class="link" data-act="close">Back to floor</button></div>
-    <div class="chips" role="group" aria-label="Exercise">${station.exercises
-      .map((e) => `<button type="button" class="chip${e === current ? " is-on" : ""}" data-exercise="${esc(e)}" aria-pressed="${e === current}">${esc(e)}</button>`)
-      .join("")}</div>
+    <div class="panel-head"><h2>${esc(exercise)}</h2><button type="button" class="link" data-act="pick">Change</button></div>
     ${
-      !current
-        ? `<p class="muted">Choose what you're doing. You'll move to this station on the floor.</p>`
-        : `${resting ? `<div class="rest"><span>Resting</span><time data-since="${presence.since}">${clock(now() - presence.since)}</time><button type="button" class="link" data-act="next">Start next set</button></div>` : `<div class="rest is-training"><span>Training</span><b>${esc(current)}</b></div>`}
-      <form class="set-form" id="set-form" novalidate>
-        <div class="fields">
-          ${weighted ? stepper("weightKg", "Weight", last?.weightKg ?? 20, 2.5, "kg") : ""}
-          ${stepper("amount", minutes ? "Time" : "Reps", last?.amount ?? (minutes ? 10 : 10), 1, minutes ? "min" : "reps")}
-        </div>
-        <p class="error" id="set-error" role="alert"></p>
-        <button type="submit" class="primary">Finish set</button>
-      </form>`
+      presence.state === "resting"
+        ? `<div class="status-bar is-resting"><span>Resting</span><time data-since="${presence.since}">${clock(now() - presence.since)}</time><button type="button" class="link" data-act="next">Start next set</button></div>`
+        : `<div class="status-bar"><span>Training</span><b>at the ${esc(station.name)}</b></div>`
     }
-    <h3>This visit</h3>${sessionList()}
-    <button type="button" class="leave" data-act="leave">Leave the gym</button>`;
+    <form class="set-form" id="set-form" novalidate>
+      <div class="fields">
+        ${station.weighted ? stepper("weightKg", "Weight", last?.weightKg ?? 20, 2.5, "kg") : ""}
+        ${stepper("amount", minutes ? "Time" : "Reps", last?.amount ?? 10, 1, minutes ? "min" : "reps")}
+      </div>
+      <p class="error" id="set-error" role="alert"></p>
+      <button type="submit" class="primary">Finish set</button>
+    </form>
+    ${visit()}`;
+  world.relayout();
 }
 
 function draw() {
-  drawFloor();
+  drawWorld();
   drawPanel();
   $("#pass-button").hidden = !me;
 }
@@ -240,10 +223,10 @@ function door(view, message = "") {
   const colours = floor?.colours ?? [];
   if (view === "new") {
     box.innerHTML = `<h1 id="door-title">Walk into the gym</h1>
-      <p class="lede">A small shared floor. Train on your own, alongside whoever else is in.</p>
+      <p class="lede">A shared gym floor. Train on your own, alongside whoever else is in.</p>
       <form id="join-form">
-        <label class="field"><span>Your name on the floor</span><input name="name" maxlength="24" autocomplete="nickname" required /></label>
-        <fieldset class="swatches"><legend>Your colour</legend>${colours
+        <label class="field"><span>Your name in the gym</span><input name="name" maxlength="24" autocomplete="nickname" required /></label>
+        <fieldset class="swatches"><legend>Your shirt</legend>${colours
           .map((c, i) => `<label style="--c:${c}"><input type="radio" name="colour" value="${c}"${i === 0 ? " checked" : ""} /><span class="sr">${c}</span></label>`)
           .join("")}</fieldset>
         <p class="error" role="alert">${esc(message)}</p>
@@ -281,11 +264,20 @@ async function refresh(next) {
   draw();
 }
 
+async function choose(exercise) {
+  await act(async () => {
+    await refresh(await api("/api/activity", { exercise }));
+    picking = false;
+    drawPanel();
+    world.focus(me.user.id);
+  });
+}
+
 function forget(ask = true) {
   if (ask && me && !confirm(`Forget ${me.user.name} on this device? You'll need the gym pass ${me.pass} to come back as them.`)) return;
   pass = null;
   me = null;
-  openStation = null;
+  picking = false;
   showPass = false;
   storePass(null);
   draw();
@@ -305,15 +297,8 @@ async function act(fn) {
 
 document.addEventListener("click", (e) => {
   const t = e.target.closest("button");
-  if (!t) return;
+  if (!t || t.classList.contains("hotspot")) return;
 
-  if (t.classList.contains("zone-hit")) {
-    if (!me || me.presence.state === "away") return;
-    openStation = t.closest(".zone").dataset.station;
-    draw();
-    if (matchMedia("(max-width: 760px)").matches) $("#panel").scrollIntoView({ behavior: "smooth", block: "start" });
-    return;
-  }
   if (t.dataset.door) return door(t.dataset.door);
   if (t.dataset.step) {
     const input = t.closest(".stepper").querySelector("input");
@@ -321,16 +306,19 @@ document.addEventListener("click", (e) => {
     input.value = String(Math.max(0, Math.round((v + Number(t.dataset.by)) * 100) / 100));
     return;
   }
-  if (t.dataset.exercise) return act(async () => refresh(await api("/api/activity", { exercise: t.dataset.exercise })));
+  if (t.dataset.exercise) return choose(t.dataset.exercise);
   if (t.id === "pass-button") {
     showPass = true;
     return drawPanel();
   }
 
   switch (t.dataset.act) {
+    case "pick":
+      picking = true;
+      return drawPanel();
     case "close":
-      openStation = null;
-      return draw();
+      picking = false;
+      return drawPanel();
     case "hide-pass":
       showPass = false;
       return drawPanel();
@@ -341,13 +329,14 @@ document.addEventListener("click", (e) => {
     case "leave":
       return act(async () => {
         await refresh(await api("/api/leave", {}));
-        openStation = null;
+        picking = false;
         door("welcome");
       });
     case "enter":
       return act(async () => {
         await refresh(await api("/api/enter", {}));
         closeDoor();
+        world.focus(me.user.id);
       });
   }
 });
@@ -365,6 +354,7 @@ document.addEventListener("submit", (e) => {
       showPass = true;
       await refresh(out);
       closeDoor();
+      world.focus(me.user.id);
     });
   }
   if (form.id === "pass-form") {
@@ -381,15 +371,17 @@ document.addEventListener("submit", (e) => {
       storePass(pass);
       await refresh();
       if (me.presence.state === "away") door("welcome");
-      else closeDoor();
+      else {
+        closeDoor();
+        world.focus(me.user.id, { instant: true });
+      }
     });
   }
   if (form.id === "set-form") {
     return act(async () => {
-      const exercise = me.presence.exercise;
       await refresh(
         await api("/api/sets", {
-          exercise,
+          exercise: me.presence.exercise,
           weightKg: data.weightKg?.trim(),
           amount: Number(data.amount),
         }),
@@ -419,11 +411,13 @@ async function arrive() {
       if (err.status === 401) storePass((pass = null));
     }
   }
-  // back mid-workout: straight onto the floor, where you were
-  if (me && me.presence.state !== "away") openStation = stationOf(me.presence.exercise)?.id ?? null;
   draw();
-  if (!me) door("new");
-  else if (me.presence.state === "away") door("welcome");
+  // back mid-workout: straight into the gym, where you were
+  if (inGym()) world.focus(me.user.id, { instant: true });
+  else {
+    world.focusDoor();
+    door(me ? "welcome" : "new");
+  }
 }
 
 arrive();

@@ -12,15 +12,19 @@ interface Station {
   exercises: string[];
 }
 
-// The floor. Every exercise belongs to one station, and that's where its
-// lifter stands, resting between sets included, as in a real gym. Someone who
-// has walked in but not chosen anything yet waits in the rest area.
+// The equipment people can use. Every exercise belongs to one station, and
+// that's where its lifter is, resting between sets included, as in a real gym.
+// Only exercises the gym can show someone doing are here; the client draws the
+// machines and animations for each station id. Someone who has walked in but
+// not chosen anything yet waits in the lobby.
 export const STATIONS: Station[] = [
-  { id: "pull", name: "Cable Stack", measure: "reps", weighted: true, exercises: ["Lat Pulldown", "Seated Cable Row", "Face Pull"] },
-  { id: "chest", name: "Bench", measure: "reps", weighted: true, exercises: ["Bench Press", "Chest Press", "Push-up"] },
-  { id: "legs", name: "Squat Rack", measure: "reps", weighted: true, exercises: ["Squat", "Leg Press", "Romanian Deadlift"] },
-  { id: "cardio", name: "Cardio", measure: "min", weighted: false, exercises: ["Treadmill", "Bike", "Rower"] },
-  { id: "rest", name: "Stretch & Rest", measure: "min", weighted: false, exercises: ["Stretching", "Foam Rolling"] },
+  { id: "bench", name: "Bench", measure: "reps", weighted: true, exercises: ["Bench Press"] },
+  { id: "rack", name: "Squat Rack", measure: "reps", weighted: true, exercises: ["Squat"] },
+  { id: "pulldown", name: "Lat Pulldown", measure: "reps", weighted: true, exercises: ["Lat Pulldown"] },
+  { id: "dumbbells", name: "Free Weights", measure: "reps", weighted: true, exercises: ["Dumbbell Curl"] },
+  { id: "treadmill", name: "Treadmills", measure: "min", weighted: false, exercises: ["Treadmill"] },
+  { id: "bike", name: "Bikes", measure: "min", weighted: false, exercises: ["Bike"] },
+  { id: "mats", name: "Stretch Mats", measure: "min", weighted: false, exercises: ["Stretching"] },
 ];
 
 const stationOf = new Map(STATIONS.flatMap((s) => s.exercises.map((e) => [e, s] as const)));
@@ -248,7 +252,7 @@ export function createGym(db: DatabaseSync) {
           colour: r.colour,
           state: r.state,
           exercise: r.exercise,
-          station: (r.exercise && stationOf.get(r.exercise)?.id) || "rest",
+          station: (r.exercise && stationOf.get(r.exercise)?.id) || null,
           since: r.since,
         })),
       };

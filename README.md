@@ -2,14 +2,20 @@
 
 > A good virtual gym should make individual training feel shared without turning exercise into a meeting, competition, or social feed.
 
-Same Gym is a small shared gym floor on the web. You walk in under a name and a
-colour, then train at one of five areas: the cable stack, the bench, the squat rack,
-cardio, or stretch and rest. Your dot stands at that station with what you're doing
-on its label, for example "Lat Pulldown · Resting 01:20". Anyone else who is in
-stands at their own station in the same room. Empty places to stand are drawn as open
-spots, because the room is meant to hold several people.
+Same Gym is a persistent pixel-art gym on the web, where what you actually do in
+your workout controls what your character is doing. You walk in through the front
+door as a small pixel person with a name and a shirt colour. The room is larger than
+your screen: cardio by the windows, a machines row, free weights in front of the
+mirror, benches, squat racks on wooden platforms, a stretching and recovery corner,
+and a lobby with lockers. Tap the bench and your character walks over, lies down and
+starts pressing. Finish a set and they stand up beside it with a towel and a water
+bottle while your rest timer runs. Tap the lat pulldown and they walk across the gym,
+sit down and start pulling.
 
-![The gym floor on desktop, seeded locally with test people at the cable stack, bench and squat rack, and open spots at every station](docs/floor.png)
+Anyone else who is in is in the same room, doing their own thing on their own
+machine.
+
+![The gym on desktop: people on the bench, the squat rack and the lat pulldown, and you resting beside a bench, with the set panel in the corner](docs/gym.png)
 
 ## Who it's for
 
@@ -24,53 +30,76 @@ Most fitness apps record what you did. A real gym also lets you feel who is trai
 alongside you: the person on the next bench, someone resting between sets, and
 nobody making it a conversation. Social fitness apps add feeds, kudos, leaderboards
 or video calls, which turn exercise into something to perform or attend. Same Gym
-keeps only presence.
+keeps only presence: a place, and people visibly doing things in it.
 
 ## What good means here
 
-1. **The room comes first.** Other people are shown on the floor, where they're
-   training, not in a list beside it. You can see that someone is there and what
-   they're doing, and nothing more is asked of you.
-2. **Logging is something you do in the room.** Tap a station, choose the exercise,
-   finish the set. Your last weight and reps for that exercise are already filled
-   in, and your dot moves to where you're training.
+1. **The gym is the interface.** The room fills the screen. Logging a set happens
+   in a small panel over it, because the panel is only a way to act in the room.
+   Other people appear in the room, on the machine they're using, never in a list
+   beside it.
+2. **What you do is what your character does.** Choosing an exercise moves you to
+   its equipment and starts its animation: pressing on the bench, squatting in the
+   rack, pulling at the pulldown, curling at the free weights, running on a
+   treadmill, pedalling a bike, stretching on a mat. Finishing a set puts you in a
+   resting pose beside the machine. A label changing on its own isn't enough.
 3. **Your trace is still there.** Refresh, close the browser, or come back tomorrow
-   on another device with your gym pass, and you're still you, standing where you
-   were, with your sets. Rest timers run from the server's clock, so they keep
-   counting while you're away.
+   on another device with your gym pass. You're still you, back on the same machine
+   in the same state, with your sets. Rest timers run from the server's clock, so they
+   keep counting while you're away.
 4. **Nobody is ranked.** Other people see your exercise and whether you're training
    or resting. They never see your weights or reps, and there are no scores, streaks
    or public history. Your numbers are shown only to you.
-5. **It works on a phone.** Phones are what people carry around a gym, so on a phone
-   the floor becomes a two-column map, and the logging panel sits underneath at full
-   size.
+5. **It works on a phone.** On a phone the gym isn't shrunk to fit. The screen
+   becomes a camera onto the same room: you pan around it, it follows you when you
+   walk, and the set panel slides up from the bottom.
+
+![The same gym on a phone: a closer view of the bench area with the set panel below](docs/gym-phone.png)
 
 ## Why not a workout tracker
 
-A tracker's main view is your history. Here the main view is the present: who is in,
-where they're standing, and who is between sets. Your history is kept to bring you
-back to your spot, not to be charted or shown off.
+A tracker visualises your history. This is a place: the main view is the room in
+the present, showing who is in, where they're standing and who is between sets.
+Your sets are stored so the gym can put you back where you were and fill in your
+last weight, not to be charted or shown off.
 
 ## What I deliberately didn't build
 
 No feeds, comments, direct messages, followers, rankings or achievements. No voice or
-video. No AI coaching, workout plans, charts or nutrition tracking. No password
-accounts: a name, a colour and a gym pass are enough to tell people apart.
+video. No AI coaching, workout plans, charts or nutrition tracking. No character
+creator: one pixel body in your chosen shirt colour. No free-roaming movement yet:
+you walk where your workout takes you. No password accounts: a name, a colour and a
+gym pass are enough to tell people apart.
 
 ## Enforced and judged
 
-Enforced by `spec/`: identity and sets survive across requests, and a pass
-recovers the same person; same-name people stay distinct; bad set data is rejected
-with nothing saved; the public floor never shows a pass, weights or reps; at
-1920×1080 and 390×844, labels stay inside their zones and logging stays usable.
+Enforced by `spec/`:
+- Identity and sets survive across requests, and a pass recovers the same person.
+- A real browser that joins and reloads is still the same person, with only the
+  pass stored locally.
+- Bad set data is rejected and nothing is saved.
+- The public floor never shows a pass, weights or reps.
+- At 1920×1080 and 390×844, the gym is larger than the screen and drawn with crisp
+  pixels, and isn't shrunk below 2× scale.
+- Tapping the lat pulldown walks you there, and the camera follows you.
+- The machine you're on visibly animates.
+- Finishing a set leaves you resting beside it.
+- Neighbours' name tags don't overlap, and logging stays usable.
+
 Judged by people: whether the room feels shared, and whether logging feels light.
 
 ## Where it is now
 
-This is the first version. Other people appear on the floor when you load the page,
-not live as they move. Making the floor update in real time is the next step.
+This is the crit 8 version. Everything you do is saved on the server, and other
+people appear in the room as they were when your page last loaded or you last did
+something. They don't yet move live while you watch. Making the room update in real
+time, so you see someone walk to the rack while you rest, is the next step.
 
 ## What I read or looked at
 
-_To write: the sources that shaped this definition of good. The brief points at the
-small web, games for a handful of friends and tools built for one workshop._
+Gather's virtual offices were the reference for spatial scale and the feeling of
+sharing one room. I used none of its art, maps or code: every sprite here is drawn
+from code in `public/sprites.js`.
+
+_To write: the other sources that shaped this definition of good. The brief points
+at the small web, games for a handful of friends and tools built for one workshop._

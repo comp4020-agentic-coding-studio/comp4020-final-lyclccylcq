@@ -76,7 +76,7 @@ describe("sets", () => {
 
     const { data: floor } = await call("/api/floor");
     expect(floor.people.find((p: { id: string }) => p.id === user.id)).toMatchObject({
-      station: "pull",
+      station: "pulldown",
       state: "resting",
       exercise: "Lat Pulldown",
     });
@@ -131,7 +131,19 @@ describe("privacy on the floor", () => {
 });
 
 describe("the page", () => {
-  it("carries every station of the floor before any script runs", async () => {
+  it("someone who has walked in but chosen nothing stands at no station", async () => {
+    const { user } = await newPerson();
+    const { data: floor } = await call("/api/floor");
+    expect(floor.people.find((p: { id: string }) => p.id === user.id)).toMatchObject({ state: "idle", station: null });
+  });
+
+  it("every exercise belongs to exactly one station", async () => {
+    const { data: floor } = await call("/api/floor");
+    const all = (floor.stations as { exercises: string[] }[]).flatMap((s) => s.exercises);
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  it("carries every station of the gym before any script runs", async () => {
     const { data: floor } = await call("/api/floor");
     const res = await fetch(new URL("/", baseUrl));
     const doc = new JSDOM(await res.text()).window.document;
