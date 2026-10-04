@@ -92,10 +92,14 @@ async function api(req: IncomingMessage, res: ServerResponse, route: string): Pr
       return json(res, 200, gym.me(user.id));
     case "POST /api/enter":
       return json(res, 200, gym.enter(user.id));
-    case "POST /api/activity":
-      return json(res, 200, gym.choose(user.id, (await body(req)).exercise));
-    case "POST /api/sets":
-      return json(res, 201, gym.logSet(user.id, await body(req)));
+    case "POST /api/start":
+      return json(res, 200, gym.start(user.id, await body(req)));
+    case "POST /api/finish":
+      return json(res, 201, gym.finish(user.id));
+    case "POST /api/cancel":
+      return json(res, 200, gym.cancel(user.id));
+    case "POST /api/step-off":
+      return json(res, 200, gym.stepOff(user.id));
     case "POST /api/leave":
       return json(res, 200, gym.leave(user.id));
   }

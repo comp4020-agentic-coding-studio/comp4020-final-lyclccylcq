@@ -1,88 +1,108 @@
-// The gym as a place: its layout, who is standing where, and the camera.
+// The gym as a place: its layout, who is on which machine, and the camera.
 //
-// The server says what each person is doing (an exercise, training or
-// resting). Everything visual follows from that here: which machine they're
-// on, the route they walk to get there, and which animation plays. Nothing
-// about position or frames is stored; reloading derives the same picture.
+// The server says what each person is doing: which machine, which exercise,
+// and whether they're mid-set, resting or not on anything. Everything visual
+// follows from that here: where they stand, the route they walk, which
+// animation plays. Nothing about position or frames is stored; reloading
+// derives the same picture.
 
-import { DECOR, KINDS, PERSON, T, decorSprite, paintAisleEdges, paintFloor, paintText, paintWalls, personSprite, stationSprite } from "./sprites.js";
+import { DECOR, KINDS, PERSON, T, decorSprite, paintAisleEdges, paintFloor, paintLight, paintText, paintWalls, personSprite, stationSprite } from "./sprites.js";
 
-export const W = 60;
-export const H = 38;
-const DOOR = { x: 5, w: 3 };
-const SPAWN = [6, H - 2];
+export const W = 72;
+export const H = 46;
+const DOOR = { x: 6, w: 3 };
+const SPAWN = [7, H - 2];
 
 const ZONES = [
-  { name: "CARDIO", floor: "cardio", x: 1, y: 3, w: 20, h: 10 },
-  { name: "MACHINES", floor: "machines", x: 21, y: 3, w: 19, h: 10 },
-  { name: "FREE WEIGHTS", floor: "free", x: 40, y: 3, w: 19, h: 10 },
-  { floor: "aisle", x: 1, y: 13, w: 58, h: 2, edges: true },
-  { name: "LOBBY", floor: "lobby", x: 1, y: 15, w: 12, h: 22 },
-  { floor: "aisle", x: 13, y: 15, w: 1, h: 22, edges: true },
-  { name: "BENCH", floor: "bench", x: 14, y: 15, w: 21, h: 11 },
-  { name: "SQUAT RACKS", floor: "legs", x: 35, y: 15, w: 24, h: 11 },
-  { floor: "aisle", x: 14, y: 26, w: 45, h: 2, edges: true },
-  { name: "STRETCH & RECOVERY", floor: "recovery", x: 14, y: 28, w: 45, h: 9 },
-  { floor: "wood", x: 36, y: 16, w: 5, h: 5 },
-  { floor: "wood", x: 42, y: 16, w: 5, h: 5 },
-  { floor: "wood", x: 48, y: 17, w: 6, h: 4 },
+  { name: "CARDIO", floor: "cardio", x: 1, y: 3, w: 24, h: 12 },
+  { name: "BACK & ARMS", floor: "machines", x: 25, y: 3, w: 24, h: 12 },
+  { name: "FREE WEIGHTS", floor: "free", x: 49, y: 3, w: 22, h: 12 },
+  { floor: "aisle", x: 1, y: 15, w: 70, h: 2, edges: true },
+  { name: "RECEPTION", floor: "lobby", x: 1, y: 17, w: 14, h: 28 },
+  { floor: "entry", x: 5, y: 40, w: 5, h: 5 },
+  { floor: "aisle", x: 15, y: 17, w: 1, h: 28, edges: true },
+  { name: "CHEST", floor: "bench", x: 16, y: 17, w: 23, h: 12 },
+  { name: "LEGS", floor: "legs", x: 39, y: 17, w: 32, h: 12 },
+  { floor: "wood", x: 40, y: 18, w: 5, h: 5 },
+  { floor: "wood", x: 46, y: 18, w: 5, h: 5 },
+  { floor: "aisle", x: 16, y: 29, w: 55, h: 2, edges: true },
+  { name: "STRETCH", floor: "recovery", x: 16, y: 31, w: 29, h: 14 },
+  { name: "WATER & REST", floor: "lounge", x: 45, y: 31, w: 26, h: 14 },
 ];
 
 const WALL = [
   { kind: "window", x: 2, w: 5 },
-  { kind: "window", x: 8, w: 5 },
-  { kind: "window", x: 14, w: 5 },
-  { kind: "poster", x: 23, w: 2, colour: "#e2574c" },
-  { kind: "clock", x: 29, w: 1 },
-  { kind: "poster", x: 36, w: 2, colour: "#3fa7a0" },
-  { kind: "mirror", x: 40, w: 19 },
+  { kind: "tv", x: 8, w: 3 },
+  { kind: "window", x: 12, w: 5 },
+  { kind: "window", x: 18, w: 5 },
+  { kind: "poster", x: 26, w: 2, colour: "#e2574c" },
+  { kind: "clock", x: 33, w: 1 },
+  { kind: "poster", x: 39, w: 2, colour: "#3fa7a0" },
+  { kind: "poster", x: 45, w: 2, colour: "#f1c13b" },
+  { kind: "mirror", x: 49, w: 22 },
 ];
+const LIGHT = [[2, 5], [12, 5], [18, 5]];
+
+// Where each machine stands: the top-left tile of its footprint, in the
+// order of the server's machines (bench A, bench B, …).
+const MACHINES_AT = {
+  treadmill: [[2, 5], [6, 5], [10, 5], [14, 5]],
+  bike: [[3, 10], [7, 10], [11, 10]],
+  rower: [[15, 11], [20, 11]],
+  pulldown: [[26, 5], [30, 5]],
+  row: [[34, 5]],
+  pullup: [[38, 5]],
+  shoulder: [[42, 5]],
+  preacher: [[45, 5]],
+  cable: [[26, 10], [32, 10]],
+  dumbbells: [[53, 8], [58, 8], [63, 8]],
+  dbbench: [[51, 11], [57, 11]],
+  bench: [[17, 19], [22, 19], [27, 19]],
+  incline: [[17, 24], [22, 24]],
+  rack: [[41, 19], [47, 19]],
+  legpress: [[53, 19], [58, 19]],
+  legcurl: [[63, 19]],
+  legext: [[67, 19]],
+  mats: [[19, 34], [25, 34], [19, 39], [25, 39]],
+};
 
 // Furniture: [kind, tile x, tile y] of each footprint's top-left.
 const FURNITURE = [
-  ["rower", 3, 10], ["rower", 8, 10], ["elliptical", 14, 9], ["elliptical", 17, 9],
-  ["cableCrossover", 30, 5], ["seatedRow", 36, 5],
-  ["legPress", 22, 9], ["legExtension", 27, 9], ["chestPress", 31, 9], ["legExtension", 35, 9],
-  ["dumbbellRack", 41, 5], ["dumbbellRack", 50, 5], ["kettlebells", 46, 11], ["flatBench", 52, 11],
-  ["inclineBench", 31, 18], ["plateTree", 15, 23], ["flatBench", 17, 23], ["plateTree", 21, 23],
-  ["kettlebells", 23, 23], ["barbell", 28, 23],
-  ["barbell", 49, 18], ["plateTree", 55, 17], ["plateTree", 55, 21], ["plateTree", 41, 23],
-  ["barbell", 36, 23], ["dumbbellRack", 46, 23],
-  ["rollers", 37, 29], ["ball", 33, 30], ["ball", 34, 32], ["ball", 32, 34], ["rollers", 37, 33],
-  ["cooler", 43, 29], ["cooler", 44, 29], ["plant", 46, 29], ["bench", 42, 34],
-  ["vending", 53, 29], ["sofa", 48, 33], ["plant", 57, 29], ["plant", 57, 34], ["plant", 14, 35],
-  ...[17, 19, 21, 23, 25, 27].map((y) => ["lockers", 1, y]),
-  ["desk", 7, 31], ["cooler", 11, 16], ["bench", 5, 22], ["bench", 8, 28], ["plant", 11, 22], ["plant", 1, 34],
+  ["towels", 19, 5], ["bin", 22, 6], ["plant", 23, 5],
+  ["kettlebells", 38, 11], ["plateTree", 43, 11], ["towels", 45, 11],
+  ["dumbbellRack", 50, 5], ["dumbbellRack", 60, 5], ["kettlebells", 63, 12], ["bin", 68, 12],
+  ["barRack", 32, 19], ["plateTree", 36, 19], ["plateTree", 36, 24], ["plateRack", 28, 25], ["bin", 37, 27],
+  ["plateTree", 41, 25], ["plateTree", 47, 25], ["barbell", 53, 25], ["plateRack", 59, 25], ["kettlebells", 63, 25], ["bin", 69, 27],
+  ["rollers", 31, 33], ["ball", 36, 33], ["ball", 37, 36], ["rollers", 31, 39], ["towels", 40, 33], ["plant", 43, 43], ["bin", 41, 39],
+  ["water", 60, 32], ["bin", 64, 33], ["sofa", 55, 33], ["vending", 66, 32], ["plant", 69, 36],
+  ["bench", 48, 38], ["bench", 56, 38], ["plant", 62, 41], ["towels", 64, 38],
+  ...[18, 20, 22, 24, 26, 28, 30].map((y) => ["lockers", 1, y]),
+  ["bench", 4, 25], ["towels", 11, 18], ["plant", 13, 18], ["sofa", 6, 21], ["plant", 11, 21], ["bin", 13, 30],
+  ["counter", 6, 34], ["stool", 9, 32], ["kiosk", 12, 38],
+  ["turnstile", 5, 39], ["turnstile", 9, 39], ["plant", 2, 42], ["plant", 12, 42],
 ];
 
-// Where each station's exercise is done: the top-left tile of each machine,
-// or of each spot on the rubber. A station's id matches the server's.
-const STATION_SLOTS = {
-  treadmill: { kind: "treadmill", at: [[2, 5], [6, 5], [10, 5]] },
-  bike: { kind: "bike", at: [[14, 5], [18, 5]] },
-  pulldown: { kind: "pulldown", at: [[22, 5], [26, 5]] },
-  dumbbells: { kind: "dumbbells", at: [[44, 8], [49, 8], [54, 8]] },
-  bench: { kind: "bench", at: [[16, 18], [21, 18], [26, 18]] },
-  rack: { kind: "rack", at: [[37, 18], [43, 18]] },
-  mats: { kind: "mats", at: [[18, 31], [23, 31], [28, 31]] },
-};
-
-// Where you stand when you've walked in but not picked anything yet.
-const LOBBY_SPOTS = [[5, 18], [9, 18], [5, 26], [9, 26]];
+// Where you wait when you're in the gym but not on a machine: by the water.
+const LOUNGE = [[49, 35], [53, 36], [57, 36], [61, 35], [51, 41], [55, 41], [60, 40], [64, 36]];
 
 // ---- derived geometry ----
 
+const LETTERS = "abcdefgh";
 const feet = ([tx, ty]) => ({ x: tx * T + 8, y: ty * T + 13 });
 
-const slots = {};
-for (const [station, { kind, at }] of Object.entries(STATION_SLOTS)) {
+export const STATIONS = Object.entries(MACHINES_AT).flatMap(([kind, list]) => {
   const k = KINDS[kind];
-  slots[station] = at.map(([tx, ty], i) => {
+  return list.map(([tx, ty], i) => {
     const stand = k.inPlace ? [tx, ty] : [tx + Math.floor(k.fw / 2), ty + k.fh];
     const anchor = k.inPlace ? { x: feet(stand).x, y: feet(stand).y + 1 } : { x: tx * T + (k.fw * T) / 2, y: (ty + k.fh) * T - 1 };
-    return { key: `${station}:${i}`, station, kind, tx, ty, stand, anchor };
+    // the part of the world you click: the machine and the spot in front of it
+    const box = k.inPlace
+      ? { x: tx - 1, y: ty - 1, w: k.fw + 1, h: 2 }
+      : { x: tx, y: ty - Math.ceil((k.h - 2 - k.fh * T) / T), w: k.fw, h: k.fh + Math.ceil((k.h - 2 - k.fh * T) / T) };
+    return { id: `${kind}-${LETTERS[i]}`, kind, tx, ty, stand, anchor, box };
   });
-}
+});
+const stationById = new Map(STATIONS.map((s) => [s.id, s]));
 
 const blocked = new Uint8Array(W * H);
 const block = (tx, ty, w, h) => {
@@ -92,12 +112,12 @@ block(0, 0, W, 3);
 block(0, 0, 1, H);
 block(W - 1, 0, 1, H);
 block(0, H - 1, W, 1);
-for (const [kind, x, y] of FURNITURE) block(x, y, DECOR[kind].fw, DECOR[kind].fh);
-for (const list of Object.values(slots)) for (const s of list) if (!KINDS[s.kind].inPlace) block(s.tx, s.ty, KINDS[s.kind].fw, KINDS[s.kind].fh);
+for (const [kind, x, y] of FURNITURE) if (!DECOR[kind].walk) block(x, y, DECOR[kind].fw, DECOR[kind].fh);
+for (const s of STATIONS) if (!KINDS[s.kind].inPlace) block(s.tx, s.ty, KINDS[s.kind].fw, KINDS[s.kind].fh);
 
 // Breadth-first over the tile grid, then only the corners are kept, so people
 // walk the aisles in straight lines and turn where the floor turns.
-function route(from, to) {
+export function route(from, to) {
   const start = from[1] * W + from[0];
   const goal = to[1] * W + to[0];
   const prev = new Int32Array(W * H).fill(-1);
@@ -126,6 +146,9 @@ function route(from, to) {
   });
 }
 
+// for the layout check in spec/
+export const LAYOUT = { FURNITURE, LOUNGE, SPAWN, blocked };
+
 const tileOf = (e) => [Math.round((e.x - 8) / T), Math.round((e.y - 13) / T)];
 
 const hashId = (id) => {
@@ -136,7 +159,7 @@ const hashId = (id) => {
 
 // ---- the world ----
 
-export function createWorld({ scroller, sizer, world, canvas, layer, panel, onStation }) {
+export function createWorld({ scroller, sizer, world, canvas, layer, panel, onMachine }) {
   const g = canvas.getContext("2d");
   canvas.width = W * T;
   canvas.height = H * T;
@@ -149,10 +172,25 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onSt
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   const narrow = matchMedia("(max-width: 760px)");
   let S = 3;
-  let seen = false; // first setPeople places people; later arrivals walk in
+  let seen = false; // the first setPeople places people; later arrivals walk in
   let meId = null;
   let follow = null;
+  let poseOf = () => "";
   const entities = new Map();
+
+  // One button per machine, over the machine itself.
+  const hotspots = new Map();
+  const spots = world.querySelector(".hotspots");
+  for (const s of STATIONS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "hotspot is-free";
+    b.dataset.machine = s.id;
+    b.dataset.kind = s.kind;
+    b.innerHTML = `<span></span>`;
+    spots.append(b);
+    hotspots.set(s.id, b);
+  }
 
   // ---- scale and layout ----
 
@@ -162,25 +200,12 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onSt
     world.style.width = `${W * T * S}px`;
     world.style.height = `${H * T * S}px`;
     world.style.setProperty("--s", S);
-    for (const btn of world.querySelectorAll(".hotspot")) {
-      const list = slots[btn.dataset.station];
-      if (!list) {
-        btn.hidden = true;
-        continue;
-      }
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const s of list) {
-        const k = KINDS[s.kind];
-        x0 = Math.min(x0, s.tx);
-        y0 = Math.min(y0, s.ty - (k.inPlace ? 1 : 0));
-        x1 = Math.max(x1, s.tx + k.fw);
-        y1 = Math.max(y1, s.stand[1] + 1);
-      }
-      Object.assign(btn.style, {
-        left: `${x0 * T * S}px`,
-        top: `${y0 * T * S}px`,
-        width: `${(x1 - x0) * T * S}px`,
-        height: `${(y1 - y0) * T * S}px`,
+    for (const s of STATIONS) {
+      Object.assign(hotspots.get(s.id).style, {
+        left: `${s.box.x * T * S}px`,
+        top: `${s.box.y * T * S}px`,
+        width: `${s.box.w * T * S}px`,
+        height: `${s.box.h * T * S}px`,
       });
     }
     pad();
@@ -200,44 +225,42 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onSt
 
   // ---- people ----
 
-  function targetsFor(people) {
+  // Where each person stands. A machine is held by whoever is training or
+  // resting on it; anyone else waits in the lounge by the water.
+  function placesFor(people) {
     const out = new Map();
-    const byStation = new Map();
+    const held = new Map();
     for (const p of people) {
-      const key = p.station && slots[p.station] ? p.station : null;
-      if (!byStation.has(key)) byStation.set(key, []);
-      byStation.get(key).push(p);
-    }
-    for (const [station, group] of byStation) {
-      const spots = station ? slots[station] : LOBBY_SPOTS.map((t, i) => ({ key: `lobby:${i}`, stand: t }));
-      const taken = new Array(spots.length).fill(false);
-      const waiting = [];
-      // whoever already has a spot here keeps it, so nobody is bumped
-      for (const p of group) {
-        const i = spots.findIndex((s) => s.key === entities.get(p.id)?.slot?.key);
-        if (i >= 0 && !taken[i]) {
-          taken[i] = true;
-          out.set(p.id, spots[i]);
-        } else waiting.push(p);
-      }
-      waiting.sort((a, b) => (a.id < b.id ? -1 : 1));
-      let overflow = 0;
-      for (const p of waiting) {
-        const start = hashId(p.id) % spots.length;
-        const free = spots.findIndex((_, k) => !taken[(start + k) % spots.length]);
-        if (free >= 0) {
-          const i = (start + free) % spots.length;
-          taken[i] = true;
-          out.set(p.id, spots[i]);
-        } else {
-          // more people than machines: wait in line beside the station
-          const s = spots[overflow % spots.length];
-          const stand = [s.stand[0] + 1 + Math.floor(overflow / spots.length), s.stand[1]];
-          out.set(p.id, { key: `${s.key}:wait${overflow++}`, stand, waiting: true });
-        }
+      if (p.machine && stationById.has(p.machine) && (p.state === "training" || p.state === "resting") && !held.has(p.machine)) {
+        held.set(p.machine, p.id);
       }
     }
-    return out;
+    const loungers = [];
+    for (const p of people) {
+      const s = p.machine && stationById.get(p.machine);
+      if (s && (!held.has(s.id) || held.get(s.id) === p.id)) out.set(p.id, { key: s.id, stand: s.stand, station: s });
+      else loungers.push(p);
+    }
+    const taken = new Set([...entities.values()].filter((e) => e.place?.key.startsWith("lounge") && loungers.some((p) => p.id === e.id)).map((e) => e.place.key));
+    let extra = 0;
+    for (const p of loungers.sort((a, b) => (a.id < b.id ? -1 : 1))) {
+      const mine = entities.get(p.id)?.place;
+      if (mine?.key.startsWith("lounge") && taken.has(mine.key)) {
+        out.set(p.id, mine);
+        continue;
+      }
+      const start = hashId(p.id) % LOUNGE.length;
+      const i = LOUNGE.findIndex((_, k) => !taken.has(`lounge:${(start + k) % LOUNGE.length}`));
+      if (i >= 0) {
+        const n = (start + i) % LOUNGE.length;
+        taken.add(`lounge:${n}`);
+        out.set(p.id, { key: `lounge:${n}`, stand: LOUNGE[n] });
+      } else {
+        const [x, y] = LOUNGE[extra % LOUNGE.length];
+        out.set(p.id, { key: `lounge:x${extra}`, stand: [x + 1, y + 1 + Math.floor(extra++ / LOUNGE.length)] });
+      }
+    }
+    return { out, held };
   }
 
   function walkTo(e, tile) {
@@ -252,29 +275,32 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onSt
     e.speed = Math.max(90, total / 2.2); // never more than ~2 s to cross the gym
   }
 
-  // people: the public floor; label(p) gives each person's name tag.
-  function setPeople(people, me, label) {
+  // people: the public floor. label(p) gives each person's name tag;
+  // pose(exercise) the movement their exercise animates.
+  function setPeople(people, me, label, pose) {
     meId = me;
-    const targets = targetsFor(people);
+    poseOf = pose;
+    const { out, held } = placesFor(people);
     const present = new Set();
     for (const p of people) {
       present.add(p.id);
-      const slot = targets.get(p.id);
+      const place = out.get(p.id);
       let e = entities.get(p.id);
       if (!e) {
-        const at = feet(seen ? SPAWN : slot.stand);
+        const at = feet(seen ? SPAWN : place.stand);
         e = { id: p.id, ...at, path: [], phase: hashId(p.id) % 1000, facing: "down", el: document.createElement("div") };
         e.el.className = "person";
         layer.append(e.el);
         entities.set(p.id, e);
-        if (seen) walkTo(e, slot.stand);
-      } else if (e.leaving || e.slot?.key !== slot.key) {
-        walkTo(e, slot.stand);
+        if (seen) walkTo(e, place.stand);
+      } else if (e.leaving || e.place?.key !== place.key) {
+        walkTo(e, place.stand);
       }
-      Object.assign(e, { person: p, slot, leaving: false });
+      Object.assign(e, { person: p, place, leaving: false });
       e.el.classList.toggle("is-you", p.id === me);
       e.el.dataset.user = p.id;
-      e.el.dataset.station = p.station ?? "lobby";
+      e.el.dataset.machine = place.station?.id ?? "";
+      e.el.dataset.kind = place.station?.kind ?? "lounge";
       const html = label(p);
       if (html !== e.html) e.el.innerHTML = e.html = html;
     }
@@ -282,6 +308,12 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onSt
       if (present.has(e.id) || e.leaving) continue;
       e.leaving = true;
       walkTo(e, SPAWN);
+    }
+    for (const [id, b] of hotspots) {
+      const holder = held.get(id);
+      b.classList.toggle("is-free", !holder);
+      b.classList.toggle("is-busy", Boolean(holder) && holder !== me);
+      b.classList.toggle("is-mine", Boolean(holder) && holder === me);
     }
     seen = true;
   }
@@ -292,20 +324,19 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onSt
     if (e.path.length) return "walk";
     if (e.leaving) return "gone";
     const { state } = e.person;
-    if (state === "training" && e.slot.waiting) return "wait";
-    if (state === "training" && e.slot.kind) return "use";
-    if (state === "resting") return "rest";
+    if (state === "training" && e.place.station) return "use";
+    if (state === "resting" && e.place.station) return "rest";
     return "idle";
   }
 
   // ---- camera ----
 
-  // Keep someone in the middle of the part of the gym that isn't under the panel.
-  function aim(e) {
+  // Keep a point in the middle of the part of the gym that isn't under the panel.
+  function aim(p) {
     const r = panel.hidden ? null : panel.getBoundingClientRect();
     const vw = scroller.clientWidth - (r && !narrow.matches ? r.width + 32 : 0);
     const vh = scroller.clientHeight - (r && narrow.matches ? r.height : 0);
-    return { left: e.x * S - vw / 2, top: (e.y - 16) * S - vh / 2 };
+    return { left: p.x * S - vw / 2, top: (p.y - 16) * S - vh / 2 };
   }
 
   function focus(id, { instant = false } = {}) {
@@ -346,8 +377,8 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onSt
 
   world.addEventListener("click", (ev) => {
     if (performance.now() - dragEnded < 100) return;
-    const btn = ev.target.closest(".hotspot");
-    if (btn) onStation(btn.dataset.station);
+    const b = ev.target.closest(".hotspot");
+    if (b) onMachine(b.dataset.machine);
   });
 
   // ---- drawing ----
@@ -384,26 +415,23 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onSt
     g.drawImage(ground, 0, 0);
     const items = [];
     const users = new Map();
-    for (const e of entities.values()) if (modeOf(e) === "use") users.set(e.slot.key, e);
+    for (const e of entities.values()) if (modeOf(e) === "use") users.set(e.place.station.id, e);
     const tick = (ms, e) => (still ? 0 : Math.floor((now + (e?.phase ?? 0)) / ms) % 2);
 
-    for (const list of Object.values(slots)) {
-      for (const s of list) {
-        const k = KINDS[s.kind];
-        const user = users.get(s.key);
-        // a mat or rubber spot lies under whoever rests on it
-        items.push({ y: s.anchor.y - (k.inPlace ? 3 : 0), z: 0, img: stationSprite(s.kind, user?.person.colour ?? null, tick(k.ms, user)), x: s.anchor.x });
-      }
+    for (const s of STATIONS) {
+      const k = KINDS[s.kind];
+      const user = users.get(s.id);
+      const img = user ? stationSprite(s.kind, user.person.colour, tick(k.ms, user), poseOf(user.person.exercise)) : stationSprite(s.kind, null, 0);
+      // a mat or rubber spot lies under whoever rests on it
+      items.push({ y: s.anchor.y - (k.inPlace ? 3 : 0), z: 0, img, x: s.anchor.x });
     }
     for (const e of entities.values()) {
       const mode = modeOf(e);
       e.el.dataset.mode = mode;
       e.el.classList.toggle("is-walking", mode === "walk");
       let labelY = e.y - PERSON.label;
-      if (mode === "use") {
-        const k = KINDS[e.slot.kind];
-        labelY = e.slot.anchor.y - k.label;
-      } else {
+      if (mode === "use") labelY = e.place.station.anchor.y - KINDS[e.place.station.kind].label;
+      else {
         const pose = mode === "walk" ? `walk-${e.facing}` : mode === "rest" ? "rest" : "idle";
         const ms = mode === "walk" ? 160 : mode === "rest" ? 900 : 1600;
         let f = tick(ms, e);
@@ -444,7 +472,13 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onSt
     gg.fillRect(0, 0, W * T, H * T);
     for (const z of ZONES) paintFloor(gg, z.floor, z.x, z.y, z.w, z.h);
     for (const z of ZONES) if (z.edges) paintAisleEdges(gg, z.x, z.y, z.w, z.h);
+    for (const [x, w] of LIGHT) paintLight(gg, x, w, 7);
+    // cardio lanes between the treadmills
+    gg.fillStyle = "rgba(255, 255, 255, 0.08)";
+    for (const [x] of MACHINES_AT.treadmill.slice(1)) gg.fillRect(x * T - 9, 5 * T, 2, 3 * T);
     for (const z of ZONES) if (z.name) paintText(gg, z.name, z.x * T + 6, z.y * T + 4, z.floor === "lobby" ? "rgba(60,50,40,0.35)" : "rgba(255,255,255,0.22)");
+    // the gym's name on the reception floor
+    paintText(gg, "SAME GYM", 4 * T + 2, 28 * T, "rgba(255, 107, 74, 0.55)", 3);
     paintWalls(gg, W, H, WALL, DOOR);
     const sorted = [...FURNITURE].sort((a, b) => a[2] + DECOR[a[0]].fh - (b[2] + DECOR[b[0]].fh));
     for (const [kind, tx, ty] of sorted) {
@@ -460,6 +494,21 @@ export function createWorld({ scroller, sizer, world, canvas, layer, panel, onSt
   return {
     setPeople,
     focus,
+    focusMachine(id) {
+      const s = stationById.get(id);
+      if (!s) return;
+      follow = null;
+      scroller.scrollTo({ ...aim(feet(s.stand)), behavior: "smooth" });
+    },
+    select(id) {
+      for (const [mid, b] of hotspots) b.classList.toggle("is-selected", mid === id);
+    },
+    name(names) {
+      for (const [id, b] of hotspots) {
+        b.querySelector("span").textContent = names.get(id) ?? id;
+        b.setAttribute("aria-label", names.get(id) ?? id);
+      }
+    },
     focusDoor() {
       const { left, top } = aim(feet(SPAWN));
       scroller.scrollTo(left, top - 120);

@@ -24,17 +24,8 @@
         <div class="world-size" id="world-size">
           <div class="world" id="world">
             <canvas id="world-canvas" aria-hidden="true"></canvas>
-            <!-- The equipment is a fixed part of the room, so it's in the page
-                 itself; world.js places each over its machines. -->
-            <div class="hotspots">
-              <button type="button" class="hotspot" data-station="treadmill"><span>Treadmills</span></button>
-              <button type="button" class="hotspot" data-station="bike"><span>Bikes</span></button>
-              <button type="button" class="hotspot" data-station="pulldown"><span>Lat Pulldown</span></button>
-              <button type="button" class="hotspot" data-station="dumbbells"><span>Free Weights</span></button>
-              <button type="button" class="hotspot" data-station="bench"><span>Bench</span></button>
-              <button type="button" class="hotspot" data-station="rack"><span>Squat Rack</span></button>
-              <button type="button" class="hotspot" data-station="mats"><span>Stretch Mats</span></button>
-            </div>
+            <!-- world.js puts a button over every machine -->
+            <div class="hotspots"></div>
             <div class="people" id="people"></div>
           </div>
         </div>

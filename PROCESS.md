@@ -96,6 +96,40 @@ the words kept as HTML on top
   door, a change of exercise walks to the new machine, and someone leaving walks
   out, which is what crit 9's live feed needs.
 
+**Equipment and the set lifecycle.** My next prompt kept the direction but
+named three gaps: too few machines, a workout picked from a list instead of from
+the equipment, and only a Finish button, with no real start. It also asked for a
+visual polish pass, and said explicitly not to begin crit 9.
+
+- **Machines moved to the server.** The previous build let each browser pick a
+  free machine by hashing people's ids, so two browsers could disagree about who
+  was on bench A. `src/equipment.ts` now lists 18 kinds of equipment with their
+  exercises and poses, for 37 machines. The server records which machine each
+  person is on and refuses a second person. Positions and art stay in the
+  browser, matched by machine id. That's the occupancy model crit 9 needs.
+- **Start, finish, cancel.** `/api/activity` and `/api/sets` were replaced by
+  start, finish, cancel and step-off. Start stores the planned set and records
+  nothing; Finish records it and leaves you resting at the machine; Cancel records
+  nothing. Tapping a machine only opens its setup.
+- **A set nobody finishes.** I asked for an explicit decision about a browser
+  disappearing mid-set. A started set survives a reload, so you can finish it.
+  After ten minutes (plus its planned minutes, if timed) it expires unrecorded and
+  the machine is freed. A rest lets go of the machine after fifteen.
+- **The schema stayed additive.** Four columns were added to the presence table
+  when they're missing. Old rows of someone mid-exercise with no machine are read
+  as standing about. A separate "ready" state for "at a machine, not started" was
+  rejected: the table's CHECK constraint would have meant rebuilding it, so
+  cancelling leaves you idle with the machine noted instead.
+- **The room.**
+  - Furniture that looked like a machine but couldn't be used (ellipticals, a
+    decor leg press, a chest press, a cable crossover) was removed or made real.
+  - Reception got a counter with a screen, a check-in tablet and the gym's name,
+    a stool, a kiosk, turnstiles, an entry floor, a sofa and lockers.
+  - Daylight now falls under the windows, there's a wall TV, and towel shelves
+    and bins are dotted around.
+  - The water and rest corner is where people go when they step off a machine.
+  - A small limb-drawing helper made seated, reclined and lying poses possible.
+
 ## Stack
 
 Plain Node 24 (`http` and `node:sqlite`) with a hand-written client and no runtime
@@ -115,9 +149,10 @@ keeps across restarts and redeploys. A person is an opaque id plus a 12-characte
 gym pass, which the browser sends as a bearer token. The browser stores the pass
 and nothing else. Typing the pass on another device brings back the same person;
 the display name is only a label. Presence is one row per person, rewritten on each
-change, and a visit left open for three hours is closed at its last activity. Every
-change goes through four functions in `src/gym.ts` (enter, choose, set, leave),
-which are the events crit 9 will broadcast.
+change, and a visit left open for three hours is closed at its last activity. Presence
+now also stores the machine, the planned set and when it expires. Every change
+goes through six functions in `src/gym.ts` (enter, start, finish, cancel, step
+off, leave), which are the events crit 9 will broadcast.
 
 I tested this in a real browser by driving headless Chrome: join, choose, log a set,
 refresh, navigate away and back, quit the browser, restart the server, reopen. Then
@@ -178,6 +213,17 @@ person, their station, their set and a still-running rest timer came back.
 - **The panel squeezed the inputs again.** The old viewport check caught the
   weight input at 48px in the new desktop panel. The panel was widened and the
   stepper buttons narrowed.
+- **A test that sampled in step with the animation.** My flow script said the
+  treadmill wasn't animating. It sampled every 350 ms, close to two of the
+  treadmill's 170 ms frames, so it kept landing on the same frame. The app was
+  fine. The spec samples at uneven gaps now.
+- **Checks sharing one database.** The phone viewport check found the lat
+  pulldown taken: the desktop run's test person was still resting on it. Each
+  run now leaves the gym when it's done, and CLAUDE.md says to run the spec on a
+  fresh `DATA_DIR`.
+- **Art covering art.** The seated dumbbell press's name tag hid the arms doing
+  the press, and the water station sat on the "WATER & REST" floor lettering.
+  Both were found in screenshots and moved.
 - **A false alarm.** Full-page screenshots showed people faded at desktop width.
   Measuring the computed opacity showed it was 1: the capture was replaying the
   entrance animation. No change was needed.
@@ -185,11 +231,14 @@ person, their station, their set and a still-running rest timer came back.
 ## Rejected or deferred
 
 - **An event-log table** for crit 9 to read from. Nothing would read it yet, and the
-  four action functions already give a broadcast one place to hook in.
+  action functions already give a broadcast one place to hook in.
 - **Free roaming (WASD) and a character creator.** You walk where your workout
   takes you, and everyone has one body in their own shirt colour. Both can come
   later without changing the data model.
 - **A game engine or sprite image files.** See decision record 2.
+- **Editing the reps you actually did at Finish.** The set records what you
+  started with. Changing it is one field away, but it wasn't asked for.
+- **Rest timer settings.** The rest timer always runs; there's no switch for it.
 - **Polling the floor.** I held it back so crit 8 stays about persistence and the
   real-time choice is made deliberately at crit 9. Others appear when the page
   loads, and the README says exactly that.
@@ -199,6 +248,8 @@ person, their station, their set and a still-running rest timer came back.
 The first checks were written after the implementation in the same session, so
 they never failed against a missing app. Three are exceptions: the viewport sensor
 and the returning-browser check were both shown to catch the bug they were written
-for. The pixel-world check was shown to go red when animation is switched off.
+for. The pixel-world check was shown to go red when animation is switched off,
+and the occupancy check went red when the server stopped refusing a second person
+on a machine.
 Restart persistence is verified by
 hand, not in `spec/`, because the spec runs against an app it can't restart.

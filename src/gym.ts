@@ -1,42 +1,30 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { type Exercise, KINDS, MACHINES, kindById, machineById } from "./equipment.ts";
 
+// idle: in the gym, not on a machine (or back at one after cancelling a set)
+// training: a set is under way on a machine
+// resting: a set is finished; still at the machine, between sets
 export type State = "idle" | "training" | "resting" | "away";
-
-interface Station {
-  id: string;
-  name: string;
-  // timed work (cardio, stretching) logs minutes and no weight
-  measure: "reps" | "min";
-  weighted: boolean;
-  exercises: string[];
-}
-
-// The equipment people can use. Every exercise belongs to one station, and
-// that's where its lifter is, resting between sets included, as in a real gym.
-// Only exercises the gym can show someone doing are here; the client draws the
-// machines and animations for each station id. Someone who has walked in but
-// not chosen anything yet waits in the lobby.
-export const STATIONS: Station[] = [
-  { id: "bench", name: "Bench", measure: "reps", weighted: true, exercises: ["Bench Press"] },
-  { id: "rack", name: "Squat Rack", measure: "reps", weighted: true, exercises: ["Squat"] },
-  { id: "pulldown", name: "Lat Pulldown", measure: "reps", weighted: true, exercises: ["Lat Pulldown"] },
-  { id: "dumbbells", name: "Free Weights", measure: "reps", weighted: true, exercises: ["Dumbbell Curl"] },
-  { id: "treadmill", name: "Treadmills", measure: "min", weighted: false, exercises: ["Treadmill"] },
-  { id: "bike", name: "Bikes", measure: "min", weighted: false, exercises: ["Bike"] },
-  { id: "mats", name: "Stretch Mats", measure: "min", weighted: false, exercises: ["Stretching"] },
-];
-
-const stationOf = new Map(STATIONS.flatMap((s) => s.exercises.map((e) => [e, s] as const)));
 
 export const COLOURS = ["#ff6b4a", "#ffb703", "#2ec4b6", "#4d7cfe", "#b15cff", "#ff5fa2"];
 
-// Someone who walked off without pressing Leave isn't still on the floor three
+// Someone who walked off without pressing Leave isn't still in the gym three
 // hours later: past this, their visit is closed at their last activity.
 const STALE_MS = 3 * 60 * 60 * 1000;
+// A started set that's never finished (the tab closed, the phone died) is
+// dropped, not recorded, and frees the machine. Timed work gets its planned
+// minutes on top.
+const SET_MS = 10 * 60 * 1000;
+// Resting this long means you've wandered off: the machine is free again.
+const REST_MS = 15 * 60 * 1000;
 
 export class InputError extends Error {
-  readonly status = 400;
+  readonly status: number;
+  constructor(message: string, status = 400) {
+    super(message);
+    this.status = status;
+  }
 }
 
 interface UserRow {
@@ -49,7 +37,11 @@ interface UserRow {
 interface PresenceRow {
   state: State;
   exercise: string | null;
+  machine: string | null;
   since: number;
+  plan_weight: number | null;
+  plan_amount: number | null;
+  expires_at: number | null;
 }
 
 interface SetRow {
@@ -94,13 +86,25 @@ function cleanName(raw: unknown): string {
   return name;
 }
 
-function exerciseStation(raw: unknown): Station {
-  const station = typeof raw === "string" ? stationOf.get(raw) : undefined;
-  if (!station) throw new InputError("That isn't an exercise on this floor.");
-  return station;
+// The set someone is about to do, checked against what the exercise measures.
+function cleanPlan(ex: Exercise, input: { weightKg?: unknown; amount?: unknown }) {
+  let weight = 0;
+  if (ex.weighted) {
+    weight = Number(input.weightKg);
+    if (input.weightKg === null || input.weightKg === "" || !Number.isFinite(weight) || weight < 0 || weight > 500) {
+      throw new InputError("Weight should be between 0 and 500 kg.");
+    }
+    weight = Math.round(weight * 100) / 100;
+  }
+  const amount = Number(input.amount);
+  const max = ex.measure === "reps" ? 100 : 180;
+  if (!Number.isInteger(amount) || amount < 1 || amount > max) {
+    throw new InputError(ex.measure === "reps" ? `Reps should be a whole number from 1 to ${max}.` : `Minutes should be a whole number from 1 to ${max}.`);
+  }
+  return { weight, amount };
 }
 
-export function createGym(db: DatabaseSync) {
+export function createGym(db: DatabaseSync, clock: () => number = Date.now) {
   const q = {
     insertUser: db.prepare("insert into users (id, pass, name, colour, created_at) values (?, ?, ?, ?, ?)"),
     userByPass: db.prepare("select id, name, colour, created_at from users where pass = ?"),
@@ -118,19 +122,30 @@ export function createGym(db: DatabaseSync) {
       from sessions s left join sets t on t.session_id = s.id
       where s.user_id = ? and s.ended_at is not null
       group by s.id order by s.id desc limit 1`),
-    presence: db.prepare("select state, exercise, since from presence where user_id = ?"),
+    presence: db.prepare("select state, exercise, machine, since, plan_weight, plan_amount, expires_at from presence where user_id = ?"),
     putPresence: db.prepare(`
-      insert into presence (user_id, state, exercise, since) values (?, ?, ?, ?)
+      insert into presence (user_id, state, exercise, machine, plan_weight, plan_amount, since, expires_at)
+      values (?, ?, ?, ?, ?, ?, ?, ?)
       on conflict (user_id) do update set
-        state = excluded.state, exercise = excluded.exercise, since = excluded.since`),
+        state = excluded.state, exercise = excluded.exercise, machine = excluded.machine,
+        plan_weight = excluded.plan_weight, plan_amount = excluded.plan_amount,
+        since = excluded.since, expires_at = excluded.expires_at`),
+    // unfinished sets and long rests let go of their machine
+    expire: db.prepare(`
+      update presence set state = 'idle', exercise = null, machine = null,
+        plan_weight = null, plan_amount = null, since = expires_at, expires_at = null
+      where state in ('training', 'resting') and expires_at <= ?`),
+    holder: db.prepare("select user_id from presence where machine = ? and state in ('training', 'resting') and user_id != ?"),
     floor: db.prepare(`
-      select u.id, u.name, u.colour, p.state, p.exercise, p.since
+      select u.id, u.name, u.colour, p.state, p.exercise, p.machine, p.since
       from presence p join users u on u.id = p.user_id
       where p.state != 'away' and p.since > ?
       order by p.since`),
   };
 
   const presenceOf = (userId: string) => q.presence.get(userId) as PresenceRow | undefined;
+  const put = (userId: string, state: State, at: number, o: Partial<Omit<PresenceRow, "state" | "since">> = {}) =>
+    q.putPresence.run(userId, state, o.exercise ?? null, o.machine ?? null, o.plan_weight ?? null, o.plan_amount ?? null, at, o.expires_at ?? null);
 
   function sessionFor(userId: string, now: number): number {
     const open = q.openSession.get(userId) as { id: number } | undefined;
@@ -139,26 +154,33 @@ export function createGym(db: DatabaseSync) {
 
   function leaveAt(userId: string, at: number): void {
     q.closeSessions.run(at, userId);
-    q.putPresence.run(userId, "away", null, at);
+    put(userId, "away", at);
   }
 
-  // A visit left open for too long is closed at its last activity, so the
-  // person reads as away instead of resting for days.
+  // Bring stored state up to now: expired sets and rests first, then a visit
+  // left open too long is closed at its last activity.
   function settle(userId: string, now: number): void {
+    q.expire.run(now);
     const p = presenceOf(userId);
     if (p && p.state !== "away" && now - p.since > STALE_MS) leaveAt(userId, p.since);
   }
 
-  // Each mutation below is one of the events a live floor will broadcast in
-  // crit 9 (enter, choose, set, leave); they all end by returning the caller's
-  // fresh view, which is the seam a broadcast hooks onto.
+  function inGym(userId: string): PresenceRow {
+    const p = presenceOf(userId);
+    if (!p || p.state === "away") throw new InputError("Walk into the gym first.", 409);
+    return p;
+  }
+
+  // Each mutation below is one of the events a live gym will broadcast at
+  // crit 9 (enter, start, finish, cancel, step off, leave); they all end by
+  // returning the caller's fresh view, which is the seam a broadcast hooks onto.
   return {
     createIdentity(name: unknown, colour: unknown) {
       const clean = cleanName(name);
       if (typeof colour !== "string" || !COLOURS.includes(colour)) throw new InputError("Pick one of the colours.");
       const id = randomUUID();
       const pass = newPass();
-      q.insertUser.run(id, pass, clean, colour, Date.now());
+      q.insertUser.run(id, pass, clean, colour, clock());
       return { pass, user: this.userByPass(pass)! };
     },
 
@@ -168,17 +190,24 @@ export function createGym(db: DatabaseSync) {
     },
 
     me(userId: string) {
-      const now = Date.now();
+      const now = clock();
       settle(userId, now);
       const user = q.userById.get(userId) as unknown as UserRow & { pass: string };
-      const presence = presenceOf(userId) ?? { state: "away" as State, exercise: null, since: user.created_at };
+      const p = presenceOf(userId);
       const open = q.openSession.get(userId) as { id: number; started_at: number } | undefined;
       const visit = q.lastVisit.get(userId) as { started_at: number; ended_at: number; sets: number } | undefined;
       return {
         now,
         user: { id: user.id, name: user.name, colour: user.colour, since: user.created_at },
         pass: user.pass,
-        presence,
+        presence: {
+          state: p?.state ?? ("away" as State),
+          exercise: p?.exercise ?? null,
+          machine: p?.machine ?? null,
+          since: p?.since ?? user.created_at,
+          expiresAt: p?.expires_at ?? null,
+          plan: p?.plan_amount != null ? { weightKg: p.plan_weight ?? 0, amount: p.plan_amount } : null,
+        },
         session: open
           ? { startedAt: open.started_at, sets: (q.setsIn.all(open.id) as unknown as SetRow[]).map(setOut) }
           : null,
@@ -190,61 +219,88 @@ export function createGym(db: DatabaseSync) {
     },
 
     enter(userId: string) {
-      const now = Date.now();
+      const now = clock();
       settle(userId, now);
       sessionFor(userId, now);
       const p = presenceOf(userId);
-      if (!p || p.state === "away") q.putPresence.run(userId, "idle", null, now);
+      if (!p || p.state === "away") put(userId, "idle", now);
       return this.me(userId);
     },
 
-    choose(userId: string, exercise: unknown) {
-      exerciseStation(exercise);
-      const now = Date.now();
+    // Start a set on a machine. Nothing is recorded yet: the set exists only
+    // once it's finished.
+    start(userId: string, input: { machine?: unknown; exercise?: unknown; weightKg?: unknown; amount?: unknown }) {
+      const machine = typeof input.machine === "string" ? machineById.get(input.machine) : undefined;
+      if (!machine) throw new InputError("That isn't a machine in this gym.");
+      const ex = kindById.get(machine.kind)!.exercises.find((e) => e.name === input.exercise);
+      if (!ex) throw new InputError(`That isn't something you do on the ${machine.name}.`);
+      const { weight, amount } = cleanPlan(ex, input);
+      const now = clock();
       settle(userId, now);
+      const p = inGym(userId);
+      if (p.state === "training" && p.machine !== machine.id) throw new InputError("Finish or cancel the set you're on first.", 409);
+      if (q.holder.get(machine.id, userId)) throw new InputError("Someone's on that machine.", 409);
       sessionFor(userId, now);
-      q.putPresence.run(userId, "training", exercise as string, now);
+      const limit = SET_MS + (ex.measure === "min" ? amount * 60_000 : 0);
+      put(userId, "training", now, { exercise: ex.name, machine: machine.id, plan_weight: weight, plan_amount: amount, expires_at: now + limit });
       return this.me(userId);
     },
 
-    logSet(userId: string, input: { exercise?: unknown; weightKg?: unknown; amount?: unknown }) {
-      const station = exerciseStation(input.exercise);
-      let weight = 0;
-      if (station.weighted) {
-        weight = Number(input.weightKg);
-        if (input.weightKg === null || input.weightKg === "" || !Number.isFinite(weight) || weight < 0 || weight > 500) {
-          throw new InputError("Weight should be between 0 and 500 kg.");
-        }
-        weight = Math.round(weight * 100) / 100;
-      }
-      const amount = Number(input.amount);
-      const max = station.measure === "reps" ? 100 : 180;
-      if (!Number.isInteger(amount) || amount < 1 || amount > max) {
-        throw new InputError(station.measure === "reps" ? `Reps should be a whole number from 1 to ${max}.` : `Minutes should be a whole number from 1 to ${max}.`);
-      }
-      const now = Date.now();
+    // Finish the set under way: this is when it's recorded.
+    finish(userId: string) {
+      const now = clock();
       settle(userId, now);
+      const p = inGym(userId);
+      if (p.state !== "training") throw new InputError("There's no set under way to finish.", 409);
       const session = sessionFor(userId, now);
-      q.insertSet.run(session, userId, input.exercise as string, weight, amount, now);
-      q.putPresence.run(userId, "resting", input.exercise as string, now);
+      q.insertSet.run(session, userId, p.exercise!, p.plan_weight ?? 0, p.plan_amount!, now);
+      put(userId, "resting", now, {
+        exercise: p.exercise,
+        machine: p.machine,
+        plan_weight: p.plan_weight,
+        plan_amount: p.plan_amount,
+        expires_at: now + REST_MS,
+      });
+      return this.me(userId);
+    },
+
+    // Stop a set without recording it; you stay by the machine.
+    cancel(userId: string) {
+      const now = clock();
+      settle(userId, now);
+      const p = inGym(userId);
+      if (p.state !== "training") throw new InputError("There's no set under way to cancel.", 409);
+      put(userId, "idle", now, { machine: p.machine });
+      return this.me(userId);
+    },
+
+    // Step away from a machine, to the water and the benches.
+    stepOff(userId: string) {
+      const now = clock();
+      settle(userId, now);
+      const p = inGym(userId);
+      if (p.state === "training") throw new InputError("Finish or cancel the set you're on first.", 409);
+      put(userId, "idle", now);
       return this.me(userId);
     },
 
     leave(userId: string) {
-      leaveAt(userId, Date.now());
+      leaveAt(userId, clock());
       return this.me(userId);
     },
 
-    // Everyone currently on the floor. Public, so it carries only what you'd
-    // see looking across a real gym: who, where, what, and whether they're
-    // between sets. No passes, and no weights or reps: nobody's numbers are
-    // set beside anyone else's.
+    // Everyone in the gym right now. Public, so it carries only what you'd
+    // see looking across a real gym: who, which machine, what they're doing,
+    // and whether they're mid-set or between sets. No passes, and no weights
+    // or reps: nobody's numbers are set beside anyone else's.
     floor() {
-      const now = Date.now();
+      const now = clock();
+      q.expire.run(now);
       const rows = q.floor.all(now - STALE_MS) as unknown as (PresenceRow & { id: string; name: string; colour: string })[];
       return {
         now,
-        stations: STATIONS,
+        kinds: KINDS,
+        machines: MACHINES,
         colours: COLOURS,
         people: rows.map((r) => ({
           id: r.id,
@@ -252,7 +308,7 @@ export function createGym(db: DatabaseSync) {
           colour: r.colour,
           state: r.state,
           exercise: r.exercise,
-          station: (r.exercise && stationOf.get(r.exercise)?.id) || null,
+          machine: r.machine && machineById.has(r.machine) ? r.machine : null,
           since: r.since,
         })),
       };

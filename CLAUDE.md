@@ -16,9 +16,16 @@ quietly change the product.
 - **The gym is the main view.** The pixel room fills the screen; the set panel is
   a small card over it (a bottom sheet on phones). Don't add dashboards, stats rows
   or history pages that compete with the room.
-- **Activity → place → animation.** Choosing an exercise moves the character to
-  its equipment and plays its animation; finishing a set puts them in the resting
-  pose beside it. Never let a change of activity show only as text.
+- **The equipment starts the workout.** Tapping a machine opens its setup
+  (exercise if it has several, weight, reps or minutes). Nothing changes until
+  Start set. Don't bring back an exercise list as the main way in.
+- **Idle → training → resting.** Start set stores the plan and nothing else.
+  Finish set records the set and moves you to resting at the machine. Cancel
+  records nothing. Never create a set anywhere but `finish`.
+- **Activity → place → animation.** Starting a set moves the character to that
+  machine and plays its pose; finishing puts them in the resting pose beside it;
+  stepping off sends them to the water. Never let a change of activity show only
+  as text.
 - **Spatial presence before social networking.** Other people appear in the
   room, on the machine they're using. Never in a sidebar list, a roster or a
   feed.
@@ -29,12 +36,15 @@ quietly change the product.
   your own panel and on your own label, never in `/api/floor` or on anyone
   else's view. No rankings, scores, streaks, badges or leaderboards unless I
   explicitly ask.
-- **The room shows its capacity.** Each station has several machines (or mats,
-  or spots on the rubber), and people take a free one, so an empty gym still reads
-  as a room for several people. When all are taken, people wait beside the
-  station. A new exercise needs a station, machines in `world.js` and an
-  animation in `sprites.js`; don't add an exercise the gym can't show someone
-  doing.
+- **One machine, one person.** Each physical machine (`bench-a`, `bench-b`, …) is
+  its own station. The server records who is on it and refuses a second person
+  (409). Several machines share a kind, its exercises and its art.
+- **Adding equipment is three edits, all data:** a kind with its exercises and
+  poses in `src/equipment.ts`, footprints in `MACHINES_AT` in `public/world.js`
+  (in machine order), and a `draw(r, colour, frame, pose)` in `KINDS` in
+  `public/sprites.js`. Don't add an exercise the gym can't show someone doing,
+  and don't add a machine-looking thing that can't be used: furniture must read
+  as furniture.
 - **No messaging, comments, voice or video.** If co-presence ever needs a signal
   between people, it is a lightweight, ephemeral reaction, and only when I ask.
 - **Don't add a feature because fitness apps usually have one.** That rules out
@@ -48,8 +58,11 @@ quietly change the product.
   puts them where they were. `localStorage` holds only the gym pass, never workout
   data or state.
 - **Persist meaning, derive the picture.** The server stores what someone is doing
-  (exercise, training/resting/idle, since when). Position, route, pose and frame
-  are derived in `world.js` and never stored.
+  (machine, exercise, state, planned set, since when, when it expires). Position,
+  route, pose and frame are derived in `world.js` and never stored.
+- **Nobody trains forever.** An unfinished set expires unrecorded after 10 minutes
+  (plus its planned minutes if timed), and a rest after 15. Both free the machine.
+  Expiry happens when state is read; there is no background job.
 - **Phones are first-class.** Every change must work at 390px wide. On a phone
   the screen is a camera onto the same gym at 2× pixels (3× on desktop). Never
   shrink the world to fit. Check both widths before calling UI work done.
@@ -74,7 +87,8 @@ quietly change the product.
 Real-time is still to come: right now other people appear only when the page
 loads. When it arrives:
 
-- Broadcast from the four action functions in `src/gym.ts`, sending the same public
+- Broadcast from the action functions in `src/gym.ts` (enter, start, finish,
+  cancel, stepOff, leave), sending the same public
   shape as `/api/floor` (never a pass, never numbers).
 - Feed it to `world.setPeople()`, which already treats everyone as an entity: a
   newcomer walks in from the door, a changed exercise walks to the new machine,
@@ -101,7 +115,8 @@ loads. When it arrives:
 - **Identity:** a user is an opaque id. The display name is a label: never look
   anyone up by name. The gym pass is a secret. It is returned only to its owner
   (`/api/me`) and must never appear in `/api/floor` or anything public.
-- **Every state change goes through `src/gym.ts`** (enter, choose, set, leave). They
+- **Every state change goes through `src/gym.ts`** (enter, start, finish, cancel,
+  stepOff, leave). They
   are the events the live floor will broadcast, so keep them as single functions
   rather than scattering writes.
 - **Validate on the server.** The client's checks are a convenience; the server
@@ -115,8 +130,12 @@ loads. When it arrives:
 
 - Start the app (`pnpm start`) and run `pnpm check`. Both must be green.
 - For UI changes, look at it at 1920×1080 and 390×844. `spec/viewports.test.ts`
-  catches a shrunk or blurred world, a camera that loses you, a machine that
-  doesn't animate, overlapping name tags and cramped inputs. Only a person can
+  catches a shrunk or blurred world, a machine you can't tap, a tap that starts
+  a set instead of setting one up, a camera that loses you, a machine that
+  doesn't animate, overlapping name tags and cramped inputs.
+  `spec/lifecycle.test.ts` covers expiry and old data with a fake clock. Run the
+  spec on a fresh `DATA_DIR`: people left on machines in a local database will
+  make the browser checks find them taken. Only a person can
   judge whether it still feels like a gym.
 - A promise the README makes that can be tested belongs in `spec/`. When you add
   or change one, add or change its check.
