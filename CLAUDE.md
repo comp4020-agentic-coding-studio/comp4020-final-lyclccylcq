@@ -1,6 +1,6 @@
-# Same Gym: rules for the agent
+# Virtual Gym: rules for the agent
 
-Same Gym is a persistent pixel-art gym in which real workout activity controls
+Virtual Gym (the gym is called Same Gym in the app) is a persistent pixel-art gym in which real workout activity controls
 what your character is doing. People train on their own, in one shared room, and
 can see who else is in and what they're doing. It is not a workout tracker drawn as
 a gym: the room is the product, and logging is how you act in it. `README.md` is the argument for what good means
@@ -8,8 +8,9 @@ here. This file holds the rules that follow from it, and `spec/` holds the parts
 that can be checked. If a change would contradict the README, stop and ask. Don't
 quietly change the product.
 
-> A good virtual gym should make individual training feel shared without turning
-> exercise into a meeting, competition, or social feed.
+> A good virtual gym should make individual training feel like training alongside
+> other people, without turning exercise into a meeting, a competition, or a social
+> feed.
 
 ## Product rules
 
@@ -38,10 +39,10 @@ quietly change the product.
 - **Idle → training → resting.** Start set stores the plan and nothing else.
   Finish set records the set and moves you to resting at the machine. Cancel
   records nothing. Never create a set anywhere but `finish`.
-- **Activity → place → animation.** Starting a set moves the character to that
-  machine and plays its pose; finishing puts them in the resting pose beside it;
-  stepping off sends them to the water. Never let a change of activity show only
-  as text.
+- **Activity → place → animation.** Tapping a machine walks the character to it;
+  Start set plays that exercise's pose on it; Finish set puts them in the resting
+  pose beside it; stepping off sends them to the water. Never let a change of
+  activity show only as text.
 - **The floor is now; the locker is what's kept.** Current activity (presence,
   machine, state) is live and expires. History (visits, sets, heaviest sets) is
   kept and is read by opening your own locker in the locker room. Don't add a
@@ -76,14 +77,17 @@ quietly change the product.
 - **No messaging, comments, voice or video.** If co-presence ever needs a signal
   between people, it is a lightweight, ephemeral reaction, and only when I ask.
 - **Don't add a feature because fitness apps usually have one.** That rules out
-  plans, programmes, AI coaching, nutrition, charts and personal records. Ask
-  first.
-- **Interactions stay light.** Logging a set is: pick an exercise, adjust weight
-  and reps (prefilled from your last set of that exercise), Finish set. Don't add
-  required fields or steps.
-- **Persistence is part of the experience.** Whatever someone does is stored on
-  the server. Coming back (refresh, tomorrow, another device with the gym pass)
-  puts them where they were. `localStorage` holds only the gym pass, never workout
+  plans, programmes, AI coaching, nutrition, charts and record-chasing beyond the
+  locker's plain heaviest set. Ask first.
+- **Interactions stay light.** A set is: tap a machine and walk to it, adjust its
+  prefilled values (choosing the exercise only if the machine has several), Start
+  set, train, Finish set (correcting what you did if needed), rest. Only Finish
+  records a set. Don't add required fields or steps.
+- **Persistence keeps who you are and what you've done, not where you stood.**
+  Identity, locker, visits and finished sets are stored on the server and come
+  back tomorrow or on another device with the gym pass. A fresh visit starts at
+  the entrance; only a refresh in the same tab keeps your live place. Your
+  history is in your locker. `localStorage` holds only the gym pass, never workout
   data or state.
 - **Persist meaning, derive the picture.** The server stores what someone is doing
   (machine, exercise, state, planned set, since when, when it expires). Position,
@@ -116,8 +120,11 @@ quietly change the product.
 
 ## Real-time (crit 9)
 
-Real-time is still to come: right now other people appear only when the page
-loads. When it arrives:
+Real-time is still to come. Today several people share one gym state, and each
+browser sees the others as of its last page load, its own last action, or its
+return to the tab, not within a second of a change. Crit 9 propagates changes live;
+direct interaction (a reaction, a fist bump) comes after that, only if presence
+needs it. When real-time arrives:
 
 - Broadcast from the action functions in `src/gym.ts` (enter, arrive, approach,
   start, finish, cancel, stepOff, leave), sending the same public
