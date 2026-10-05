@@ -137,6 +137,17 @@ describe.skipIf(!chromePath)("a returning browser", () => {
     await send("Page.reload");
     await sleep(1400);
     expect(await evaluate<string>(`(() => { const p = document.querySelector(".person.is-you"); return p.dataset.kind + "/" + p.dataset.mode; })()`)).toBe("dbbench/use");
+
+    // the set stops behind the page's back (here: cancelled elsewhere, as a
+    // second tab or the ten-minute limit would): Finish must say it wasn't
+    // recorded and show you as you are, not stay "in progress"
+    await post("/api/cancel", {}, pass);
+    await evaluate(`document.querySelector("#finish-form").requestSubmit()`);
+    await sleep(900);
+    const stale = await evaluate<{ view: string; note: string }>(`({ view: document.querySelector("#panel").dataset.view, note: document.querySelector("#panel .note")?.textContent ?? "" })`);
+    expect(stale.view, "the panel still shows a set that had stopped").not.toBe("training");
+    expect(stale.note).toMatch(/wasn't recorded/);
+    await post("/api/start", { machine: "dbbench-b", exercise: "Dumbbell Bench Press", weightKg: 16, amount: 10 }, pass);
     await evaluate(`sessionStorage.clear()`);
     await send("Page.reload");
     await sleep(1600);

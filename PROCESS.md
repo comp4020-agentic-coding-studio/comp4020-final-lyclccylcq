@@ -228,6 +228,14 @@ Problems in this pass:
 - On a phone, the new top-bar button pushed "Gym pass" off the screen. Narrow
   screens now show only the logo, without the gym's name.
 - The walk-first check was shown to go red when the setup opened on tap.
+- **A set that silently vanished.** After the push, I reported a finished set
+  missing from my locker. The server data and the locker code were both fine.
+  Reproducing it found the real bug: when a set stopped on the server (the
+  ten-minute limit, or the gym opened in another tab), Finish got a 409. The page
+  only refetched the floor, not you, so it kept showing "Set 1 in progress", and
+  the error was redrawn away. Finish did nothing, and nothing was recorded. A 409
+  now refreshes your own state and says the set wasn't recorded and why. The tab
+  also catches up when you come back to it. A browser check covers it.
 
 ## Stack
 

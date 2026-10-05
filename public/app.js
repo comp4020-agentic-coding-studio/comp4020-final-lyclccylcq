@@ -48,6 +48,7 @@ let leaving = null; // a machine you tapped while resting at another: asks befor
 const choice = new Map(); // machine id → the exercise picked for it
 let showPass = false; // reception's card: shown once on checking in, and on request
 let lockerView = null; // a locker you've opened: yours (with what's in it) or someone else's door
+let flash = null; // something the gym refused, shown at the top of the panel until your next move
 
 async function api(path, data) {
   const res = await fetch(path, {
@@ -277,6 +278,10 @@ function startForm(machine, exercise) {
 }
 
 function panelHtml() {
+  return (flash ? `<p class="note" role="alert">${esc(flash)}</p>` : "") + viewHtml();
+}
+
+function viewHtml() {
   const { presence } = me;
   const mine = presence.machine && machineOf(presence.machine);
 
@@ -414,17 +419,33 @@ function forget(ask = true) {
 }
 
 async function act(fn) {
+  flash = null;
   try {
     await fn();
   } catch (err) {
     if (err.status === 401) return forget(false);
+    if (err.status === 409) {
+      // what you were looking at was out of date (a set that had stopped, a
+      // machine someone took): catch up with yourself and the gym, and say why
+      flash = err.message;
+      walkingTo = null;
+      world.cancelArrival();
+      await refresh(await api("/api/me")).catch(() => {});
+      panelOpen = true;
+      return drawPanel();
+    }
     const slot = document.querySelector("#set-error") ?? document.querySelector("#door:not([hidden]) .error");
     if (slot) slot.textContent = err.message;
     else alert(err.message);
-    // someone else may have taken the machine; show the gym as it is now
-    if (err.status === 409) await refresh().catch(() => {});
   }
 }
+
+// Coming back to this tab: what you're doing may have changed meanwhile (a set
+// dropped after ten minutes, another tab opened), so never show a stale set.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !inGym()) return;
+  act(async () => refresh(await api("/api/me")));
+});
 
 // What a set form says, ready to send: only the fields it has.
 function setValues(form) {

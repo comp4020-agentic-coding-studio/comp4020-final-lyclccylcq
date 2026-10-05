@@ -305,7 +305,12 @@ export function createGym(db: DatabaseSync, clock: () => number = Date.now, opts
       const now = clock();
       settle(userId, now);
       const p = inGym(userId);
-      if (p.state !== "training") throw new InputError("There's no set under way to finish.", 409);
+      if (p.state !== "training") {
+        throw new InputError(
+          "That set had already stopped, so it wasn't recorded. A set is dropped after 10 minutes without Finish, or when the gym is opened in another tab.",
+          409,
+        );
+      }
       const ex = KINDS.flatMap((k) => k.exercises).find((e) => e.name === p.exercise)!;
       const planned = { weightKg: p.plan_weight, assistKg: p.plan_setting, amount: p.plan_amount, setting: p.plan_setting };
       const has = (k: keyof typeof input) => input[k] !== undefined;
