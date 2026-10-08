@@ -1,6 +1,6 @@
 # syntax = docker/dockerfile:1
 
-# The gym is plain Node: its own http server and the built-in SQLite
+# Wayline is plain Node: its own http server and the built-in SQLite
 # (node:sqlite), with TypeScript run as-is by Node's type stripping. No runtime
 # dependencies, so nothing to install and nothing to build. It serves HTTP on
 # 0.0.0.0:$PORT (fly.toml sets PORT), publishes README.md at /readme/, and keeps

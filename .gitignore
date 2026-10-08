@@ -12,6 +12,7 @@ Desktop.ini
 # untracked file, never in a tracked one
 .env
 .env.*
+!.env.example
 .envrc
 mise.local.toml
 *.pem
@@ -21,5 +22,5 @@ mise.local.toml
 # harness is CLAUDE.md (and any AGENTS.md), not this directory.
 .claude/
 
-# the local gym database (production keeps it on the Fly volume at /data)
+# the local databases (production keeps them on the Fly volume at /data)
 data/

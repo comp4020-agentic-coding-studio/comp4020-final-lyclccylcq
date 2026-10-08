@@ -1,46 +1,21 @@
 <!doctype html>
 <html lang="en-AU">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Same Gym</title>
-    <meta name="description" content="A shared pixel gym: train on your own, alongside whoever else is in." />
-    <link rel="icon" href="/favicon.svg" />
-    <link rel="stylesheet" href="/styles.css" />
-    <script type="module" src="/app.js"></script>
-  </head>
-  <body class="gym">
-    <header class="top">
-      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Same Gym</span></a>
-      <p class="headcount" id="headcount" aria-live="polite"></p>
-      <nav>
-        <button type="button" class="activity" id="activity-button" hidden></button>
-        <a href="/readme/">About</a>
-        <button type="button" class="link" id="pass-button" hidden>Gym pass</button>
-      </nav>
-    </header>
-
-    <main class="stage">
-      <div class="world-scroll" id="world-scroll" tabindex="0" aria-label="The gym floor. Tap any equipment to use it.">
-        <div class="world-size" id="world-size">
-          <div class="world" id="world">
-            <canvas id="world-canvas" aria-hidden="true"></canvas>
-            <!-- world.js puts a button over every machine -->
-            <div class="hotspots"></div>
-            <div class="people" id="people"></div>
-          </div>
-        </div>
-      </div>
-      <aside class="panel" id="panel" aria-live="polite" hidden></aside>
-    </main>
-
-    <!-- The way in: first visit, or coming back after leaving. -->
-    <div class="door" id="door" hidden>
-      <div class="door-card" role="dialog" aria-modal="true" aria-labelledby="door-title">
-        <div id="door-body"></div>
-      </div>
-    </div>
-
-    <noscript><p class="noscript">The gym needs JavaScript to draw the room and the people in it.</p></noscript>
-  </body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Wayline · plan trips together</title>
+<meta name="description" content="Wayline is a collaborative travel planner: choose where you want to go together, and get help working out how to get there.">
+<meta name="theme-color" content="#FAF6EF">
+<link rel="icon" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="/styles.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<div id="app"><div class="boot" role="status">Loading Wayline…</div></div>
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+<noscript><p class="boot">Wayline needs JavaScript to plan trips. You can still <a href="/readme/">read about it</a>.</p></noscript>
+</body>
 </html>

@@ -2,77 +2,131 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-// Everything the gym remembers lives in one SQLite file. In production that's
-// on the Fly volume at /data, the only storage that survives a restart or a
+// Everything Wayline keeps lives in one SQLite file. In production that's on
+// the Fly volume at /data, the only storage that survives a restart or a
 // redeploy; locally it's ./data (gitignored).
+//
+// Wayline uses its own file, wayline.db. The Virtual Gym's gym.db is left
+// exactly as it was in the same directory: nothing is migrated out of it or
+// deleted, so it doubles as the backup of the old product's data.
 export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
   mkdirSync(dir, { recursive: true });
-  const db = new DatabaseSync(join(dir, "gym.db"));
+  const db = new DatabaseSync(join(dir, "wayline.db"));
   db.exec(`
     pragma journal_mode = wal;
     pragma foreign_keys = on;
+    pragma busy_timeout = 3000;
 
-    -- a lightweight identity: the display name is just a label, the opaque id
-    -- is who you are, and the pass is the secret that lets a browser be you
     create table if not exists users (
-      id         text primary key,
-      pass       text not null unique,
-      name       text not null,
-      colour     text not null,
-      created_at integer not null
+      id            text primary key,
+      username      text not null unique collate nocase,
+      display_name  text not null,
+      password_hash text not null,
+      created_at    integer not null
     );
 
-    -- one visit to the gym, from walking in to leaving
-    create table if not exists sessions (
-      id         integer primary key,
-      user_id    text not null references users(id),
-      started_at integer not null,
-      ended_at   integer
+    -- only a hash of the cookie token is stored, so a copied database can't
+    -- be used to sign in as anyone
+    create table if not exists auth_sessions (
+      token_hash text primary key,
+      user_id    text not null references users(id) on delete cascade,
+      created_at integer not null,
+      expires_at integer not null
+    );
+    create index if not exists auth_sessions_by_user on auth_sessions(user_id);
+
+    create table if not exists trips (
+      id             text primary key,
+      owner_id       text not null references users(id),
+      title          text not null,
+      destination    text not null,
+      start_date     text not null,
+      end_date       text not null,
+      timezone       text not null,
+      dest_place_id  text,
+      dest_lat       real,
+      dest_lng       real,
+      dest_cached_at integer,
+      invite_hash    text unique,
+      rev            integer not null default 1,
+      created_at     integer not null,
+      updated_at     integer not null
     );
 
-    create table if not exists sets (
-      id         integer primary key,
-      session_id integer not null references sessions(id),
-      user_id    text not null references users(id),
-      exercise   text not null,
-      weight_kg  real not null,
-      amount     integer not null, -- reps, or minutes for timed work
-      done_at    integer not null
+    create table if not exists trip_members (
+      trip_id   text not null references trips(id) on delete cascade,
+      user_id   text not null references users(id) on delete cascade,
+      role      text not null check (role in ('owner', 'collaborator')),
+      joined_at integer not null,
+      primary key (trip_id, user_id)
     );
-    create index if not exists sets_by_user on sets(user_id, id);
+    create index if not exists trip_members_by_user on trip_members(user_id);
 
-    -- each person's locker: kept, like visits and sets
-    create table if not exists lockers (
-      number      integer primary key,
-      user_id     text not null unique references users(id),
-      assigned_at integer not null
+    create table if not exists trip_days (
+      id      text primary key,
+      trip_id text not null references trips(id) on delete cascade,
+      date    text not null,
+      unique (trip_id, date)
     );
 
-    -- The only live table. Where each person is and what they're doing right
-    -- now: one row per user, rewritten on every change and expired when it
-    -- goes stale, so it's also the shape a live broadcast will send. Nothing
-    -- in it is history; history is sessions and sets.
-    create table if not exists presence (
-      user_id  text primary key references users(id),
-      state    text not null check (state in ('idle', 'training', 'resting', 'away')),
-      exercise text,
-      since    integer not null
+    -- What the user chose to do. place_id is a stable Google place id (kept
+    -- indefinitely, as Google allows); lat/lng are a temporary copy with the
+    -- time they were fetched, refreshed after 30 days. Address, hours and
+    -- the rest of a place's details are never stored: they're fetched live.
+    create table if not exists activities (
+      id              text primary key,
+      trip_id         text not null references trips(id) on delete cascade,
+      day_id          text not null references trip_days(id) on delete cascade,
+      client_id       text not null,
+      position        integer not null,
+      title           text not null,
+      kind            text not null check (kind in ('attraction', 'food', 'shopping', 'accommodation', 'custom')),
+      start_min       integer,
+      duration_min    integer not null,
+      notes           text not null default '',
+      place_id        text,
+      place_source    text,
+      lat             real,
+      lng             real,
+      place_cached_at integer,
+      version         integer not null default 1,
+      created_by      text references users(id) on delete set null,
+      updated_by      text references users(id) on delete set null,
+      updated_at      integer not null,
+      unique (trip_id, client_id)
+    );
+    create index if not exists activities_by_day on activities(day_id, position);
+
+    -- The connection between two consecutive activities. options is the
+    -- route data Google returned for each mode (a temporary copy, dropped
+    -- after 30 days or when the pair stops being consecutive); selected_mode
+    -- is the user's choice. depart_key records the departure the options
+    -- were computed for, so a changed time marks them stale.
+    create table if not exists transport_segments (
+      id               text primary key,
+      trip_id          text not null references trips(id) on delete cascade,
+      from_activity_id text not null references activities(id) on delete cascade,
+      to_activity_id   text not null references activities(id) on delete cascade,
+      depart_key       text not null,
+      options          text not null,
+      selected_mode    text,
+      computed_at      integer not null,
+      computed_by      text references users(id) on delete set null,
+      unique (from_activity_id, to_activity_id)
     );
   `);
-
-  // Added when sets gained a start and a finish: which machine someone is on,
-  // the set they've started (weight, reps or minutes), and when an unfinished
-  // set or a rest stops holding the machine.
-  // Later: a set's one extra number (assistance kg, or a cardio machine's
-  // speed or level), and where someone not on a machine is standing.
-  const add = (table: string, columns: [string, string][]) => {
-    const have = new Set((db.prepare(`pragma table_info(${table})`).all() as { name: string }[]).map((c) => c.name));
-    for (const [name, type] of columns) if (!have.has(name)) db.exec(`alter table ${table} add column ${name} ${type}`);
-  };
-  add("presence", [["machine", "text"], ["plan_weight", "real"], ["plan_amount", "integer"], ["expires_at", "integer"], ["plan_setting", "real"], ["spot", "text"]]);
-  add("sets", [["setting", "real"]]);
-  // rows from before machines existed say what someone did, not where: they
-  // become someone standing about, which is the honest reading
-  db.exec(`update presence set state = 'idle', exercise = null where state in ('training', 'resting') and machine is null`);
   return db;
+}
+
+// Runs fn inside one write transaction: either every statement lands or none do.
+export function transaction<T>(db: DatabaseSync, fn: () => T): T {
+  db.exec("begin immediate");
+  try {
+    const out = fn();
+    db.exec("commit");
+    return out;
+  } catch (err) {
+    db.exec("rollback");
+    throw err;
+  }
 }

@@ -1,183 +1,126 @@
-# Virtual Gym: rules for the agent
+# Wayline: rules for the agent
 
-Virtual Gym (the gym is called Same Gym in the app) is a persistent pixel-art gym in which real workout activity controls
-what your character is doing. People train on their own, in one shared room, and
-can see who else is in and what they're doing. It is not a workout tracker drawn as
-a gym: the room is the product, and logging is how you act in it. `README.md` is the argument for what good means
-here. This file holds the rules that follow from it, and `spec/` holds the parts
-that can be checked. If a change would contradict the README, stop and ask. Don't
-quietly change the product.
+Wayline is a collaborative travel itinerary planner: a shared trip, an
+interactive map and a day-by-day timeline, with real transport times between
+consecutive stops and an AI copilot that explains schedule problems. It
+replaced the Virtual Gym in October 2026; the gym's history stays in git,
+`PROCESS.md`, `reflections/` and `docs/decisions/0001–0002`. `README.md` is
+the argument for what good means here. This file holds the rules that follow
+from it, and `spec/` holds the parts that can be checked. If a change would
+contradict the README, stop and ask. Don't quietly change the product.
 
-> A good virtual gym should make individual training feel like training alongside
-> other people, without turning exercise into a meeting, a competition, or a social
-> feed.
+> People choose where they want to go. Wayline helps them figure out how to
+> get there.
 
 ## Product rules
 
-- **The gym is the main view.** The pixel room fills the screen; the set panel is
-  a small card over it (a bottom sheet on phones). Don't add dashboards, stats rows
-  or history pages that compete with the room.
-- **Walk first, then set up.** Tapping a free machine walks you to it
-  (`/api/approach`: you stand there, nothing held or recorded); its setup opens
-  only when you arrive. Never open the setup on tap, and don't bring back an
-  exercise list as the main way in.
-- **Set by set.** The setup is for the next set only: its number (counted from
-  this visit's sets of that exercise), and its own values, prefilled from the last
-  set and always editable. Finish can correct what was actually done. No "number
-  of sets" field, no workout planning.
-- **Each exercise asks for its own metric** (`src/equipment.ts`): load (weight ×
-  reps), assist (assistance × reps; more assistance is easier, so it's never
-  weight or a "best"), or time (minutes + an optional speed or level). A new
-  exercise picks one of these; don't add a new set schema.
-- **You arrive at the entrance.** Opening the gym afresh (a new tab: no
-  `sessionStorage` flag) calls `/api/arrive`, which puts you at the entrance and
-  drops any unfinished set unrecorded. A refresh in the same tab keeps you where
-  you were. Where you stood is never restored from history.
-- **The panel never decides anything.** Closing it hides it; whatever you're doing
-  carries on, and the top-bar button reopens it. Leaving a station between sets
-  asks first; walking off mid-set isn't allowed.
-- **Idle → training → resting.** Start set stores the plan and nothing else.
-  Finish set records the set and moves you to resting at the machine. Cancel
-  records nothing. Never create a set anywhere but `finish`.
-- **Activity → place → animation.** Tapping a machine walks the character to it;
-  Start set plays that exercise's pose on it; Finish set puts them in the resting
-  pose beside it; stepping off sends them to the water. Never let a change of
-  activity show only as text.
-- **The floor is now; the locker is what's kept.** Current activity (presence,
-  machine, state) is live and expires. History (visits, sets, heaviest sets) is
-  kept and is read by opening your own locker in the locker room. Don't add a
-  profile page, an account dashboard or a global "history" button. Reception
-  checks you in and explains the gym; it doesn't show history.
-- **Lockers are entities.** `lockers` rows are a number and an owner. The room
-  shows numbers and whether each is taken, never who has it. `GET /api/locker`
-  returns only the caller's own. Never key a locker or anything else by display
-  name. When other people are live (crit 9), keep their lockers shut.
-- **Don't widen the locker into a fitness platform.** No charts, calories, body
-  weight, streaks or 1RM estimates. A "best" is the heaviest finished set of a
-  weighted lift, nothing computed.
-- **Spatial presence before social networking.** Other people appear in the
-  room, on the machine they're using. Never in a sidebar list, a roster or a
-  feed.
-- **The floor shows the present, not a history.** There's no feed or scrollback of
-  anyone's activity. Others see only who you are, which station, which exercise,
-  and whether you're training or resting.
-- **Numbers are private.** Weights and reps belong to their owner: they appear in
-  your own panel and on your own label, never in `/api/floor` or on anyone
-  else's view. No rankings, scores, streaks, badges or leaderboards unless I
-  explicitly ask.
-- **One machine, one person.** Each physical machine (`bench-a`, `bench-b`, …) is
-  its own station. The server records who is on it and refuses a second person
-  (409). Several machines share a kind, its exercises and its art.
-- **Adding equipment is three edits, all data:** a kind with its exercises and
-  poses in `src/equipment.ts`, footprints in `MACHINES_AT` in `public/world.js`
-  (in machine order), and a `draw(r, colour, frame, pose)` in `KINDS` in
-  `public/sprites.js`. Don't add an exercise the gym can't show someone doing,
-  and don't add a machine-looking thing that can't be used: furniture must read
-  as furniture.
-- **No messaging, comments, voice or video.** If co-presence ever needs a signal
-  between people, it is a lightweight, ephemeral reaction, and only when I ask.
-- **Don't add a feature because fitness apps usually have one.** That rules out
-  plans, programmes, AI coaching, nutrition, charts and record-chasing beyond the
-  locker's plain heaviest set. Ask first.
-- **Interactions stay light.** A set is: tap a machine and walk to it, adjust its
-  prefilled values (choosing the exercise only if the machine has several), Start
-  set, train, Finish set (correcting what you did if needed), rest. Only Finish
-  records a set. Don't add required fields or steps.
-- **Persistence keeps who you are and what you've done, not where you stood.**
-  Identity, locker, visits and finished sets are stored on the server and come
-  back tomorrow or on another device with the gym pass. A fresh visit starts at
-  the entrance; only a refresh in the same tab keeps your live place. Your
-  history is in your locker. `localStorage` holds only the gym pass, never workout
-  data or state.
-- **Persist meaning, derive the picture.** The server stores what someone is doing
-  (machine, exercise, state, planned set, since when, when it expires). Position,
-  route, pose and frame are derived in `world.js` and never stored.
-- **Nobody trains forever.** An unfinished set expires unrecorded after 10 minutes
-  (plus its planned minutes if timed), and a rest after 15. Both free the machine.
-  Someone idle for 45 minutes has gone home: they're marked away and their visit
-  closes at their last activity. Expiry happens when state is read; there is no
-  background job.
-- **`presence` is the only live table.** Everything else (users, lockers,
-  sessions, sets) is history and is never rewritten by expiry.
-- **Phones are first-class.** Every change must work at 390px wide. On a phone
-  the screen is a camera onto the same gym at 2× pixels (3× on desktop). Never
-  shrink the world to fit. Check both widths before calling UI work done.
-- **Design for a handful of people at once**, about one class: two or three
-  machines per station. Don't build for scale the room can't show.
+- **The map and the timeline are the product.** The editor is a large map
+  beside one day's timeline (tabs on phones). The copilot is a collapsible
+  side panel. Don't add dashboards, feeds or panels that compete with them.
+- **Direct manipulation first.** Search, add, reorder, retime, resize and
+  remove happen on the map and timeline and show at once. Forms are for
+  details (notes, exact times), never the only way to act. Every drag has a
+  button alternative (move earlier/later, move to another day).
+- **Users choose; Wayline connects.** Never add places, reorder the plan or
+  change times on the user's behalf. The app suggests; a person accepts.
+- **Activities and transport are different things.** An activity is somewhere
+  the travellers chose. A transport segment connects two *consecutive*
+  activities and is deleted the moment they stop being neighbours. Don't store
+  transport as an activity.
+- **No chat, comments, reviews, social feeds, bookings, payments, expenses,
+  AI-generated trips or multi-day route optimisation** (V1 scope). Ask first.
 
-## Pixel art rules
+## Truthful transportation
 
-- All art is drawn in code in `public/sprites.js`: rectangles on one world-pixel
-  grid, the shared palette `P`, a 1 px `INK` outline added by `make()`. Don't load
-  image assets, and never copy another product's sprites or maps (Gather was a
-  reference for scale and feel only).
-- The canvas is scaled by whole numbers with `image-rendering: pixelated`. No
-  smoothing, no fractional zoom.
-- Animations are two frames. Clarity beats detail: the pose should say the
-  exercise at a glance.
-- Text people read (name tags, the panel, the door) is HTML over the canvas, not
-  pixels: it has to stay readable and accessible.
+- Route data (durations, lines, stops, times) comes only from the Routes API
+  response. Never estimate, interpolate or invent a route, line, departure or
+  fare. If Google can't answer, say why, in the UI.
+- Display arithmetic on real data is fine ("arrive ≈ 12:05" = departure +
+  Google's duration) but must be labelled as approximate.
+- Transit needs a departure time within Google's window (7 days back to 100
+  days ahead); say so instead of calling the API outside it.
+- Route lookups are explicit (a button) and deduplicated server-side by
+  pair + departure. Never call Google on drag, render, or snapshot receipt.
+  A time change marks a route *stale*; it doesn't recalculate on its own.
+- Demo places (`demo:` ids) are labelled "Demo place" everywhere, have no
+  opening hours, and can't be routed.
 
-## Real-time (crit 9)
+## The AI copilot
 
-Real-time is still to come. Today several people share one gym state, and each
-browser sees the others as of its last page load, its own last action, or its
-return to the tab, not within a second of a change. Crit 9 propagates changes live;
-direct interaction (a reaction, a fist bump) comes after that, only if presence
-needs it. When real-time arrives:
+- Deterministic first: `src/schedule.ts` computes end times, gaps, overlaps,
+  shortfalls and every candidate fix with its exact edits. The model never
+  does time arithmetic and never proposes an edit of its own.
+- The model gets structured, verified input (`copilotInput`) and answers with
+  ids from it; `validateAnswer` drops anything else. Keep it that way.
+- Nothing is applied without an explicit click. `applyProposal` re-derives the
+  proposal and refuses (409) if any value it changes has moved since the
+  preview.
+- With no provider configured the rule-based check still works and the UI
+  says AI is unavailable. Never show canned text as if a model wrote it.
+- One model call per unchanged day (cached by input hash), per-user rate
+  limited, only on request.
 
-- Broadcast from the action functions in `src/gym.ts` (enter, arrive, approach,
-  start, finish, cancel, stepOff, leave), sending the same public
-  shape as `/api/floor` (never a pass, never numbers).
-- Feed it to `world.setPeople()`, which already treats everyone as an entity: a
-  newcomer walks in from the door, a changed exercise walks to the new machine,
-  someone leaving walks out. Other people's changes move their character, not a
-  notification or a list item.
-- Choose the transport deliberately and record why in a decision record in
-  `docs/decisions/`. Server-sent events need no dependency; WebSockets would.
-- Until then, don't describe the app as real-time anywhere: not in `README.md`, the
-  UI copy or `PROCESS.md`.
+## Collaboration and integrity
+
+- The server is authoritative. Every itinerary change goes through
+  `createTripStore` in `src/trips.ts`, inside `mutate()`: one transaction, trip
+  `rev` bumped, stale segments pruned, then the snapshot broadcast. Persist
+  first, broadcast after commit. Don't write to these tables anywhere else.
+- Content edits carry `baseVersion`; a mismatch is a 409 with the current
+  activity, and the UI offers "load theirs" or "save mine over theirs". Never
+  drop the version check to make a conflict go away.
+- Adds carry a client-generated `clientId` (unique per trip), so retries and
+  reconnect replays can't duplicate.
+- Clients ignore snapshots with a lower `rev` than they hold; on reconnect the
+  stream sends a fresh snapshot. Real-time is SSE from one in-process hub;
+  this holds only while Fly runs one machine (ADR 0003).
+- Presence is secondary. It never substitutes for synchronising the plan.
+
+## Access and secrets
+
+- Roles: owner, collaborator, everyone else. Non-members get the same 404 as
+  a missing trip. Only owners invite, rename, change dates, delete or remove
+  people; collaborators edit the itinerary and can leave.
+- Invite links are 256-bit random tokens, stored hashed, shown once, replaced
+  or revoked by the owner. Never authorise by trip id alone.
+- Sessions are HttpOnly SameSite=Lax cookies (Secure behind Fly's TLS), stored
+  hashed. Writes require JSON and a same-origin `Origin`.
+- `GOOGLE_MAPS_SERVER_KEY` and `ANTHROPIC_API_KEY` never leave the server.
+  `/api/config` is the only place the browser key is exposed, and its key set
+  is pinned by `spec/restart.test.ts`. No keys in the repo, ever.
+- Google content: store place ids indefinitely; coordinates and route
+  options are a temporary copy dropped/refreshed after 30 days; addresses,
+  hours and details are fetched live and never stored. Show "Google Maps"
+  attribution where Google data appears without a Google map.
 
 ## Engineering rules
 
-- **Stack:** Node 24's own `http` server and `node:sqlite`, TypeScript run directly
-  by Node (type stripping, so only erasable syntax: no `enum`, no parameter
-  properties, and imports end in `.ts`). The client is hand-written HTML, CSS
-  and JS in `public/`, with no build step: `reception.js` (check-in, how-to),
-  `locker.js` (your history), `app.js` (the floor's panel and wiring),
-  `world.js` (layout, people, routes, camera, the canvas loop) and `sprites.js`
-  (the art). **Add no runtime dependency without
-  asking.**
-- **Storage:** one SQLite file under `DATA_DIR` (`/data` on Fly, the only place that
-  survives a redeploy; `./data` locally). Schema changes must be additive (`create
-  ... if not exists`, a new column with a default), because the live database
-  already has people in it.
-- **Identity:** a user is an opaque id. The display name is a label: never look
-  anyone up by name. The gym pass is a secret. It is returned only to its owner
-  (`/api/me`) and must never appear in `/api/floor` or anything public.
-- **Every state change goes through `src/gym.ts`** (enter, arrive, approach,
-  start, finish, cancel, stepOff, leave). They
-  are the events the live floor will broadcast, so keep them as single functions
-  rather than scattering writes.
-- **Validate on the server.** The client's checks are a convenience; the server
-  rejects bad input with a 400 and writes nothing.
+- **Stack:** Node 24's `http` and `node:sqlite`, TypeScript by type stripping
+  (erasable syntax only: no `enum`, no parameter properties, imports end in
+  `.ts`). Client is hand-written HTML/CSS/JS modules in `public/` with no build
+  step: `app.js` (routing, auth, dashboard, join), `editor.js` (the trip
+  workspace), `map.js` (Google map or labelled schematic), `ui.js` (helpers).
+  **Add no runtime dependency without asking.** The AI provider uses `fetch`
+  for this reason.
+- Build DOM with `h()`; user text goes in as text nodes, never `innerHTML`.
+- **Storage:** `DATA_DIR/wayline.db` (`/data` on Fly). Schema changes are
+  additive. The old `gym.db` beside it is left untouched as the gym's record.
+- **Validate on the server.** Bad input is a 400 that writes nothing.
 - **Starter contract:** `/` answers 200; `/readme/` serves `README.md` in full,
-  rendered on the server with no script needed; the app listens on
-  `0.0.0.0:$PORT`. Don't touch `fly.toml`'s machine, volume or region settings, or
-  `spec/invariants.test.ts`.
+  server-rendered; listen on `0.0.0.0:$PORT`. Don't touch `fly.toml`'s machine,
+  volume or region settings, or `spec/invariants.test.ts`.
 
 ## Before calling something done
 
-- Start the app (`pnpm start`) and run `pnpm check`. Both must be green.
-- For UI changes, look at it at 1920×1080 and 390×844. `spec/viewports.test.ts`
-  catches a shrunk or blurred world, a machine you can't tap, a tap that starts
-  a set instead of setting one up, a camera that loses you, a machine that
-  doesn't animate, overlapping name tags and cramped inputs.
-  `spec/lifecycle.test.ts` covers expiry and old data with a fake clock. Run the
-  spec on a fresh `DATA_DIR`: people left on machines in a local database will
-  make the browser checks find them taken. Only a person can
-  judge whether it still feels like a gym.
-- A promise the README makes that can be tested belongs in `spec/`. When you add
-  or change one, add or change its check.
-- When I correct the same mistake twice, the fix goes here or into `spec/`, not
-  into another retry.
+- Start the app on a fresh `DATA_DIR` (`pnpm start`) and run `pnpm check`;
+  both must be green. `pnpm check:evidence` too before a crit.
+- For UI changes, look at it at 1920×1080 and 390×844 in a real browser.
+  `spec/browser.test.ts` checks layout at both, keyboard reordering,
+  persistence after reload, and two browsers seeing each other's changes.
+- A testable README promise belongs in `spec/`. When a check is added for a
+  bug, break the code once to see it fail.
+- Never claim a Google or AI integration works unless it has been exercised
+  with real credentials; say what was and wasn't verified.
+- Don't write first-person process claims, research or reflections for the
+  student. Factual notes go in `docs/`.
+- When I correct the same mistake twice, the fix goes here or into `spec/`.

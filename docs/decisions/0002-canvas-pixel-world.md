@@ -1,6 +1,8 @@
 # 2. One canvas for the pixel gym, HTML for the words
 
 Date: 2026-10-04 · Status: accepted (for crit 8; revisit if the room grows)
+· Superseded 2026-10-09: the Virtual Gym was replaced by Wayline, which has no
+canvas world. Kept as the record of the gym.
 
 ## Context
 
