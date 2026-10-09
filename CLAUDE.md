@@ -30,10 +30,36 @@ contradict the README, stop and ask. Don't quietly change the product.
 - **No chat, comments, reviews, social feeds, bookings, payments, expenses,
   AI-generated trips or multi-day route optimisation** (V1 scope). Ask first.
 
+## Discovery (homepage)
+
+- The homepage is public: anyone can browse curated itineraries, search
+  destinations and preview. Trips, copying an itinerary and invites need an
+  account.
+- Itineraries are Wayline's own templates (`itinerary_templates`,
+  `src/curated.ts`), labelled "Curated by Wayline". Never present them as
+  user-generated, and never add ratings, view counts or popularity numbers.
+- Never write a Google place id by hand. Curated stops carry a search query
+  and approximate coordinates; `discovery.ts` stores an id only when Google
+  returns a match within 1.5 km, and the UI labels unmatched stops
+  "Approximate location".
+- Rank by great-circle distance (`haversineKm`, to the template or its
+  nearest stop), never by matching city names.
+- Location: ask only when the user presses "Use my location"; if refused,
+  don't ask again that session. Coordinates are used for the request and
+  never stored or logged on the server; the browser keeps a ~1 km rounded copy
+  in sessionStorage only.
+- When nothing curated is near, show Google places as *individual places*,
+  visibly distinct from itineraries.
+- Google calls happen on intent only: autocomplete is debounced (300 ms) with
+  a session token; details and photos load when a place is opened; routes
+  load when "Get travel times" is pressed. Public Google-backed endpoints are
+  rate-limited per IP.
+
 ## Truthful transportation
 
-- Route data (durations, lines, stops, times) comes only from the Routes API
-  response. Never estimate, interpolate or invent a route, line, departure or
+- Route data (durations, lines, stops, times, geometry) comes only from the
+  Routes API response. Draw a route line only from Google's polyline; the
+  dashed stop-order line must stay visibly different. Never estimate, interpolate or invent a route, line, departure or
   fare. If Google can't answer, say why, in the UI.
 - Display arithmetic on real data is fine ("arrive ≈ 12:05" = departure +
   Google's duration) but must be labelled as approximate.
@@ -98,8 +124,11 @@ contradict the README, stop and ask. Don't quietly change the product.
 - **Stack:** Node 24's `http` and `node:sqlite`, TypeScript by type stripping
   (erasable syntax only: no `enum`, no parameter properties, imports end in
   `.ts`). Client is hand-written HTML/CSS/JS modules in `public/` with no build
-  step: `app.js` (routing, auth, dashboard, join), `editor.js` (the trip
-  workspace), `map.js` (Google map or labelled schematic), `ui.js` (helpers).
+  step: `app.js` (routing, nav, auth, dashboard, join), `home.js` (the
+  discovery homepage), `preview.js` (itinerary preview), `places.js` (place
+  inspector), `editor.js` (the trip workspace), `map.js` (Google map or
+  labelled schematic), `ui.js` (helpers). Server-side Google calls live only
+  in `src/google.ts`, behind `src/discovery.ts` and the trip routes.
   **Add no runtime dependency without asking.** The AI provider uses `fetch`
   for this reason.
 - Build DOM with `h()`; user text goes in as text nodes, never `innerHTML`.

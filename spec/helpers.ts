@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -137,8 +138,20 @@ export function watchEvents(baseUrl: string, c: Client, tripId: string) {
 
 // A second, private copy of the app on its own port and database, for what
 // the shared app under test can't show: a restart, or a particular config.
+// A port the OS says is free, so parallel test files never collide.
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address() as { port: number };
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
 export async function startApp(env: Record<string, string> = {}, dataDir = mkdtempSync(join(tmpdir(), "wayline-spec-"))) {
-  const port = 9100 + Math.floor(Math.random() * 800);
+  const port = await freePort();
   const proc: ChildProcess = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "src/server.ts"], {
     env: {
       PATH: process.env.PATH ?? "",
@@ -152,11 +165,15 @@ export async function startApp(env: Record<string, string> = {}, dataDir = mkdte
     stdio: ["ignore", "pipe", "pipe"],
   });
   const url = `http://127.0.0.1:${port}`;
-  for (let i = 0; i < 100; i++) {
+  let exited = false;
+  proc.once("exit", () => (exited = true));
+  for (let i = 0; ; i++) {
+    if (exited) throw new Error(`the app on port ${port} exited before answering`);
     try {
       await fetch(url);
       break;
     } catch {
+      if (i > 100) throw new Error(`the app on port ${port} never answered`);
       await new Promise((r) => setTimeout(r, 100));
     }
   }
@@ -165,6 +182,7 @@ export async function startApp(env: Record<string, string> = {}, dataDir = mkdte
     dataDir,
     stop: () =>
       new Promise<void>((resolve) => {
+        if (exited) return resolve();
         proc.once("exit", () => resolve());
         proc.kill("SIGTERM");
       }),

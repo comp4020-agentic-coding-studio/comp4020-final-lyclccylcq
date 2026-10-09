@@ -283,6 +283,7 @@ export async function openEditor(root, tripId, ctx) {
           h("span", { class: `tag tag-${a.kind}` }, KIND_LABEL[a.kind]),
           h("span", {}, dur(a.durationMin)),
           a.place?.source === "demo" && h("span", { class: "tag tag-demo", title: "Demo fixture, not data from Google" }, "Demo place"),
+          a.place?.source === "curated" && h("span", { class: "tag tag-demo", title: "From Wayline's curated sample data, not matched to a Google place" }, "Approximate location"),
           !a.place && h("span", { class: "muted" }, "No place"),
         ),
         a.notes && h("p", { class: "stop-notes" }, a.notes),
@@ -389,11 +390,11 @@ export async function openEditor(root, tripId, ctx) {
   }
 
   function routeButton(prev, next, busy, label, force = false) {
-    const demo = prev.place?.source === "demo" || next.place?.source === "demo";
+    const unverified = prev.place?.source !== "google" || next.place?.source !== "google";
     const disabledWhy = !ctx.config.routes
       ? "Routes need Google Maps configured on the server"
-      : demo
-        ? "Demo places can't be routed"
+      : unverified
+        ? "Only places matched to Google Maps can be routed"
         : null;
     return h(
       "span",

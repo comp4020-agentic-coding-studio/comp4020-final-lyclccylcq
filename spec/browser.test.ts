@@ -140,3 +140,68 @@ describe.skipIf(!chromePath)("in a real browser", () => {
     await sleep(50);
   });
 });
+
+// The homepage's discovery flow, end to end in a real browser.
+describe.skipIf(!chromePath)("homepage discovery in a real browser", () => {
+  const cards = `[...document.querySelectorAll('#near .it-card:not(.skeleton) h3')].map(e => e.textContent)`;
+
+  it("uses the browser's location to recommend nearby itineraries, then previews one and comes back", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(390, 844, true);
+    await page.geolocation(baseUrl, { lat: -35.2835, lng: 149.1281 }); // central Canberra
+    await page.goto(new URL("/", baseUrl).href);
+    await page.waitFor(`document.querySelector('.hero h1')?.textContent === 'Your next journey starts here.'`);
+    await page.waitFor(`${cards}.length > 4`); // general content before any location
+    await page.eval(`[...document.querySelectorAll('button')].find(b => b.textContent.includes('Use my location')).click()`);
+    await page.waitFor(`document.querySelector('.chip-place') && ${cards}.length === 4`);
+    expect(await page.eval(`document.querySelector('#near h2').textContent`)).toBe("Near you");
+    const distances = await page.eval<number[]>(`[...document.querySelectorAll('#near .it-distance')].map(e => parseFloat(e.textContent))`);
+    expect(distances).toEqual([...distances].sort((a, b) => a - b));
+    expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+
+    // preview: ordered stops, a marker per stop, an inspector per place
+    await page.eval(`document.querySelector('#near .it-card .btn-outline').click()`);
+    await page.waitFor(`location.pathname.startsWith('/itineraries/') && document.querySelectorAll('.pv-stop').length > 1`);
+    const stops = await page.eval<number>(`document.querySelectorAll('.pv-stop').length`);
+    expect(await page.eval<number>(`document.querySelectorAll('.schematic-stop, .pin:not(.pin-result)').length`)).toBe(stops);
+    await page.eval(`document.querySelector('.pv-stop .btn-ghost').click()`);
+    await page.waitFor(`document.querySelector('dialog[open].place-dialog h2')`);
+    await page.eval(`document.querySelector('dialog[open]').close()`);
+    await page.eval(`document.querySelector('.back-link').click()`);
+    await page.waitFor(`location.pathname === '/' && document.querySelector('.chip-place') && ${cards}.length === 4`);
+  });
+
+  it("updates recommendations for a searched destination, independent of location", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    await page.geolocation(baseUrl, "denied");
+    await page.goto(new URL("/", baseUrl).href);
+    await page.waitFor(`document.querySelector('#dest-search')`);
+    const config = await page.eval<any>(`fetch('/api/config').then(r => r.json())`);
+    await page.eval(`(() => { const i = document.querySelector('#dest-search'); i.focus(); i.value = 'Tokyo'; i.dispatchEvent(new Event('input')); })()`);
+    await page.waitFor(`document.querySelector('#dest-list li[role=option]')`, 4000);
+    if (config.places === "demo") expect(await page.eval(`document.querySelector('#dest-list li[role=option] strong').textContent`)).toBe("Tokyo");
+    await page.eval(`document.querySelector('#dest-list li[role=option]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`);
+    await page.waitFor(`/Tokyo/.test(document.querySelector('.chip-place')?.textContent ?? '') && ${cards}.length > 0`);
+    const dest = await page.eval<string[]>(`[...document.querySelectorAll('#near .it-cover-dest')].map(e => e.textContent)`);
+    expect(dest.every((d) => /Tokyo/.test(d))).toBe(true);
+  });
+
+  it("carries on without location when permission is denied, and doesn't ask again", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(390, 844, true);
+    await page.geolocation(baseUrl, "denied");
+    await page.goto(new URL("/", baseUrl).href);
+    await page.waitFor(`${cards}.length > 4`);
+    await page.eval(`window.__asks = 0; const g = navigator.geolocation.getCurrentPosition.bind(navigator.geolocation); navigator.geolocation.getCurrentPosition = (...a) => { window.__asks++; return g(...a); };`);
+    const btn = `[...document.querySelectorAll('button')].find(b => b.textContent.includes('Use my location'))`;
+    if (await page.eval<boolean>(`Boolean(${btn}) && !${btn}.hidden`)) {
+      await page.eval(`${btn}.click()`);
+      await page.waitFor(`/denied|off/i.test(document.querySelector('.hero-status').textContent + document.querySelector('.place-chip').textContent)`);
+      if (await page.eval<boolean>(`Boolean(${btn}) && !${btn}.hidden`)) await page.eval(`${btn}.click()`);
+    }
+    expect(await page.eval<number>(`window.__asks`)).toBeLessThanOrEqual(1);
+    expect(await page.eval<number>(`${cards}.length`)).toBeGreaterThan(4); // general recommendations still shown
+    expect(await page.eval(`document.querySelector('#dest-search').disabled`)).toBe(false);
+  });
+});

@@ -31,6 +31,7 @@ export type RouteOption = {
   distanceM?: number;
   steps?: RouteStep[];
   message?: string;
+  polyline?: string;
 };
 
 export type DayActivity = {

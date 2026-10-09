@@ -1,4 +1,6 @@
 import { openEditor } from "/editor.js";
+import { renderHome } from "/home.js";
+import { renderPreview } from "/preview.js";
 import { api, ApiError, avatar, fmtRange, h, icon, openDialog, relTime, toast } from "/ui.js";
 
 const app = document.getElementById("app");
@@ -23,11 +25,20 @@ async function route() {
   cleanup?.();
   cleanup = null;
   const path = location.pathname;
+  const next = new URLSearchParams(location.search).get("next");
   const join = path.match(/^\/join\/([A-Za-z0-9_-]+)$/);
   const trip = path.match(/^\/trips\/([0-9a-f-]{36})$/);
+  const itinerary = path.match(/^\/itineraries\/([a-z0-9-]{3,80})$/);
+  window.scrollTo(0, 0);
 
-  if (!state.me) return renderAuth(path === "/login" ? new URLSearchParams(location.search).get("next") : path);
-  if (path === "/login") return navigate(new URLSearchParams(location.search).get("next") || "/", { replace: true });
+  // open to everyone
+  if (path === "/") return void (cleanup = renderHome(app, ctx()));
+  if (itinerary) return void (cleanup = await renderPreview(app, itinerary[1], ctx()));
+  if (path === "/privacy") return renderPrivacy();
+  if (path === "/login") return state.me ? navigate(next || "/", { replace: true }) : renderAuth(next);
+
+  // everything else needs an account
+  if (!state.me) return navigate(`/login?next=${encodeURIComponent(path + location.search)}`, { replace: true });
   if (join) return renderJoin(join[1]);
   if (trip) {
     app.replaceChildren(h("div", { class: "boot", role: "status" }, "Opening trip…"));
@@ -38,42 +49,103 @@ async function route() {
     }
     return;
   }
-  return renderDashboard();
+  if (path === "/trips") {
+    await renderDashboard();
+    if (new URLSearchParams(location.search).get("new") === "1") newTripDialog();
+    return;
+  }
+  renderMissing("There's no page at this address.");
 }
 
-function topbar() {
+const ctx = () => ({ me: state.me, config: state.config, navigate, signOut, topbar, footer, createTrip });
+
+function createTrip() {
+  if (state.me) newTripDialog();
+  else navigate(`/login?next=${encodeURIComponent("/trips?new=1")}`);
+}
+
+function topbar(active = "") {
   return h(
     "header",
     { class: "topbar" },
     h("a", { class: "brand", href: "/", "data-link": true }, h("span", { class: "brand-mark", "aria-hidden": "true" }), "Wayline"),
     h(
       "nav",
-      { class: "topbar-nav" },
-      h("a", { href: "/readme/" }, "About"),
-      state.me &&
-        h(
-          "span",
-          { class: "me" },
-          avatar({ id: state.me.id, displayName: state.me.displayName }, "sm"),
-          h("span", { class: "me-name" }, state.me.displayName),
-        ),
-      state.me && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: signOut }, "Sign out"),
+      { class: "topbar-nav", "aria-label": "Main" },
+      h("a", { href: "/#explore", "data-link": true, class: active === "home" ? "on" : "" }, "Explore"),
+      h("a", { href: "/trips", "data-link": true, class: active === "trips" ? "on" : "" }, "My Trips"),
+      h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: createTrip }, icon("plus"), h("span", { class: "hide-xs" }, "Create Trip")),
+      state.me
+        ? h(
+            "span",
+            { class: "me" },
+            avatar({ id: state.me.id, displayName: state.me.displayName }, "sm"),
+            h("span", { class: "me-name" }, state.me.displayName),
+            h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: signOut }, "Sign out"),
+          )
+        : h("a", { class: "btn btn-ghost btn-sm", href: `/login?next=${encodeURIComponent(location.pathname)}`, "data-link": true }, "Sign in"),
     ),
+  );
+}
+
+function footer() {
+  return h(
+    "footer",
+    { class: "site-footer" },
+    h("div", {}, h("strong", {}, "Wayline"), h("span", { class: "muted" }, " · plan trips together")),
+    h(
+      "nav",
+      { "aria-label": "Legal and about" },
+      h("a", { href: "/readme/" }, "About"),
+      h("a", { href: "/privacy", "data-link": true }, "Privacy"),
+      h("a", { href: "https://maps.google.com/help/terms_maps/", target: "_blank", rel: "noopener" }, "Google Maps Terms"),
+      h("a", { href: "https://policies.google.com/privacy", target: "_blank", rel: "noopener" }, "Google Privacy Policy"),
+    ),
+    h("p", { class: "muted small" }, "Maps, places and routes come from Google Maps Platform when it's configured. Sample itineraries are curated by Wayline."),
+  );
+}
+
+function renderPrivacy() {
+  const ext = (href, label) => h("a", { href, target: "_blank", rel: "noopener" }, label);
+  app.replaceChildren(
+    topbar(),
+    h(
+      "main",
+      { class: "readme" },
+      h("h1", {}, "Privacy"),
+      h("p", { class: "callout" }, "Draft for the V1 prototype; to be reviewed by the project author before public use."),
+      h("h2", {}, "What Wayline stores"),
+      h("p", {}, "Your account (username, display name and a hashed password), the trips you create or join, and what you add to them. Everyone on a trip can see that trip."),
+      h("h2", {}, "Your location"),
+      h(
+        "p",
+        {},
+        "Wayline only asks for your location when you press “Use my location”. The coordinates go with that request to find nearby itineraries and the name of your area, and are not stored on the server. Your browser keeps a rounded copy (about 1 km) for the current tab so the homepage remembers where you were exploring.",
+      ),
+      h("h2", {}, "Google Maps Platform"),
+      h(
+        "p",
+        {},
+        "Searches, place details, maps and routes are provided by Google Maps Platform, so those requests are processed by Google under the ",
+        ext("https://maps.google.com/help/terms_maps/", "Google Maps Terms of Service"),
+        " and the ",
+        ext("https://policies.google.com/privacy", "Google Privacy Policy"),
+        ". Wayline keeps Google place IDs, not copies of Google's place content.",
+      ),
+    ),
+    footer(),
   );
 }
 
 async function signOut() {
   await api("/api/auth/logout", { method: "POST", body: {} }).catch(() => {});
   state.me = null;
-  navigate("/login", { replace: true });
+  navigate("/", { replace: true });
 }
 
 // --- sign in -----------------------------------------------------------------
 
 function renderAuth(next) {
-  if (location.pathname !== "/login") {
-    history.replaceState(null, "", `/login${next && next !== "/" ? `?next=${encodeURIComponent(next)}` : ""}`);
-  }
   let mode = "signup";
   const error = h("p", { class: "form-error", role: "alert", hidden: true });
   const nameField = h("label", { class: "field" }, h("span", {}, "Your name"), h("input", { name: "displayName", autocomplete: "nickname", maxlength: 40, placeholder: "How collaborators will see you" }));
@@ -165,7 +237,7 @@ function heroArt() {
 // --- dashboard ---------------------------------------------------------------
 
 async function renderDashboard() {
-  app.replaceChildren(topbar(), h("main", { class: "dash" }, h("div", { class: "boot" }, "Loading your trips…")));
+  app.replaceChildren(topbar("trips"), h("main", { class: "dash" }, h("div", { class: "boot" }, "Loading your trips…")));
   let data;
   try {
     data = await api("/api/trips");

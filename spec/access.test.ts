@@ -13,7 +13,8 @@ describe("who can see and change a trip", () => {
     expect((await nobody.get("/api/trips")).status).toBe(401);
     expect((await nobody.get(`/api/trips/${trip.id}`)).status).toBe(401);
     expect((await nobody.get(`/api/trips/${trip.id}/events`)).status).toBe(401);
-    expect((await nobody.get("/api/places/search?q=zoo")).status).toBe(401);
+    // discovery is public; searching within a private trip is not
+    expect((await nobody.get(`/api/places/search?q=zoo&tripId=${trip.id}`)).status).toBe(401);
   });
 
   it("shows an outsider nothing, not even that the trip exists", async () => {

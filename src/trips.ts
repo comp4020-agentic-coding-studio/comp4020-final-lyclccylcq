@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { newToken, sha256 } from "./auth.ts";
 import { transaction } from "./db.ts";
 import { bad, HttpError, notFound } from "./errors.ts";
+import type { TemplateDetail } from "./itineraries.ts";
 import {
   analyseDay,
   type DayActivity,
@@ -131,8 +132,11 @@ function placeInput(v: unknown): { placeId: string; source: string; lat: number;
   if (typeof v !== "object") throw bad("Invalid place.");
   const p = v as Row;
   const placeId = text(p.placeId, "Place id", 300);
-  const source = p.source === "demo" ? "demo" : "google";
-  if (source === "demo" !== placeId.startsWith("demo:")) throw bad("Invalid place.");
+  // demo: Wayline's fixtures; curated: a template stop with no verified
+  // Google id (tpl: prefix); google: a real place id. Only google routes.
+  const source = p.source === "demo" ? "demo" : p.source === "curated" ? "curated" : "google";
+  const prefix = source === "demo" ? "demo:" : source === "curated" ? "tpl:" : null;
+  if (prefix ? !placeId.startsWith(prefix) : placeId.startsWith("demo:") || placeId.startsWith("tpl:")) throw bad("Invalid place.");
   const lat = Number(p.lat);
   const lng = Number(p.lng);
   if (!(Math.abs(lat) <= 90) || !(Math.abs(lng) <= 180)) throw bad("Invalid place coordinates.");
@@ -349,6 +353,42 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         q("insert into trip_members (trip_id, user_id, role, joined_at) values (?, ?, 'owner', ?)").run(id, userId, t);
         for (const date of datesBetween(startDate, endDate)) {
           q("insert into trip_days (id, trip_id, date) values (?, ?, ?)").run(randomUUID(), id, date);
+        }
+      });
+      return snapshot(id);
+    },
+
+    // A new trip, owned by the user, holding a copy of an itinerary's stops:
+    // one trip day per template day, starting on startDate. Stops keep their
+    // suggested times; nothing links back, so the copy is the user's to edit.
+    createFromTemplate(userId: string, tpl: TemplateDetail, input: Row): TripSnapshot {
+      if (!isDate(input.startDate)) throw bad("Choose a start date (YYYY-MM-DD).");
+      const startDate = input.startDate;
+      const dates = datesBetween(startDate, new Date(Date.parse(`${startDate}T00:00:00Z`) + (tpl.days - 1) * 86_400_000).toISOString().slice(0, 10));
+      const id = randomUUID();
+      transaction(db, () => {
+        const t = now();
+        q(
+          "insert into trips (id, owner_id, title, destination, start_date, end_date, timezone, dest_place_id, dest_lat, dest_lng, dest_cached_at, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ).run(id, userId, tpl.title, tpl.destination, startDate, dates[dates.length - 1], tpl.timezone, `tpl:${tpl.id}`, tpl.ref.lat, tpl.ref.lng, t, t, t);
+        q("insert into trip_members (trip_id, user_id, role, joined_at) values (?, ?, 'owner', ?)").run(id, userId, t);
+        const dayIds = dates.map((date) => {
+          const dayId = randomUUID();
+          q("insert into trip_days (id, trip_id, date) values (?, ?, ?)").run(dayId, id, date);
+          return dayId;
+        });
+        const ins = q(
+          `insert into activities (id, trip_id, day_id, client_id, position, title, kind, start_min, duration_min, notes,
+                                   place_id, place_source, lat, lng, place_cached_at, created_by, updated_by, updated_at)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        for (const s of tpl.stops) {
+          ins.run(
+            randomUUID(), id, dayIds[s.day - 1], `tpl:${s.id}`, s.position, s.title, KINDS.includes(s.kind as Kind) ? s.kind : "custom",
+            s.startMin, s.durationMin, s.note,
+            s.placeId ?? `tpl:${s.id}`, s.placeId ? "google" : "curated", s.lat, s.lng, t,
+            userId, userId, t,
+          );
         }
       });
       return snapshot(id);

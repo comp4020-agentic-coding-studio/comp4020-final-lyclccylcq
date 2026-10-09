@@ -55,3 +55,41 @@ process argument or a reflection.
 - **Not verified:** any live Google Maps Platform call (no keys available),
   any live AI call (no app key; the request/response code was exercised
   against a local stand-in only), and a Fly deploy.
+
+## Iteration 2: discovery homepage and Google service layer (9 October 2026)
+
+Factual notes for the author.
+
+- **New homepage** at `/` (public): hero with a destination autocomplete and
+  "Use my location"; "Near you" recommendations with category filters;
+  Explore destinations; Featured itineraries; My trips (signed in); footer
+  with Google Maps Terms, Google Privacy Policy and a draft Wayline privacy
+  page (`/privacy`). The trip dashboard moved from `/` to `/trips`.
+- **Itinerary preview** at `/itineraries/:id`: ordered stops (day tabs for
+  multi-day), map markers, a place inspector (details and photo on demand),
+  "Get travel times" per mode (Routes API, geometry drawn only from Google's
+  polyline), and "Plan this trip", which copies the stops into a new trip.
+- **Data model:** two new tables, `itinerary_templates` and
+  `itinerary_template_stops`, additive (no existing table changed). They
+  carry `source`, `author_id` and `visibility` so user-published itineraries
+  can be added later. 13 curated templates (Canberra 4, Sydney 5, Tokyo 4)
+  are seeded on start from `src/curated.ts`.
+- **Place ids:** none were written by hand. Each curated stop has a query and
+  approximate coordinates chosen for this project; when a server key is set,
+  opening a template looks up each stop once (Text Search, `places.id,
+  places.location`) and stores the id only if the result is within 1.5 km.
+  No key was available, so **no stop has a verified Google place id yet**.
+- **Endpoints added:** `GET /api/itineraries`, `/api/itineraries/featured`,
+  `/api/itineraries/nearby`, `/api/itineraries/destinations`,
+  `/api/itineraries/:id`, `POST /api/itineraries/:id/copy`,
+  `GET /api/places/autocomplete`, `/api/places/nearby`, `/api/places/photo`,
+  `GET /api/geo/reverse`, `POST /api/routes`. `GET /api/places/search` and
+  `/api/places/:id` became public (with per-IP limits).
+- **Behaviour change:** anonymous place search used to return 401; it is now
+  allowed (rate-limited). `spec/access.test.ts` was updated to match; search
+  scoped to a private trip still requires membership.
+- **Verification:** `pnpm check` 65/65 across 10 spec files. Google behaviour
+  is checked against a **mocked** Google server only
+  (`spec/google-mock.test.ts`); no live Google request has been made.
+  Deliberately breaking distance ranking failed 3 tests; widening a field
+  mask failed 1.

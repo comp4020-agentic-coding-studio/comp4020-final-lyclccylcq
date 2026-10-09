@@ -25,6 +25,7 @@ function loadGoogle(key) {
   return loader;
 }
 
+const MODE_COLOUR = { WALK: "#0F7C8C", TRANSIT: "#7A5AF8", DRIVE: "#F2603D" };
 const KIND_COLOUR = { attraction: "#F2603D", food: "#E08A00", shopping: "#7A5AF8", accommodation: "#0F7C8C", custom: "#5F6B7A" };
 
 export async function createMap(el, { config, onSelectStop, onSelectResult }) {
@@ -56,6 +57,7 @@ async function googleMap(el, config, handlers) {
   });
   let markers = [];
   let line = null;
+  let routeLines = [];
   let lastFit = "";
 
   const onAuthFail = () => {
@@ -76,6 +78,9 @@ async function googleMap(el, config, handlers) {
       for (const m of markers) m.map = null;
       markers = [];
       line?.setMap(null);
+      for (const r of routeLines) r.setMap(null);
+      // real route geometry from the Routes API, drawn solid
+      routeLines = (data.routes ?? []).map((r) => new Polyline({ map, path: r.path, strokeColor: MODE_COLOUR[r.mode] ?? "#1C2430", strokeOpacity: 0.85, strokeWeight: 5, zIndex: 5 }));
 
       stops.forEach((s, i) => {
         const pin = h("button", { class: `pin${s.selected ? " pin-on" : ""}`, type: "button", style: `--c:${KIND_COLOUR[s.kind]}`, "aria-label": `Stop ${i + 1}: ${s.title}` }, h("span", {}, String(i + 1)));
@@ -104,7 +109,7 @@ async function googleMap(el, config, handlers) {
       }
 
       const pts = [...stops, ...results];
-      const key = pts.map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join("|") || (center ? `${center.lat},${center.lng}` : "");
+      const key = (data.fitKey ?? "") + pts.map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join("|") || (center ? `${center.lat},${center.lng}` : "");
       if (key === lastFit) return;
       lastFit = key;
       if (pts.length > 1) {
@@ -181,7 +186,8 @@ async function schematic(el, handlers, problem) {
       const spanX = Math.max((maxLng - minLng) * k, 0.005);
       const spanY = Math.max(maxLat - minLat, 0.005);
       // room on the right for labels, and for the search bar and note on top and bottom
-      const pad = { left: 40, right: Math.min(200, W * 0.4), top: 110, bottom: 120 };
+      const short = H < 520;
+      const pad = { left: 40, right: Math.min(200, W * 0.3), top: short ? 40 : 110, bottom: short ? 110 : 120 };
       const scale = Math.min((W - pad.left - pad.right) / spanX, (H - pad.top - pad.bottom) / spanY);
       const cx = (minLng + maxLng) / 2;
       const cy = (minLat + maxLat) / 2;
@@ -190,11 +196,15 @@ async function schematic(el, handlers, problem) {
       const at = (p) => [midX + (p.lng - cx) * k * scale, midY - (p.lat - cy) * scale];
 
       if (stops.length > 1) node("polyline", { points: stops.map((s) => at(s).join(",")).join(" "), class: "schematic-path" });
+      for (const r of data.routes ?? []) {
+        node("polyline", { points: r.path.map((q) => at(q).join(",")).join(" "), class: "schematic-route", style: `stroke:${MODE_COLOUR[r.mode] ?? "#1C2430"}` });
+      }
       results.forEach((r) => {
         const [x, y] = at(r);
         const g = node("g", { class: `schematic-result${r.placeId === selectedPlaceId ? " on" : ""}`, tabindex: 0, role: "button", "aria-label": r.name });
         node("circle", { cx: x, cy: y, r: 8 }, g);
-        const t = node("text", { x: x + 13, y: y + 4.5 }, g);
+        const left = x > W * 0.62;
+        const t = node("text", { x: left ? x - 13 : x + 13, y: y + 4.5, "text-anchor": left ? "end" : "start" }, g);
         t.textContent = r.name;
         const pick = () => handlers.onSelectResult(r.placeId);
         g.addEventListener("click", pick);
@@ -206,7 +216,9 @@ async function schematic(el, handlers, problem) {
         node("circle", { cx: x, cy: y, r: 14 }, g);
         const n = node("text", { x, y: y + 4.5, "text-anchor": "middle", class: "num" }, g);
         n.textContent = String(i + 1);
-        const t = node("text", { x: x + 20, y: y + 4.5, class: "label" }, g);
+        // labels near the right edge go on the left of the marker
+        const left = x > W * 0.62;
+        const t = node("text", { x: left ? x - 20 : x + 20, y: y + 4.5, class: "label", "text-anchor": left ? "end" : "start" }, g);
         t.textContent = s.title;
         const pick = () => handlers.onSelectStop(s.id);
         g.addEventListener("click", pick);

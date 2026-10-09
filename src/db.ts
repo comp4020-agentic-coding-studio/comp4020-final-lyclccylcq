@@ -114,6 +114,51 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
       computed_by      text references users(id) on delete set null,
       unique (from_activity_id, to_activity_id)
     );
+
+    -- Itineraries people can discover and copy into a trip. V1 holds only
+    -- Wayline's curated samples (source 'curated', no author). The columns
+    -- for authorship and visibility are there so user-published itineraries
+    -- can live in the same table later.
+    create table if not exists itinerary_templates (
+      id              text primary key,
+      title           text not null,
+      destination     text not null,
+      description     text not null,
+      timezone        text not null,
+      ref_lat         real not null,
+      ref_lng         real not null,
+      days            integer not null default 1,
+      categories      text not null,
+      source          text not null check (source in ('curated', 'user')),
+      author_id       text references users(id) on delete set null,
+      visibility      text not null default 'public' check (visibility in ('public', 'unlisted', 'private', 'draft')),
+      featured        integer not null default 0,
+      content_version integer not null default 1,
+      created_at      integer not null,
+      updated_at      integer not null
+    );
+    create index if not exists itinerary_templates_public on itinerary_templates(visibility, featured);
+
+    -- An ordered stop. lat/lng are the template author's own approximate
+    -- location, not Google content. place_id is filled in only when Google
+    -- returns a match for place_query near those coordinates.
+    create table if not exists itinerary_template_stops (
+      id               text primary key,
+      template_id      text not null references itinerary_templates(id) on delete cascade,
+      day              integer not null default 1,
+      position         integer not null,
+      title            text not null,
+      kind             text not null,
+      start_min        integer,
+      duration_min     integer not null,
+      note             text not null default '',
+      lat              real not null,
+      lng              real not null,
+      place_query      text,
+      place_id         text,
+      place_checked_at integer,
+      unique (template_id, day, position)
+    );
   `);
   return db;
 }

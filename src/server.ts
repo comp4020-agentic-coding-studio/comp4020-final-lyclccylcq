@@ -6,7 +6,9 @@ import { clearCookie, COOKIE, createAuth, readCookie, sessionCookie, type User }
 import { createCopilot } from "./copilot.ts";
 import { openDb } from "./db.ts";
 import { HttpError } from "./errors.ts";
+import { createDiscovery } from "./discovery.ts";
 import { computeRouteOptions, DEMO_PLACES, googleConfigured, placeDetails, searchPlaces } from "./google.ts";
+import { createItineraryStore } from "./itineraries.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { createHub } from "./realtime.ts";
 import { zonedTimeToUtc } from "./schedule.ts";
@@ -24,6 +26,9 @@ const trips = createTripStore(db, Date.now, (tripId) => {
   }
   hub.publish(tripId, snap, (userId) => trips.roleOf(tripId, userId) !== null);
 });
+const itineraries = createItineraryStore(db);
+itineraries.seed();
+const discovery = createDiscovery({ itineraries, trips });
 const copilot = createCopilot(aiProvider());
 const port = Number(process.env.PORT ?? 8080);
 
@@ -141,8 +146,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     return json(res, 200, { ok: true }, { "set-cookie": clearCookie(isSecure(req)) });
   }
 
-  const user: User | null = auth.userForToken(readCookie(req.headers.cookie, COOKIE));
-  if (!user) return json(res, 401, { error: "Sign in to continue." });
+  const maybeUser: User | null = auth.userForToken(readCookie(req.headers.cookie, COOKIE));
+  const found = await discovery(req, url, maybeUser, () => body(req));
+  if (found) return json(res, found.status, found.data);
+
+  if (!maybeUser) return json(res, 401, { error: "Sign in to continue." });
+  const user: User = maybeUser;
 
   if (method === "GET" && path === "/api/auth/me") return json(res, 200, { user });
 
@@ -155,17 +164,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     }
   }
 
-  if (method === "GET" && path === "/api/places/search") {
-    const query = (url.searchParams.get("q") ?? "").trim();
-    if (query.length < 2 || query.length > 120) throw new HttpError(400, "Search for at least two characters.");
-    const tripId = url.searchParams.get("tripId");
-    const center = tripId ? trips.view(user.id, tripId).center : null;
-    return json(res, 200, await searchPlaces(query, center));
-  }
-  let m = path.match(/^\/api\/places\/([^/]+)$/);
-  if (method === "GET" && m) return json(res, 200, await placeDetails(decodeURIComponent(m[1])));
-
-  m = path.match(/^\/api\/invites\/([A-Za-z0-9_-]+)(\/accept)?$/);
+  let m = path.match(/^\/api\/invites\/([A-Za-z0-9_-]+)(\/accept)?$/);
   if (m) {
     if (method === "GET" && !m[2]) return json(res, 200, trips.previewInvite(user.id, m[1]));
     if (method === "POST" && m[2]) return json(res, 200, { tripId: trips.acceptInvite(user.id, m[1]) });
@@ -261,7 +260,7 @@ async function calculateRoute(user: User, tripId: string, input: Record<string, 
   }
   const reqInfo = trips.routeRequest(user.id, tripId, input.fromId, input.toId);
   if (reqInfo.from.place?.source !== "google" || reqInfo.to.place?.source !== "google") {
-    throw new HttpError(400, "Demo places aren't real Google places, so routes can't be calculated between them.");
+    throw new HttpError(400, "Only places verified with Google can be routed; demo and curated-only places can't.");
   }
   // Already calculated for this departure: no new API calls.
   if (reqInfo.existing && reqInfo.existing.departKey === reqInfo.departKey && input.force !== true) return trips.snapshot(tripId);
@@ -309,7 +308,7 @@ async function refreshStalePlaces(tripId: string): Promise<void> {
   }
 }
 
-const APP_PAGES = /^\/(login|trips\/[0-9a-f-]{36}|join\/[A-Za-z0-9_-]+)?$/;
+const APP_PAGES = /^\/(login|privacy|trips|trips\/[0-9a-f-]{36}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80})?$/;
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");

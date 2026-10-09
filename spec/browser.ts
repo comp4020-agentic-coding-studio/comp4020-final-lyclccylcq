@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -26,11 +27,19 @@ export type Page = {
   waitFor(expression: string, timeoutMs?: number): Promise<number>;
   click(selector: string): Promise<void>;
   screenshot(path: string): Promise<void>;
+  // the browser's location permission for this page's origin
+  geolocation(origin: string, at: { lat: number; lng: number } | "denied"): Promise<void>;
 };
 
 export async function launch() {
   if (!chromePath) return null;
-  const port = 9300 + Math.floor(Math.random() * 600);
+  const port = await new Promise<number>((resolve) => {
+    const srv = createNetServer();
+    srv.listen(0, "127.0.0.1", () => {
+      const p = (srv.address() as { port: number }).port;
+      srv.close(() => resolve(p));
+    });
+  });
   const chrome: ChildProcess = spawn(
     chromePath,
     ["--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", `--remote-debugging-port=${port}`, `--user-data-dir=${mkdtempSync(join(tmpdir(), "wayline-chrome-"))}`, "about:blank"],
@@ -93,6 +102,10 @@ export async function launch() {
       async click(selector) {
         const ok = await page.eval<boolean>(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.click(); return true; })()`);
         if (!ok) throw new Error(`nothing to click at ${selector}`);
+      },
+      async geolocation(origin, at) {
+        await send("Browser.setPermission", { permission: { name: "geolocation" }, setting: at === "denied" ? "denied" : "granted", origin, browserContextId });
+        if (at !== "denied") await s("Emulation.setGeolocationOverride", { latitude: at.lat, longitude: at.lng, accuracy: 50 });
       },
       async screenshot(path) {
         const { data } = await s("Page.captureScreenshot", { format: "png" });
