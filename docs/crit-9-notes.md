@@ -150,7 +150,8 @@ from the missing-version test):
 1. **Gaps found by review, not by the first build** ([`b4bb133`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b4bb133)):
    the start could be silently overwritten by a simultaneous change; a
    collaborator's change reset everyone's map; a route request reached a
-   configuration check before the membership check. Each has a test. The
+   configuration check before the membership check. Version and access fixes
+   have automated tests; map preservation was checked manually. The
    independent audit later found the start check incomplete. It was fixed
    in [`7278cfe`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/7278cfe), with a test that failed on the old code and a `CLAUDE.md`
    rule.
@@ -201,7 +202,7 @@ server answered the person making a change in the old order until the fix in
 | Real-time, deployed: a change reaches other sessions in about a second, no reload | Done; automated checks plus two rounds of production measurement |
 | One multi-user decision written down with options and costs | ADR 0003, accepted; the start-version defect and its fix are in its History |
 | Commits that grew with the work | Done (table above) |
-| `PROCESS.md` rewritten for Crit 9 | Rewritten; personal passages need the author |
-| `reflections/crit-9.md` | Needs the author's answers before it's final |
+| `PROCESS.md` rewritten for Crit 9 | Complete; current Wayline account, stack/workflow rationale and cited decisions |
+| `reflections/crit-9.md` | Complete; both standing prompts answered, 258 words |
 | Account of directing, grounding, correcting | Evidence above; the account is the author's |
-| Checks green, site live at the cutoff | Green at `54c282e`; recheck after the final push, which should land well before the 13:30 cutoff so CI and the deploy finish before the sweep at 13:45 |
+| Checks green, site live at the cutoff | Verified on 12 October at [`095a40f`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/095a40f): local HEAD, GitHub main and Fly release 23 matched; [CI](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/actions/runs/38161656198) passed all 14 files and 111 tests, evidence checks and deployment. Recheck after any later push; freeze by the 13:30 cutoff (the 13:45 sweep is not extra editing time). |
