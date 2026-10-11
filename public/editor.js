@@ -3,6 +3,7 @@ import {
   api,
   avatar,
   dur,
+  fill,
   fmtDay,
   fmtRange,
   guessKind,
@@ -159,7 +160,8 @@ export async function openEditor(root, tripId, ctx) {
     const t = S.trip;
     const online = S.presence.length ? S.presence : [{ id: me.id, displayName: me.displayName }];
     const issues = t.days.reduce((n, d) => n + d.analysis.issues.length, 0);
-    bar.replaceChildren(
+    fill(
+      bar,
       h("a", { class: "icon-btn", href: "/", "data-link": true, "aria-label": "Back to your trips" }, icon("back")),
       h("div", { class: "trip-title" }, h("h1", {}, t.title), h("p", {}, `${t.destination} · ${fmtRange(t.startDate, t.endDate)}`)),
       h(
@@ -584,7 +586,8 @@ export async function openEditor(root, tripId, ctx) {
     }
     searchPanel.hidden = false;
     if (S.place) return searchPanel.replaceChildren(placeCard(S.place));
-    searchPanel.replaceChildren(
+    fill(
+      searchPanel,
       panelHead(`${S.results.length} place${S.results.length === 1 ? "" : "s"}`),
       S.resultsSource === "demo" &&
         h("p", { class: "demo-note" }, h("strong", {}, "Demo places."), " Google Places isn't configured on this server, so these are a few fixed Sydney landmarks with approximate locations, not search results."),

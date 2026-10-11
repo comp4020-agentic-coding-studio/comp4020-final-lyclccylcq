@@ -7,7 +7,7 @@ import { createCopilot } from "./copilot.ts";
 import { openDb } from "./db.ts";
 import { HttpError } from "./errors.ts";
 import { createDiscovery } from "./discovery.ts";
-import { computeRouteOptions, DEMO_PLACES, googleConfigured, placeDetails, searchPlaces } from "./google.ts";
+import { computeRouteOptions, DEMO_PLACES, googleConfigured, mapsKeyWarnings, placeDetails, searchPlaces } from "./google.ts";
 import { createItineraryStore } from "./itineraries.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { createHub } from "./realtime.ts";
@@ -333,7 +333,15 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(port, "0.0.0.0", () => console.log(`Wayline listening on http://localhost:${port}`));
+server.listen(port, "0.0.0.0", () => {
+  console.log(`Wayline listening on http://localhost:${port}`);
+  // which integrations are on; never the key values
+  const on = (v: string | undefined) => (v ? "set" : "missing");
+  console.log(
+    `Google Maps: browser key ${on(process.env.GOOGLE_MAPS_BROWSER_KEY)}, server key ${on(process.env.GOOGLE_MAPS_SERVER_KEY)}, map id ${process.env.GOOGLE_MAPS_MAP_ID ? "set" : "DEMO_MAP_ID"}; AI ${on(process.env.ANTHROPIC_API_KEY)}`,
+  );
+  for (const w of mapsKeyWarnings()) console.warn(`Warning: ${w}`);
+});
 
 // Fly stops the machine when nobody's around; close streams and the database cleanly.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

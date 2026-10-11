@@ -1,7 +1,7 @@
 import { CATEGORY_LABEL } from "/home.js";
 import { createMap } from "/map.js";
 import { placeDialog } from "/places.js";
-import { api, decodePolyline, dur, h, hhmm, icon, KIND_LABEL, openDialog, toast } from "/ui.js";
+import { api, decodePolyline, dur, fill, h, hhmm, icon, KIND_LABEL, openDialog, toast } from "/ui.js";
 
 const MODE_LABEL = { WALK: "Walk", TRANSIT: "Public transport", DRIVE: "Drive" };
 
@@ -89,7 +89,8 @@ export async function renderPreview(app, id, ctx) {
     if (!config.routes) {
       return routeBar.replaceChildren(h("p", { class: "muted small" }, "Travel times between stops need Google Maps configured on the server. None are estimated here."));
     }
-    routeBar.replaceChildren(
+    fill(
+      routeBar,
       h(
         "div",
         { class: "modes", role: "group", "aria-label": "Travel mode" },
@@ -195,7 +196,7 @@ export async function renderPreview(app, id, ctx) {
   function inspect(s) {
     S.selected = s.id;
     render();
-    placeDialog({ placeId: s.placeId, name: s.title, lat: s.lat, lng: s.lng, source: s.placeId ? "google" : "curated", note: s.note, query: s.placeQuery });
+    placeDialog({ placeId: s.placeId, name: s.title, lat: s.lat, lng: s.lng, source: s.placeId ? "google" : "curated", note: s.note, query: s.placeQuery }, ctx);
   }
 
   function copyDialog() {

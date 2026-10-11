@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { mapsKeyWarnings } from "../src/google.ts";
 import { anon, signUp, startApp } from "./helpers.ts";
 
 // MOCKED Google Maps Platform. These checks run a private copy of the app
@@ -40,7 +41,19 @@ beforeAll(async () => {
     if (url.pathname === "/v1/places:autocomplete") {
       return send({ suggestions: [{ placePrediction: { placeId: "ChIJ_paris_city_id", text: { text: "Paris, France" }, structuredFormat: { mainText: { text: "Paris" }, secondaryText: { text: "France" } } } }] });
     }
-    if (url.pathname === "/v1/places:searchText") return send({ places: placesFor(body) });
+    if (url.pathname === "/v1/places:searchText") {
+      // error shapes as Google documents them, triggered by the query text
+      const fail: Record<string, [number, string, string]> = {
+        "trigger-invalid-key": [400, "INVALID_ARGUMENT", "API_KEY_INVALID"],
+        "trigger-disabled": [403, "PERMISSION_DENIED", "SERVICE_DISABLED"],
+        "trigger-billing": [403, "PERMISSION_DENIED", "BILLING_DISABLED"],
+        "trigger-quota": [429, "RESOURCE_EXHAUSTED", "RATE_LIMIT_EXCEEDED"],
+        "trigger-referrer": [403, "PERMISSION_DENIED", "API_KEY_HTTP_REFERRER_BLOCKED"],
+      };
+      const f = fail[String(body.textQuery)];
+      if (f) return send({ error: { code: f[0], status: f[1], message: `raw google detail ${f[2]}`, details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: f[2] }] } }, f[0]);
+      return send({ places: placesFor(body) });
+    }
     if (url.pathname === "/v1/places:searchNearby") {
       return send({ places: [{ id: "ChIJ_eiffel_tower_id", displayName: { text: "Eiffel Tower" }, location: { latitude: 48.8584, longitude: 2.2945 }, primaryTypeDisplayName: { text: "Tourist attraction" }, types: ["tourist_attraction"] }] });
     }
@@ -52,6 +65,8 @@ beforeAll(async () => {
         formattedAddress: "Paris, France",
         location: { latitude: 48.8566, longitude: 2.3522 },
         types: ["locality"],
+        rating: 4.7,
+        userRatingCount: 1234,
         regularOpeningHours: { weekdayDescriptions: ["Monday: Open 24 hours"] },
         googleMapsUri: "https://maps.google.com/?cid=1",
         photos: [{ name: "places/ChIJ_paris_city_id/photos/abc123", authorAttributions: [{ displayName: "A Photographer", uri: "https://maps.google.com/contrib/1" }] }],
@@ -113,7 +128,7 @@ describe("Google service layer (mocked Google)", () => {
     expect(last("/v1/places:searchNearby").body).toMatchObject({ includedTypes: ["tourist_attraction"], maxResultCount: 12, locationRestriction: { circle: { radius: 5000 } } });
 
     const full = await c.get("/api/places/ChIJ_paris_city_id");
-    expect(full.data).toMatchObject({ openingHours: ["Monday: Open 24 hours"], photo: { name: "places/ChIJ_paris_city_id/photos/abc123", attributions: [{ displayName: "A Photographer" }] } });
+    expect(full.data).toMatchObject({ rating: 4.7, ratingCount: 1234, openingHours: ["Monday: Open 24 hours"], photo: { name: "places/ChIJ_paris_city_id/photos/abc123", attributions: [{ displayName: "A Photographer" }] } });
     expect(last("/v1/places/ChIJ_paris_city_id").headers["x-goog-fieldmask"]).toContain("regularOpeningHours.weekdayDescriptions");
     const photo = await c.get(`/api/places/photo?name=${encodeURIComponent(full.data.photo.name)}`);
     expect(photo.data).toEqual({ uri: "https://lh3.googleusercontent.com/mock-photo" });
@@ -169,11 +184,44 @@ describe("Google service layer (mocked Google)", () => {
     expect(sources).toEqual(["google", "google", "curated"]);
   });
 
+  it("turns Google's errors into clear messages without leaking the raw error", async () => {
+    const c = anon(base);
+    const cases: [string, number, RegExp][] = [
+      ["trigger-invalid-key", 503, /rejected the server's Maps key/],
+      ["trigger-disabled", 503, /isn't enabled/],
+      ["trigger-billing", 503, /billing/],
+      ["trigger-quota", 503, /usage limits/],
+      ["trigger-referrer", 503, /website restriction/],
+    ];
+    for (const [q, status, msg] of cases) {
+      const r = await c.get(`/api/places/search?q=${q}`);
+      expect(r.status, q).toBe(status);
+      expect(r.data.error, q).toMatch(msg);
+      expect(JSON.stringify(r.data), q).not.toContain("raw google detail");
+    }
+  });
+
   it("never puts the server key in a response", async () => {
     const c = anon(base);
     const bodies = await Promise.all(
       ["/api/config", "/api/places/ChIJ_paris_city_id", "/api/places/autocomplete?q=par", "/api/geo/reverse?lat=1&lng=1", "/api/itineraries/tpl-tokyo-kamakura"].map((p) => fetch(new URL(p, base)).then((r) => r.text())),
     );
     for (const b of bodies) expect(b).not.toContain(KEY);
+  });
+});
+
+describe("Maps key configuration warnings", () => {
+  it("warns when one key is used for both browser and server, without printing it", () => {
+    const shared = "AIzaShared-key-value-under-test";
+    const w = mapsKeyWarnings({ GOOGLE_MAPS_BROWSER_KEY: shared, GOOGLE_MAPS_SERVER_KEY: shared });
+    expect(w.join("\n")).toMatch(/same key/);
+    expect(w.join("\n")).not.toContain(shared);
+  });
+
+  it("is quiet with two distinct keys, and names a missing one", () => {
+    expect(mapsKeyWarnings({ GOOGLE_MAPS_BROWSER_KEY: "b", GOOGLE_MAPS_SERVER_KEY: "s" })).toEqual([]);
+    expect(mapsKeyWarnings({ GOOGLE_MAPS_BROWSER_KEY: "b" }).join()).toMatch(/GOOGLE_MAPS_SERVER_KEY is missing/);
+    expect(mapsKeyWarnings({ GOOGLE_MAPS_SERVER_KEY: "s" }).join()).toMatch(/GOOGLE_MAPS_BROWSER_KEY is missing/);
+    expect(mapsKeyWarnings({})).toEqual([]);
   });
 });

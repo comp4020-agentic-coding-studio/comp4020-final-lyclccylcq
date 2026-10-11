@@ -23,6 +23,14 @@ function append(el, children) {
   }
 }
 
+// replaceChildren() with h()'s rules: false/null/undefined children are skipped,
+// where the DOM's own replaceChildren() would write them out as text.
+export function fill(el, ...children) {
+  el.replaceChildren();
+  append(el, children);
+  return el;
+}
+
 export function svg(markup) {
   const t = document.createElement("template");
   t.innerHTML = markup.trim(); // only ever called with static icon strings

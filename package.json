@@ -3,13 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning src/server.ts",
-    "dev": "node --disable-warning=ExperimentalWarning --watch src/server.ts",
+    "start": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/server.ts",
+    "dev": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --watch src/server.ts",
     "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm test",
     "check:evidence": "node scripts/check-evidence.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:google": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/live-google-check.ts"
   },
   "devDependencies": {
     "@types/jsdom": "^30.0.0",

@@ -1,3 +1,4 @@
+import { createExploreMap } from "/explore-map.js";
 import { placeDialog } from "/places.js";
 import { api, dur, fmtRange, h, icon, km, relTime, uid } from "/ui.js";
 
@@ -244,6 +245,7 @@ export function renderHome(app, ctx) {
     S.place = p;
     store.set(PLACE_KEY, { ...p, lat: round(p.lat), lng: round(p.lng) });
     renderPlaceChip();
+    explore.setOrigin(p);
     loadNear();
   }
 
@@ -253,7 +255,7 @@ export function renderHome(app, ctx) {
     placeChip.replaceChildren(
       h("span", { class: "chip chip-place" }, icon(S.place.source === "location" ? "locate" : "pin"), "Exploring: ", h("strong", {}, S.place.label)),
       h("button", { class: "linklike small", type: "button", onclick: () => input.focus() }, "Change"),
-      h("button", { class: "linklike small", type: "button", onclick: () => { S.place = null; store.set(PLACE_KEY, null); renderPlaceChip(); loadNear(); } }, "Clear"),
+      h("button", { class: "linklike small", type: "button", onclick: () => { S.place = null; store.set(PLACE_KEY, null); renderPlaceChip(); explore.setOrigin(null); loadNear(); } }, "Clear"),
     );
   }
 
@@ -337,7 +339,7 @@ export function renderHome(app, ctx) {
                 {},
                 h(
                   "button",
-                  { type: "button", class: "place-row", onclick: () => placeDialog({ placeId: p.placeId, name: p.name, source: p.source }) },
+                  { type: "button", class: "place-row", onclick: () => placeDialog({ placeId: p.placeId, name: p.name, source: p.source }, ctx) },
                   h("span", { class: "place-pin" }, icon("pin")),
                   h("span", { class: "grow" }, h("strong", {}, p.name), h("small", { class: "muted" }, [p.category, p.address].filter(Boolean).join(" · "))),
                   h("span", { class: "muted small" }, km(p.distanceKm)),
@@ -353,9 +355,12 @@ export function renderHome(app, ctx) {
     }
   }
 
+  // --- the map ---
+  const explore = createExploreMap(ctx);
+
   // --- explore destinations ---
   const destGrid = h("div", { class: "dest-grid" });
-  const explore = h(
+  const exploreDest = h(
     "section",
     { class: "home-section", id: "explore" },
     h("div", { class: "section-head" }, h("div", {}, h("h2", {}, "Explore destinations"), h("p", { class: "section-sub" }, "Pick a city to see its itineraries, wherever you are now. Or search any city above."))),
@@ -423,7 +428,7 @@ export function renderHome(app, ctx) {
       .catch((err) => tripsBox.replaceChildren(h("p", { class: "form-error" }, err.message)));
   }
 
-  app.replaceChildren(ctx.topbar("home"), h("main", { class: "home" }, hero, near, explore, featured, myTrips), ctx.footer());
+  app.replaceChildren(ctx.topbar("home"), h("main", { class: "home" }, hero, explore.el, near, exploreDest, featured, myTrips), ctx.footer());
 
   renderChips();
   renderPlaceChip();
@@ -435,11 +440,13 @@ export function renderHome(app, ctx) {
       renderPlaceChip();
     }
   }).catch(() => {});
-  if (location.hash === "#explore") requestAnimationFrame(() => explore.scrollIntoView());
+  if (S.place) explore.setOrigin(S.place);
+  if (location.hash === "#explore") requestAnimationFrame(() => exploreDest.scrollIntoView());
   if (location.hash === "#near") requestAnimationFrame(() => near.scrollIntoView());
 
   return () => {
     clearTimeout(S.timer);
     S.aborter?.abort();
+    explore.destroy();
   };
 }

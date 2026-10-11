@@ -14,6 +14,19 @@ import type { Mode, RouteOption, RouteStep, TransitStep } from "./schedule.ts";
 
 const serverKey = (): string | undefined => process.env.GOOGLE_MAPS_SERVER_KEY || undefined;
 export const googleConfigured = (): boolean => Boolean(serverKey());
+
+// Startup warnings about the two Maps keys. Never includes a key value.
+export function mapsKeyWarnings(env: NodeJS.ProcessEnv = process.env): string[] {
+  const browser = env.GOOGLE_MAPS_BROWSER_KEY || "";
+  const server = env.GOOGLE_MAPS_SERVER_KEY || "";
+  const out: string[] = [];
+  if (browser && server && browser === server) {
+    out.push("GOOGLE_MAPS_BROWSER_KEY and GOOGLE_MAPS_SERVER_KEY are the same key. The browser key is public via /api/config, so the server key is exposed too. Use two separate keys (docs/google-maps-keys.md).");
+  }
+  if (browser && !server) out.push("GOOGLE_MAPS_SERVER_KEY is missing: places fall back to demo data and routes are unavailable.");
+  if (server && !browser) out.push("GOOGLE_MAPS_BROWSER_KEY is missing: the map falls back to the schematic view.");
+  return out;
+}
 const PLACES = () => process.env.GOOGLE_PLACES_BASE_URL || "https://places.googleapis.com";
 const ROUTES = () => process.env.GOOGLE_ROUTES_BASE_URL || "https://routes.googleapis.com";
 const GEOCODE = () => process.env.GOOGLE_GEOCODE_BASE_URL || "https://maps.googleapis.com";
@@ -30,6 +43,8 @@ export type PlaceSummary = {
 };
 
 export type PlaceDetails = PlaceSummary & {
+  rating: number | null;
+  ratingCount: number | null;
   openingHours: string[] | null;
   openNow: boolean | null;
   googleMapsUri: string | null;
@@ -62,11 +77,46 @@ export const DEMO_PLACES: PlaceSummary[] = [
 }));
 
 // Place types the search endpoints accept, so a caller can't send anything.
-export const SEARCH_TYPES = ["tourist_attraction", "restaurant", "cafe", "museum", "park", "shopping_mall", "lodging", "store"] as const;
+export const SEARCH_TYPES = ["tourist_attraction", "restaurant", "cafe", "museum", "park", "zoo", "shopping_mall", "lodging", "store"] as const;
+
+// Google's error shape ({ error: { code, status, message, details[].reason } })
+// turned into a message a person can act on. The raw error goes to the
+// server log only, and never includes the key.
+export function describeGoogleError(httpStatus: number, data: any, api: string): { status: number; message: string; reason: string } {
+  const err = data?.error ?? {};
+  const reasons: string[] = (Array.isArray(err.details) ? err.details : []).map((d: any) => String(d?.reason ?? "")).filter(Boolean);
+  const reason = reasons[0] ?? String(err.status ?? httpStatus);
+  const text = String(err.message ?? "");
+  if (reasons.includes("API_KEY_INVALID") || /api key not valid/i.test(text)) {
+    return { status: 503, reason, message: "Google rejected the server's Maps key. Check GOOGLE_MAPS_SERVER_KEY." };
+  }
+  if (reasons.includes("SERVICE_DISABLED") || reasons.includes("ACCESS_NOT_CONFIGURED") || /has not been used|is disabled/i.test(text)) {
+    return { status: 503, reason, message: `The ${api} isn't enabled for this Google Cloud project yet.` };
+  }
+  if (reasons.includes("BILLING_DISABLED") || /billing/i.test(text)) {
+    return { status: 503, reason, message: "Google Maps billing isn't enabled for this Google Cloud project." };
+  }
+  if (reasons.includes("API_KEY_HTTP_REFERRER_BLOCKED") || /referer/i.test(text)) {
+    return { status: 503, reason, message: "The server's Maps key has a website restriction, which blocks server requests. Give GOOGLE_MAPS_SERVER_KEY no application restriction, and keep website restrictions on the browser key." };
+  }
+  if (reasons.some((r) => r.startsWith("API_KEY_") && r.includes("BLOCKED")) || /blocked/i.test(text)) {
+    return { status: 503, reason, message: `The server key's restrictions don't allow the ${api}. Check its API restrictions.` };
+  }
+  if (httpStatus === 429 || err.status === "RESOURCE_EXHAUSTED") {
+    return { status: 503, reason, message: "Google Maps usage limits have been reached. Try again later." };
+  }
+  if (httpStatus === 400 || err.status === "INVALID_ARGUMENT") {
+    return { status: 400, reason, message: "Google Maps couldn't understand that request." };
+  }
+  return { status: 502, reason, message: "Google Maps couldn't complete this request. Try again in a moment." };
+}
+
+const apiName = (url: string) => (url.includes("routes") || url.includes("computeRoutes") ? "Routes API" : url.includes("geocode") ? "Geocoding API" : "Places API (New)");
 
 async function google(url: string, init: { method: string; fieldMask?: string; body?: unknown }): Promise<any> {
   const key = serverKey();
-  if (!key) throw new HttpError(503, "Google Maps isn't configured on this server.");
+  if (!key) throw new HttpError(503, "Google Maps isn't configured on this server (GOOGLE_MAPS_SERVER_KEY is missing).");
+  const api = apiName(url);
   let res: Response;
   try {
     res = await fetch(url, {
@@ -79,14 +129,16 @@ async function google(url: string, init: { method: string; fieldMask?: string; b
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       signal: AbortSignal.timeout(10_000),
     });
-  } catch {
-    throw new HttpError(502, "Couldn't reach Google Maps. Try again in a moment.");
+  } catch (err) {
+    const timeout = err instanceof Error && err.name === "TimeoutError";
+    console.warn(`google ${api}: ${timeout ? "timed out" : "network error"}`);
+    throw new HttpError(502, timeout ? "Google Maps took too long to answer. Try again." : "Couldn't reach Google Maps. Check the connection and try again.");
   }
   const data = (await res.json().catch(() => ({}))) as any;
   if (!res.ok) {
-    // Google's own message (never the key) so a misconfiguration is visible.
-    const message = typeof data?.error?.message === "string" ? data.error.message : `HTTP ${res.status}`;
-    throw new HttpError(502, `Google Maps returned an error: ${message}`);
+    const e = describeGoogleError(res.status, data, api);
+    console.warn(`google ${api}: HTTP ${res.status} ${e.reason}: ${String(data?.error?.message ?? "").slice(0, 200)}`);
+    throw new HttpError(e.status, e.message, { reason: e.reason });
   }
   return data;
 }
@@ -206,16 +258,18 @@ export async function placeBasic(placeId: string, session: string | null): Promi
 // Everything the place panel shows, fetched when someone opens it.
 export async function placeDetails(placeId: string): Promise<PlaceDetails> {
   const demo = DEMO_PLACES.find((p) => p.placeId === placeId);
-  if (demo) return { ...demo, openingHours: null, openNow: null, googleMapsUri: null, photo: null };
+  if (demo) return { ...demo, rating: null, ratingCount: null, openingHours: null, openNow: null, googleMapsUri: null, photo: null };
   if (!validPlaceId(placeId)) throw new HttpError(400, "That isn't a place id.");
   const data = await google(`${PLACES()}/v1/places/${encodeURIComponent(placeId)}`, {
     method: "GET",
     fieldMask:
-      "id,displayName,formattedAddress,location,primaryTypeDisplayName,types,regularOpeningHours.weekdayDescriptions,currentOpeningHours.openNow,googleMapsUri,photos",
+      "id,displayName,formattedAddress,location,primaryTypeDisplayName,types,rating,userRatingCount,regularOpeningHours.weekdayDescriptions,currentOpeningHours.openNow,googleMapsUri,photos",
   });
   const p0 = Array.isArray(data.photos) ? data.photos[0] : undefined;
   return {
     ...toSummary(data),
+    rating: typeof data.rating === "number" ? data.rating : null,
+    ratingCount: typeof data.userRatingCount === "number" ? data.userRatingCount : null,
     openingHours: data.regularOpeningHours?.weekdayDescriptions ?? null,
     openNow: typeof data.currentOpeningHours?.openNow === "boolean" ? data.currentOpeningHours.openNow : null,
     googleMapsUri: data.googleMapsUri ?? null,
@@ -272,7 +326,10 @@ export async function reverseGeocode(p: LatLng): Promise<{ label: string; source
   } catch {
     return nearestKnown();
   }
-  if (data?.status !== "OK" || !Array.isArray(data.results) || !data.results[0]) return nearestKnown();
+  if (data?.status !== "OK" || !Array.isArray(data.results) || !data.results[0]) {
+    if (data?.status && data.status !== "ZERO_RESULTS") console.warn(`google Geocoding API: ${data.status}: ${String(data.error_message ?? "").slice(0, 200)}`);
+    return nearestKnown();
+  }
   const comps: any[] = data.results[0].address_components ?? [];
   const pick = (t: string) => comps.find((c) => Array.isArray(c.types) && c.types.includes(t))?.long_name;
   const area = pick("locality") ?? pick("administrative_area_level_2") ?? pick("administrative_area_level_1");

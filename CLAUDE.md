@@ -49,7 +49,15 @@ contradict the README, stop and ask. Don't quietly change the product.
   never stored or logged on the server; the browser keeps a ~1 km rounded copy
   in sessionStorage only.
 - When nothing curated is near, show Google places as *individual places*,
-  visibly distinct from itineraries.
+  visibly distinct from itineraries. The "Explore places on the map" section
+  (`public/explore-map.js`) is the same: places, never routes or itineraries.
+- Google's errors reach users only as the plain messages from
+  `describeGoogleError` in `src/google.ts`; raw Google errors go to the server
+  log, and the server key never goes anywhere.
+- Locally, keys live in `.env` (gitignored, read by `pnpm dev`/`pnpm start`
+  via Node's `--env-file-if-exists`); on Fly, in `fly secrets`. `pnpm
+  check:google` runs the live checks against a running app; `spec/` only ever
+  mocks Google.
 - Google calls happen on intent only: autocomplete is debounced (300 ms) with
   a session token; details and photos load when a place is opened; routes
   load when "Get travel times" is pressed. Public Google-backed endpoints are
@@ -113,7 +121,9 @@ contradict the README, stop and ask. Don't quietly change the product.
   hashed. Writes require JSON and a same-origin `Origin`.
 - `GOOGLE_MAPS_SERVER_KEY` and `ANTHROPIC_API_KEY` never leave the server.
   `/api/config` is the only place the browser key is exposed, and its key set
-  is pinned by `spec/restart.test.ts`. No keys in the repo, ever.
+  is pinned by `spec/restart.test.ts`. No keys in the repo, ever. Browser
+  and server Maps keys are different keys with different restrictions
+  (`docs/google-maps-keys.md`).
 - Google content: store place ids indefinitely; coordinates and route
   options are a temporary copy dropped/refreshed after 30 days; addresses,
   hours and details are fetched live and never stored. Show "Google Maps"

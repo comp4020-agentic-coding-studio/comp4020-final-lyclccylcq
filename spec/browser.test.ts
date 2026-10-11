@@ -116,6 +116,8 @@ describe.skipIf(!chromePath)("in a real browser", () => {
     await bob.waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent === 'Join this trip')`);
     await bob.eval(`[...document.querySelectorAll('button')].find(b => b.textContent === 'Join this trip').click()`);
     await bob.waitFor(`location.pathname === '/trips/${trip.id}' && document.querySelectorAll('.timeline .stop').length === 3`);
+    // a collaborator has no settings button, and no stray "false" where it would be
+    expect(await bob.eval<string>(`document.querySelector('.trip-bar').textContent`)).not.toMatch(/false|undefined|null/);
     await alice.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
     await alice.waitFor(`document.querySelector('.conn-live') && /2 people/.test(document.querySelector('.presence-label').textContent)`);
 
@@ -203,5 +205,35 @@ describe.skipIf(!chromePath)("homepage discovery in a real browser", () => {
     expect(await page.eval<number>(`window.__asks`)).toBeLessThanOrEqual(1);
     expect(await page.eval<number>(`${cards}.length`)).toBeGreaterThan(4); // general recommendations still shown
     expect(await page.eval(`document.querySelector('#dest-search').disabled`)).toBe(false);
+  });
+});
+
+describe.skipIf(!chromePath)("explore places on the homepage map", () => {
+  it("shows places around the chosen location on the map, and opens one with Add to Trip", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    await signUpIn(page, baseUrl, uniqueName("xm"));
+    await inPage(page, "POST", "/api/trips", { title: "Map trip", destination: "Sydney", startDate: "2026-12-01", endDate: "2026-12-02", timezone: "Australia/Sydney" });
+    await page.geolocation(baseUrl, { lat: -33.8688, lng: 151.2093 }); // Sydney CBD
+    await page.goto(new URL("/", baseUrl).href);
+    await page.waitFor(`document.querySelector('#explore-map')`);
+    expect(await page.eval(`document.querySelectorAll('#explore-map .place-row').length`)).toBe(0); // nothing fetched before a location
+    await page.eval(`[...document.querySelectorAll('button')].find(b => b.textContent.includes('Use my location')).click()`);
+    await page.waitFor(`document.querySelectorAll('#explore-map .place-row').length > 0`, 6000);
+    const rows = await page.eval<number>(`document.querySelectorAll('#explore-map .place-row').length`);
+    const marks = await page.eval<number>(`document.querySelectorAll('#explore-map .schematic-result, #explore-map .pin-result').length`);
+    expect(marks).toBe(rows);
+    await page.click("#explore-map .place-row");
+    await page.waitFor(`document.querySelector('#explore-map .xm-panel h3')`);
+    await page.waitFor(`[...document.querySelectorAll('#explore-map .xm-panel button')].some(b => b.textContent.includes('Add to Trip'))`);
+    await page.eval(`[...document.querySelectorAll('#explore-map .xm-panel button')].find(b => b.textContent.includes('Add to Trip')).click()`);
+    await page.waitFor(`document.querySelector('dialog[open] select[name=day] option')`);
+    const name = await page.eval<string>(`document.querySelector('#explore-map .xm-panel h3').textContent`);
+    await page.eval(`document.querySelector('dialog[open] form').requestSubmit()`);
+    await page.waitFor(`!document.querySelector('dialog[open]')`);
+    const trips = await inPage(page, "GET", "/api/trips");
+    const trip = await inPage(page, "GET", `/api/trips/${trips.owned[0].id}`);
+    expect(trip.days[0].activities.map((a: any) => a.title)).toContain(name);
+    expect(trip.days[0].activities[0].place.placeId).toBeTruthy();
   });
 });
