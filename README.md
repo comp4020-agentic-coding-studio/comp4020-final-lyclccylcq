@@ -4,6 +4,14 @@
 
 Wayline is a collaborative travel planner. A group shares one trip: an interactive map beside a day-by-day timeline. Everyone picks places, arranges them into days and sees each other's changes as they happen. Between consecutive stops Wayline looks up real travel times and points out when a plan doesn't add up.
 
+![The trip editor: a Google map of Sydney with numbered stops beside Day 1's timeline](docs/readme-editor-desktop.png)
+
+![The same trip on a phone: the timeline, with Map, Plan and Copilot tabs](docs/readme-editor-phone.png)
+
+![The public homepage: destination search and curated itineraries to copy](docs/readme-home-desktop.png)
+
+_Screenshots from 12 October 2026: the homepage from the live site; the editor from a local copy of the same commit with real Google keys, showing a copy of a curated itinerary. Its stops have no stored Google match, so they're labelled "Approximate location" and travel times can't be calculated for them._
+
 ## From Virtual Gym to Wayline
 
 This project began as Virtual Gym, a shared pixel-art gym where real workouts moved your character. Seeing others online changed little about anyone's experience, and its use alongside existing fitness apps was hard to justify, so in October 2026 the project pivoted to collaborative travel planning. The gym's development record stays in `PROCESS.md`, `reflections/` and `docs/decisions/`.

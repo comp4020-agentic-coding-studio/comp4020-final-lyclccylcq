@@ -4,8 +4,7 @@ _Rewritten at crit 9 to describe Wayline as it stands; it will be rewritten agai
 
 ## From Virtual Gym to Wayline
 
-Until crit 8 this project was Virtual Gym, a shared pixel-art gym where your real workout moved your character ([`a6f7c78...abe24a5`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/compare/a6f7c78...abe24a5)). Others were visible, but nothing they did touched your session, and I couldn't justify why anyone would use it alongside the fitness apps they already have. Making it live wouldn't have fixed that: it would still have been people side by side, not acting on anything shared. So I pivoted to Wayline, a collaborative trip planner, where one person's change shapes everyone's day ([`6305228`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/6305228), documented in [`0953ec9`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/0953ec9)). The gym's record (its reflection, decision records 0001–0002) stays in the repo.
-
+Until crit 8 this project was Virtual Gym, a shared pixel-art gym where your real workout moved your character ([`a6f7c78...abe24a5`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/compare/a6f7c78...abe24a5)). Others were visible, but nothing they did touched your session, and I couldn't justify why anyone would use it alongside the fitness apps they already have. Making it live wouldn't have fixed that: it would still have been people side by side, not acting on anything shared. So I pivoted to Wayline, a collaborative trip planner, where one person's change shapes everyone's day ([`6305228`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/6305228), documented in [`0953ec9`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/0953ec9)).
 ## Stack, and why
 
 Node 24's own `http` and built-in SQLite, TypeScript by type stripping, and hand-written ES modules with no build step ([decision record 1](docs/decisions/0001-plain-node-and-sqlite.md)). I kept this from the gym because the course machine is one small Fly instance with one volume, and a trip planner's data is small. The cost is hand-written routing and DOM code, and the gain is no runtime dependencies to audit or update. Real-time is server-sent events from an in-process hub ([ADR 0003](docs/decisions/0003-sse-snapshots-and-versioned-edits.md)): edits are ordinary requests, so the stream needs no protocol of its own and reuses cookie authorisation. That holds only while Fly runs one machine. Google Places and Routes are called only on the server and only on intent (a click, a button), because they're billed per request and their terms limit what may be stored.
@@ -18,7 +17,7 @@ Each pass starts from a long prompt I write: what to build, what not to touch (k
 
 `README.md` argues what good means: planning by touching the map and timeline, one shared plan, truthful travel data, an AI that suggests while people decide, and private trips. `CLAUDE.md` turns that into rules, and `spec/` checks the testable parts: outsiders get 404, retried adds don't duplicate, stale edits are refused, changes reach another real browser within a second. Whether planning feels direct is judged, not tested.
 
-> **Pending (author):** my position on the sources now listed in `README.md`: which ones I used, and where I agree or disagree.
+The README's sources pull in two directions. Shirky, Sloan and Shneiderman support building for one small group, acted on directly. Fowler supports refusing stale edits. Local-first software argues for offline editing and automatic merging. I agree with its aim of never losing someone's work, but for a few people planning short fields together I chose one copy on the server and a visible choice instead. Figma's server authority is close to mine, except that it lets the last writer win.
 
 ## The multi-user decision
 
@@ -54,4 +53,4 @@ These are small samples, not guarantees. Details and screenshots are in [`docs/c
 - The AI copilot hasn't been run with a real key.
 - Nobody outside the project has planned a trip with it yet.
 
-> **Pending (author):** what I would do differently, or what I'll check first next time, in my own words.
+Next time I would do two things earlier. First, I'd judge how much the screen shows: with the Google map in place, the editor felt busier, not clearer, and I expect to simplify what the map shows. Second, I'd decide how each new service's keys are stored before adding it, not afterwards. Wayline's keys ended up in a git-ignored `.env` and Fly secrets.
