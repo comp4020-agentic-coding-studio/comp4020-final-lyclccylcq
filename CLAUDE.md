@@ -143,6 +143,12 @@ contradict the README, stop and ask. Don't quietly change the product.
   stream sends a fresh snapshot. Real-time is SSE from one in-process hub;
   this holds only while Fly runs one machine (ADR 0003).
 - Presence is secondary. It never substitutes for synchronising the plan.
+- Changing the starting point carries `baseVersion` too (the start's version
+  when choosing began, `null` if none); a mismatch is a 409 with the current
+  start, never a silent replace.
+- Only shared itinerary data is live. A snapshot from the stream updates the
+  timeline and markers but never moves someone's map (`keepView`); zoom, open
+  panels, search results and exploring stay local to each browser.
 
 ## Access and secrets
 

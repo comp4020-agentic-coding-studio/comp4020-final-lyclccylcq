@@ -258,10 +258,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
 }
 
 async function calculateRoute(user: User, tripId: string, input: Record<string, unknown>): Promise<TripSnapshot> {
+  const reqInfo = trips.routeRequest(user.id, tripId, input.fromId, input.toId); // membership first
   if (!googleConfigured()) {
     throw new HttpError(503, "Route calculation needs Google Maps configured on the server (GOOGLE_MAPS_SERVER_KEY). No route was estimated.");
   }
-  const reqInfo = trips.routeRequest(user.id, tripId, input.fromId, input.toId);
   const routable = (p: typeof reqInfo.from.place) => p?.source === "google" || (p?.source === "custom" && p.lat !== null && p.lng !== null);
   if (!routable(reqInfo.from.place) || !routable(reqInfo.to.place)) {
     throw new HttpError(400, "Only places verified with Google or picked on the map can be routed; demo and curated-only places can't.");

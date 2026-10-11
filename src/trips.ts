@@ -590,7 +590,12 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       const title = text(input.title, "Title", 120);
       const place = placeInput(input.place);
       if (!place) throw bad("Choose where the trip starts.");
-      const existing = q("select id from activities where trip_id = ? and role = 'start'").get(tripId);
+      const existing = q("select id, version from activities where trip_id = ? and role = 'start'").get(tripId);
+      // baseVersion: the start's version the client saw (null: it saw none).
+      // A mismatch means someone else changed the start meanwhile.
+      if (input.baseVersion !== undefined && (existing ? Number(existing.version) : null) !== input.baseVersion) {
+        throw new HttpError(409, "Someone else changed the starting point while you were choosing.", { current: existing ? getActivity(tripId, String(existing.id)) : null });
+      }
       if (existing) {
         const id = String(existing.id);
         const trip = mutate(tripId, userId, () => {

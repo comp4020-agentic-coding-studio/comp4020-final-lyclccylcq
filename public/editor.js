@@ -54,6 +54,7 @@ export async function openEditor(root, tripId, ctx) {
   if (params.has("new")) history.replaceState(history.state, "", location.pathname);
   const startOf = () => S.trip.days.flatMap((d) => d.activities).find((a) => a.role === "start") ?? null;
   if (params.has("new") && !startOf()) S.starting = { step: "choose" };
+  S.startBase = startOf()?.version ?? null; // the start as it was when choosing began
   const dayKey = `wayline.day.${tripId}`;
   try {
     S.dayId = localStorage.getItem(dayKey);
@@ -114,9 +115,12 @@ export async function openEditor(root, tripId, ctx) {
 
   // --- server state ---
 
-  function applySnapshot(snap) {
+  // remote: it came on the live stream (maybe a collaborator's change), so the
+  // map keeps this person's zoom and position
+  function applySnapshot(snap, { remote = false } = {}) {
     if (!snap || typeof snap.rev !== "number" || snap.rev < S.trip.rev) return;
     S.trip = snap;
+    S.keepView = remote;
     if (!snap.days.some((d) => d.id === S.dayId)) S.dayId = snap.days[0]?.id ?? null;
     if (S.selectedId && !snap.days.some((d) => d.activities.some((a) => a.id === S.selectedId))) S.selectedId = null;
     S.editing?.onSnapshot(snap);
@@ -137,7 +141,7 @@ export async function openEditor(root, tripId, ctx) {
   const base = `/api/trips/${tripId}`;
 
   const events = new EventSource(`${base}/events`);
-  events.addEventListener("snapshot", (e) => applySnapshot(JSON.parse(e.data)));
+  events.addEventListener("snapshot", (e) => applySnapshot(JSON.parse(e.data), { remote: true }));
   events.addEventListener("presence", (e) => {
     S.presence = JSON.parse(e.data);
     renderBar();
@@ -597,7 +601,8 @@ export async function openEditor(root, tripId, ctx) {
         : S.explore
           ? { lat: S.explore.lat, lng: S.explore.lng, label: S.explore.label }
           : null;
-    map.update({ stops, results: shownResults(), temp, center: S.trip.center, selectedPlaceId: S.place?.placeId ?? null });
+    map.update({ stops, results: shownResults(), temp, center: S.trip.center, selectedPlaceId: S.place?.placeId ?? null, keepView: S.keepView });
+    S.keepView = false;
   }
 
   searchForm.addEventListener("submit", async (e) => {
@@ -1017,6 +1022,7 @@ export async function openEditor(root, tripId, ctx) {
 
   function beginStart() {
     S.starting = { step: "choose" };
+    S.startBase = startOf()?.version ?? null;
     S.place = null;
     S.placeDetails = null;
     S.explore = null;
@@ -1049,6 +1055,7 @@ export async function openEditor(root, tripId, ctx) {
           { class: "start-body" },
           h("p", { class: "start-cand" }, h("span", { class: "start-badge" }, "Start"), h("strong", {}, c.title)),
           c.pending && h("p", { class: "muted small", role: "status" }, "Finding the name of this spot…"),
+          st.message && h("p", { class: "leg-warn small", role: "alert" }, st.message),
           away > 150 && h("p", { class: "leg-warn small" }, `This is about ${Math.round(away).toLocaleString("en-AU")} km from ${S.trip.destination}. Fine if the trip really starts here; otherwise choose a start in ${S.trip.destination}.`),
           h(
             "div",
@@ -1181,7 +1188,7 @@ export async function openEditor(root, tripId, ctx) {
     if (S.starting) S.starting = { ...S.starting, saving: true };
     renderSearch();
     try {
-      const res = await act(api(`${base}/start`, { method: "PUT", body: { clientId: uid(), title: c.title, place: c.place } }));
+      const res = await act(api(`${base}/start`, { method: "PUT", body: { clientId: uid(), title: c.title, place: c.place, baseVersion: S.startBase } }));
       S.starting = null;
       S.place = null;
       S.placeDetails = null;
@@ -1195,8 +1202,13 @@ export async function openEditor(root, tripId, ctx) {
       render();
       if (Number.isFinite(c.place.lat)) map.focus(c.place);
       toast(changed ? `Starting from ${c.title}.` : "Starting point set.");
-    } catch {
-      if (S.starting) S.starting = { ...S.starting, saving: false };
+    } catch (err) {
+      if (err.status === 409 && S.starting) {
+        // their start is now on screen; pressing again replaces it on purpose
+        const theirs = err.data?.current;
+        S.startBase = theirs?.version ?? null;
+        S.starting = { ...S.starting, saving: false, message: theirs ? `A collaborator just set the start to ${theirs.title}. Press "Start here" again to replace it.` : "A collaborator just removed the start. Press \"Start here\" again to set yours." };
+      } else if (S.starting) S.starting = { ...S.starting, saving: false };
       renderSearch();
     }
   }

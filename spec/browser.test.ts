@@ -430,3 +430,70 @@ describe.skipIf(!chromePath)("starting a trip in the editor", () => {
     }
   });
 });
+
+// Two separate browser sessions on one trip: each kind of change reaches the
+// other within about a second, and the timings are printed.
+describe.skipIf(!chromePath)("collaborating live, every kind of change", () => {
+  it("syncs remove, retime and a new starting point to the other browser within about a second", async () => {
+    const alice = await browser!.newPage();
+    const bob = await browser!.newPage();
+    await alice.viewport(1920, 1080);
+    await bob.viewport(390, 844, true);
+    await signUpIn(alice, baseUrl, uniqueName("alice"));
+    await signUpIn(bob, baseUrl, uniqueName("bob"));
+    const trip = await tripWithStops(alice);
+    const { token } = await inPage(alice, "POST", `/api/trips/${trip.id}/invite`, {});
+    await inPage(bob, "POST", `/api/invites/${token}/accept`, {});
+    await alice.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await bob.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await alice.waitFor(`document.querySelector('.conn-live') && /2 people/.test(document.querySelector('.presence-label').textContent)`);
+    await bob.waitFor(`document.querySelector('.conn-live') && document.querySelectorAll('.timeline .stop').length === 3`);
+    const timings: Record<string, number> = {};
+    const ids = (await inPage(alice, "GET", `/api/trips/${trip.id}`)).days[0].activities.map((a: any) => a);
+
+    // Bob removes Lunch; Alice sees it go
+    await bob.eval(`window.confirm = () => true; document.querySelector('[aria-label="Remove Lunch"]').click()`);
+    timings.remove = await alice.waitFor(`!${stopTitles}.includes('Lunch') && ${stopTitles}.length === 2`, 3000);
+
+    // Bob retimes the Zoo; Alice's timeline shows the new time
+    const zoo = ids.find((a: any) => a.title === "Zoo");
+    await inPage(bob, "PATCH", `/api/trips/${trip.id}/activities/${zoo.id}`, { baseVersion: zoo.version, startMin: 8 * 60 + 30 });
+    timings.retime = await alice.waitFor(`document.querySelector('.timeline .stop .stop-time').textContent.startsWith('08:30')`, 3000);
+    expect(await alice.eval(`document.querySelector('.stop-touched')?.textContent ?? ''`)).toMatch(/Changed by/);
+
+    // Alice sets a starting point; it arrives first in Bob's timeline
+    await inPage(alice, "PUT", `/api/trips/${trip.id}/start`, { clientId: crypto.randomUUID(), title: "Central Station", place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: -33.8832, lng: 151.2069 }, baseVersion: null });
+    timings.start = await bob.waitFor(`document.querySelector('.timeline .stop.stop-start h3')?.textContent === 'Central Station'`, 3000);
+
+    console.log(`live sync (ms): ${JSON.stringify(timings)}`);
+    for (const ms of Object.values(timings)) expect(ms).toBeLessThan(1500);
+    // nothing confirmed was lost on either side
+    const final = ["Central Station", "Zoo", "Opera House"];
+    expect(await alice.eval<string[]>(stopTitles)).toEqual(final);
+    expect(await bob.eval<string[]>(stopTitles)).toEqual(final);
+  });
+
+  it("keeps both of two simultaneous adds, and shows the latest state to someone who comes back", async () => {
+    const alice = await browser!.newPage();
+    const bob = await browser!.newPage();
+    await alice.viewport(1920, 1080);
+    await bob.viewport(1920, 1080);
+    await signUpIn(alice, baseUrl, uniqueName("alice"));
+    await signUpIn(bob, baseUrl, uniqueName("bob"));
+    const trip = await inPage(alice, "POST", "/api/trips", { title: "Same time", destination: "Sydney", startDate: "2026-12-01", endDate: "2026-12-01", timezone: "Australia/Sydney" });
+    const { token } = await inPage(alice, "POST", `/api/trips/${trip.id}/invite`, {});
+    await inPage(bob, "POST", `/api/invites/${token}/accept`, {});
+    await alice.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await bob.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await alice.waitFor(`/2 people/.test(document.querySelector('.presence-label')?.textContent ?? '')`);
+    const add = (title: string) => ({ clientId: crypto.randomUUID(), dayId: trip.days[0].id, title, kind: "food", startMin: 720, durationMin: 60 });
+    await Promise.all([inPage(alice, "POST", `/api/trips/${trip.id}/activities`, add("Restaurant")), inPage(bob, "POST", `/api/trips/${trip.id}/activities`, add("Museum"))]);
+    for (const p of [alice, bob]) await p.waitFor(`${stopTitles}.length === 2 && ${stopTitles}.includes('Restaurant') && ${stopTitles}.includes('Museum')`, 3000);
+
+    // Bob leaves; Alice keeps editing; when Bob comes back he sees it all
+    await bob.goto("about:blank");
+    await inPage(alice, "POST", `/api/trips/${trip.id}/activities`, add("Late dinner"));
+    await bob.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await bob.waitFor(`${stopTitles}.includes('Late dinner') && ${stopTitles}.length === 3`, 3000);
+  });
+});

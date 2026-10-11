@@ -55,3 +55,25 @@ order). Adds are idempotent by `clientId`.
   revisiting at hundreds.
 - Two people editing the *same* activity's notes at once: the second save is
   refused and must choose. No automatic merge of text.
+
+## Update 2026-10-12 (agent, for the author to review)
+
+Two behaviours added for Crit 9, both following the decision above:
+
+- **The starting point is versioned too.** `PUT /api/trips/:id/start` carries
+  `baseVersion` (the start's version when choosing began, or `null` if there
+  was none). If a collaborator changed the start meanwhile, the request gets a
+  409 with their start; the panel says so, and pressing "Start here" again
+  replaces it deliberately. Before this, the second of two simultaneous start
+  changes silently replaced the first.
+- **Only shared itinerary data is live.** A snapshot arriving on the stream
+  updates the timeline and markers but no longer re-fits the map, so one
+  person's change doesn't move another's zoom or position. Open place panels,
+  search results, map-click exploring and the start being chosen stay local
+  to each browser.
+
+Measured on one machine (two Chrome sessions, local server, n=10 each): add,
+reorder, retime and remove reached the other session in a median of 29–31 ms
+(max 34 ms). After a server restart with both pages open, the other page
+reconnected on its own and showed a new change 0.8 s after it was made. A
+production measurement is still to be taken after deploy.

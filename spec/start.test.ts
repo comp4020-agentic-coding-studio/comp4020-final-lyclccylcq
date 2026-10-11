@@ -75,6 +75,39 @@ describe("the starting point", () => {
   });
 });
 
+describe("the starting point with several people", () => {
+  it("refuses a change based on a start someone else has replaced, instead of overwriting it", async () => {
+    const a = await signUp(baseUrl);
+    const trip = await newTrip(a);
+    const put = (title: string, baseVersion: number | null) =>
+      a.send("PUT", `/api/trips/${trip.id}/start`, { clientId: crypto.randomUUID(), title, place: custom(-33.87, 151.2), baseVersion });
+    const first = await put("Hotel", null);
+    expect(first.status).toBe(200);
+    const v = first.data.trip.days[0].activities[0].version;
+    // two people both saw version v and both press "Start here"
+    const [x, y] = await Promise.all([put("Airport", v), put("Station", v)]);
+    expect([x.status, y.status].sort()).toEqual([200, 409]);
+    const loser = x.status === 409 ? x : y;
+    const winner = x.status === 200 ? "Airport" : "Station";
+    expect(loser.data.current.title).toBe(winner);
+    // a second start can't be created by someone who thought there was none
+    expect((await put("Somewhere", null)).status).toBe(409);
+    // retrying on the version they were shown replaces it on purpose
+    expect((await put("Ferry wharf", loser.data.current.version)).status).toBe(200);
+  });
+
+  it("can't be set or routed on someone else's trip", async () => {
+    const owner = await signUp(baseUrl);
+    const outsider = await signUp(baseUrl);
+    const trip = await newTrip(owner);
+    const r = await outsider.send("PUT", `/api/trips/${trip.id}/start`, { clientId: crypto.randomUUID(), title: "Mine now", place: custom(1, 1) });
+    expect(r.status).toBe(404);
+    const route = await outsider.send("POST", `/api/trips/${trip.id}/routes`, { fromId: crypto.randomUUID(), toId: crypto.randomUUID() });
+    expect(route.status).toBe(404);
+    expect((await owner.get(`/api/trips/${trip.id}`)).data.days[0].activities).toEqual([]);
+  });
+});
+
 describe("spots picked on the map", () => {
   it("are stored with their coordinates and a custom id, never a Google id", async () => {
     const c = await signUp(baseUrl);

@@ -141,6 +141,9 @@ async function googleMap(el, config, handlers) {
       const key = (data.fitKey ?? "") + pts.map((p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`).join("|") || (center ? `${center.lat},${center.lng}` : "");
       if (key === lastFit) return;
       lastFit = key;
+      // keepView: a collaborator's change updates the markers but leaves this
+      // person's zoom and position alone
+      if (data.keepView) return;
       if (pts.length > 1) {
         const b = new google.maps.LatLngBounds();
         pts.forEach((p) => b.extend(p));
