@@ -213,6 +213,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     const { created, activityId, trip } = trips.addActivity(user.id, tripId, await body(req));
     return json(res, created ? 201 : 200, { activityId, trip });
   }
+  if (method === "PUT" && rest === "/start") return json(res, 200, trips.setStart(user.id, tripId, await body(req)));
   r = rest.match(/^\/activities\/([0-9a-f-]{36})(\/move)?$/);
   if (r) {
     if (method === "PATCH" && !r[2]) return json(res, 200, trips.updateActivity(user.id, tripId, r[1], await body(req)));
@@ -261,8 +262,9 @@ async function calculateRoute(user: User, tripId: string, input: Record<string, 
     throw new HttpError(503, "Route calculation needs Google Maps configured on the server (GOOGLE_MAPS_SERVER_KEY). No route was estimated.");
   }
   const reqInfo = trips.routeRequest(user.id, tripId, input.fromId, input.toId);
-  if (reqInfo.from.place?.source !== "google" || reqInfo.to.place?.source !== "google") {
-    throw new HttpError(400, "Only places verified with Google can be routed; demo and curated-only places can't.");
+  const routable = (p: typeof reqInfo.from.place) => p?.source === "google" || (p?.source === "custom" && p.lat !== null && p.lng !== null);
+  if (!routable(reqInfo.from.place) || !routable(reqInfo.to.place)) {
+    throw new HttpError(400, "Only places verified with Google or picked on the map can be routed; demo and curated-only places can't.");
   }
   // Already calculated for this departure: no new API calls.
   if (reqInfo.existing && reqInfo.existing.departKey === reqInfo.departKey && input.force !== true) return trips.snapshot(tripId);
@@ -272,7 +274,9 @@ async function calculateRoute(user: User, tripId: string, input: Record<string, 
   if (running) return running;
   const job = (async () => {
     const departure = reqInfo.departMin === null ? null : zonedTimeToUtc(reqInfo.date, reqInfo.departMin, reqInfo.timezone);
-    const options = await computeRouteOptions(reqInfo.from.place!.placeId, reqInfo.to.place!.placeId, departure);
+    // a custom point has no Google id, so it's routed by its coordinates
+    const wp = (p: NonNullable<typeof reqInfo.from.place>) => (p.source === "custom" ? { lat: p.lat!, lng: p.lng! } : { placeId: p.placeId });
+    const options = await computeRouteOptions(wp(reqInfo.from.place!), wp(reqInfo.to.place!), departure);
     return trips.saveRoute(user.id, tripId, reqInfo.from.id, reqInfo.to.id, reqInfo.departKey, options, reqInfo.existing?.selectedMode ?? null);
   })().finally(() => inflight.delete(key));
   inflight.set(key, job);

@@ -148,7 +148,9 @@ export function createDiscovery(deps: { itineraries: ItineraryStore; trips: Trip
       const type = p.get("type") ?? "tourist_attraction";
       if (!SEARCH_TYPES.includes(type as (typeof SEARCH_TYPES)[number])) throw bad(`type must be one of: ${SEARCH_TYPES.join(", ")}.`);
       placesLimit(ip);
-      return ok(await nearbyPlaces(center, radius, type));
+      const rich = p.get("rich") === "1";
+      if (rich) placesLimit(ip); // a photo lookup per result: counts double
+      return ok(await nearbyPlaces(center, radius, type, { rich }));
     }
     if (method === "GET" && path === "/api/places/photo") {
       if (!googleConfigured()) throw new HttpError(503, "Photos need Google Maps configured on the server.");

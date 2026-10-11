@@ -226,7 +226,16 @@ export async function searchPlaces(
 const FOOD_TYPES = new Set(["restaurant", "cafe"]);
 
 // Notable places around a point, for when Wayline has no itinerary nearby.
-export async function nearbyPlaces(center: LatLng, radiusM: number, type: string): Promise<{ source: "google" | "demo"; places: (PlaceSummary & { distanceKm: number })[] }> {
+export type NearbyPlace = PlaceSummary & {
+  distanceKm: number;
+  rating?: number | null;
+  ratingCount?: number | null;
+  thumb?: { uri: string; credit: string[] } | null;
+};
+
+// rich: the editor's map-click list, which also shows rating and a small
+// photo per place (Google's photo credit comes with it and must be shown).
+export async function nearbyPlaces(center: LatLng, radiusM: number, type: string, { rich = false } = {}): Promise<{ source: "google" | "demo"; places: NearbyPlace[] }> {
   const withDistance = (list: PlaceSummary[]) =>
     list.map((p) => ({ ...p, distanceKm: Math.round(haversineKm(center, p) * 10) / 10 })).sort((a, b) => a.distanceKm - b.distanceKm);
   if (!googleConfigured()) {
@@ -237,12 +246,30 @@ export async function nearbyPlaces(center: LatLng, radiusM: number, type: string
   const types = FOOD_TYPES.has(type) ? { includedPrimaryTypes: [type] } : { includedTypes: [type] };
   const data = await google(`${PLACES()}/v1/places:searchNearby`, {
     method: "POST",
-    fieldMask: LIST_MASK,
-    body: { ...types, maxResultCount: 12, rankPreference: "POPULARITY", locationRestriction: circle(center, radiusM) },
+    fieldMask: rich ? `${LIST_MASK},places.rating,places.userRatingCount,places.photos` : LIST_MASK,
+    body: { ...types, maxResultCount: rich ? 10 : 12, rankPreference: "POPULARITY", locationRestriction: circle(center, radiusM) },
   });
   // Google's popularity order is kept; distance is shown, not used to re-sort.
-  const places = (Array.isArray(data.places) ? data.places : []).map(toSummary).filter((p: PlaceSummary) => Number.isFinite(p.lat));
-  return { source: "google", places: places.map((p: PlaceSummary) => ({ ...p, distanceKm: Math.round(haversineKm(center, p) * 10) / 10 })) };
+  const raw = (Array.isArray(data.places) ? data.places : []).filter((p: any) => Number.isFinite(Number(p.location?.latitude)));
+  const places: NearbyPlace[] = raw.map((p: any) => {
+    const s = toSummary(p);
+    return { ...s, distanceKm: Math.round(haversineKm(center, s) * 10) / 10 };
+  });
+  if (!rich) return { source: "google", places };
+  await Promise.all(
+    raw.map(async (p: any, i: number) => {
+      places[i].rating = typeof p.rating === "number" ? p.rating : null;
+      places[i].ratingCount = typeof p.userRatingCount === "number" ? p.userRatingCount : null;
+      const photo = Array.isArray(p.photos) ? p.photos[0] : undefined;
+      places[i].thumb = photo?.name
+        ? await photoUri(photo.name, 160).then(
+            (uri) => ({ uri, credit: (photo.authorAttributions ?? []).map((a: any) => String(a.displayName ?? "")).filter(Boolean) }),
+            () => null,
+          )
+        : null;
+    }),
+  );
+  return { source: "google", places };
 }
 
 // Just enough to place something on the map (choosing a destination).
@@ -430,12 +457,12 @@ export async function computeRoute(origin: Waypoint, destination: Waypoint, mode
 
 // All three modes for a trip's consecutive stops, in parallel. Each mode's
 // outcome stands on its own. Geometry isn't kept for trip segments.
-export async function computeRouteOptions(originPlaceId: string, destinationPlaceId: string, departure: Date | null, now = Date.now()): Promise<RouteOption[]> {
+export async function computeRouteOptions(origin: Waypoint, destination: Waypoint, departure: Date | null, now = Date.now()): Promise<RouteOption[]> {
   const one = async (mode: Mode): Promise<RouteOption> => {
     if (mode === "TRANSIT" && !departure) {
       return { mode, status: "error", message: "Give the earlier stop a start time to look up transit departures." };
     }
-    const { polyline: _drop, ...rest } = await computeRoute({ placeId: originPlaceId }, { placeId: destinationPlaceId }, mode, departure, now);
+    const { polyline: _drop, ...rest } = await computeRoute(origin, destination, mode, departure, now);
     return rest;
   };
   return Promise.all((["WALK", "TRANSIT", "DRIVE"] as Mode[]).map(one));

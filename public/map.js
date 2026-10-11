@@ -26,17 +26,24 @@ function loadGoogle(key) {
 }
 
 const MODE_COLOUR = { WALK: "#0F7C8C", TRANSIT: "#7A5AF8", DRIVE: "#F2603D" };
+// the start shows "S"; the stops after it are numbered from 1, as in the timeline
+const stopLabel = (stops, i) => (stops[i].start ? "S" : String(i + 1 - (stops[0]?.start ? 1 : 0)));
 const KIND_COLOUR = { attraction: "#F2603D", food: "#E08A00", shopping: "#7A5AF8", accommodation: "#0F7C8C", custom: "#5F6B7A" };
 
-export async function createMap(el, { config, onSelectStop, onSelectResult }) {
+// onPlaceClick(placeId, latLng): one of Google's own place icons was clicked.
+// onMapClick(latLng): anywhere else. Both are optional; without them the map
+// keeps Google's icons inert, as before. The schematic has no real geography,
+// so it never reports map clicks.
+export async function createMap(el, { config, onSelectStop, onSelectResult, onPlaceClick, onMapClick }) {
+  const handlers = { onSelectStop, onSelectResult, onPlaceClick, onMapClick };
   if (config.mapsBrowserKey && !authFailed) {
     try {
-      return await googleMap(el, config, { onSelectStop, onSelectResult });
+      return await googleMap(el, config, handlers);
     } catch (err) {
-      return schematic(el, { onSelectStop, onSelectResult }, err.message);
+      return schematic(el, handlers, err.message);
     }
   }
-  return schematic(el, { onSelectStop, onSelectResult }, null);
+  return schematic(el, handlers, null);
 }
 
 async function googleMap(el, config, handlers) {
@@ -49,11 +56,23 @@ async function googleMap(el, config, handlers) {
     center: { lat: 20, lng: 0 },
     zoom: 2,
     mapId: config.mapId,
-    clickableIcons: false,
+    clickableIcons: Boolean(handlers.onPlaceClick),
     mapTypeControl: false,
     streetViewControl: false,
     fullscreenControl: false,
     gestureHandling: "greedy",
+  });
+  // Google fires "click" only for a click, never at the end of a drag or zoom.
+  // A click on a place icon carries its placeId; stop() keeps Google's own
+  // info window closed so Wayline's panel is the only one.
+  map.addListener("click", (e) => {
+    const at = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+    if (e.placeId && handlers.onPlaceClick) {
+      e.stop();
+      handlers.onPlaceClick(e.placeId, at);
+    } else if (handlers.onMapClick) {
+      handlers.onMapClick(at);
+    }
   });
   let markers = [];
   let line = null;
@@ -83,13 +102,23 @@ async function googleMap(el, config, handlers) {
       routeLines = (data.routes ?? []).map((r) => new Polyline({ map, path: r.path, strokeColor: MODE_COLOUR[r.mode] ?? "#1C2430", strokeOpacity: 0.85, strokeWeight: 5, zIndex: 5 }));
 
       stops.forEach((s, i) => {
-        const pin = h("button", { class: `pin${s.selected ? " pin-on" : ""}`, type: "button", style: `--c:${KIND_COLOUR[s.kind]}`, "aria-label": `Stop ${i + 1}: ${s.title}` }, h("span", {}, String(i + 1)));
+        const label = stopLabel(stops, i);
+        const pin = h(
+          "button",
+          { class: `pin${s.start ? " pin-start" : ""}${s.selected ? " pin-on" : ""}`, type: "button", style: `--c:${KIND_COLOUR[s.kind]}`, "aria-label": s.start ? `Start: ${s.title}` : `Stop ${label}: ${s.title}` },
+          h("span", {}, label),
+        );
         pin.addEventListener("click", (e) => {
           e.stopPropagation();
           handlers.onSelectStop(s.id);
         });
-        markers.push(new AdvancedMarkerElement({ map, position: { lat: s.lat, lng: s.lng }, content: pin, title: s.title, zIndex: 10 + i }));
+        markers.push(new AdvancedMarkerElement({ map, position: { lat: s.lat, lng: s.lng }, content: pin, title: s.title, zIndex: s.start ? 60 : 10 + i }));
       });
+      // the spot just clicked or being considered: shown, never added on its own
+      if (data.temp) {
+        const dot = h("span", { class: `pin pin-temp${data.temp.start ? " pin-temp-start" : ""}`, "aria-hidden": "true" }, h("span", {}, data.temp.start ? "S" : "+"));
+        markers.push(new AdvancedMarkerElement({ map, position: { lat: data.temp.lat, lng: data.temp.lng }, content: dot, title: data.temp.label ?? "Selected spot", zIndex: 200 }));
+      }
       results.forEach((r) => {
         const dot = h("button", { class: `pin pin-result${r.placeId === selectedPlaceId ? " pin-on" : ""}`, type: "button", "aria-label": r.name }, "");
         dot.addEventListener("click", (e) => {
@@ -212,10 +241,11 @@ async function schematic(el, handlers, problem) {
       });
       stops.forEach((s, i) => {
         const [x, y] = at(s);
-        const g = node("g", { class: `schematic-stop${s.selected ? " on" : ""}`, tabindex: 0, role: "button", "aria-label": `Stop ${i + 1}: ${s.title}`, style: `--c:${KIND_COLOUR[s.kind]}` });
+        const label = stopLabel(stops, i);
+        const g = node("g", { class: `schematic-stop${s.start ? " start" : ""}${s.selected ? " on" : ""}`, tabindex: 0, role: "button", "aria-label": s.start ? `Start: ${s.title}` : `Stop ${label}: ${s.title}`, style: `--c:${KIND_COLOUR[s.kind]}` });
         node("circle", { cx: x, cy: y, r: 14 }, g);
         const n = node("text", { x, y: y + 4.5, "text-anchor": "middle", class: "num" }, g);
-        n.textContent = String(i + 1);
+        n.textContent = label;
         // labels near the right edge go on the left of the marker
         const left = x > W * 0.62;
         const t = node("text", { x: left ? x - 20 : x + 20, y: y + 4.5, class: "label", "text-anchor": left ? "end" : "start" }, g);

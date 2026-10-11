@@ -160,6 +160,10 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
       unique (template_id, day, position)
     );
   `);
+  // Additive columns for databases created before them. role = 'start' marks
+  // the trip's starting point: always the first activity of the first day.
+  const activityCols = db.prepare("pragma table_info(activities)").all().map((c) => String(c.name));
+  if (!activityCols.includes("role")) db.exec("alter table activities add column role text check (role in ('start'))");
   return db;
 }
 

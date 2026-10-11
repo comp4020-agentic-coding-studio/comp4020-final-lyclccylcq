@@ -27,6 +27,20 @@ contradict the README, stop and ask. Don't quietly change the product.
   the travellers chose. A transport segment connects two *consecutive*
   activities and is deleted the moment they stop being neighbours. Don't store
   transport as an activity.
+- **The starting point is the first activity of the first day** (`role =
+  'start'`, set through `PUT /api/trips/:id/start`). Nothing is added or moved
+  ahead of it and it can't be moved; changing it updates it in place and drops
+  only the routes touching it. A new trip asks "Where would you like to
+  start?" once (the `?new=1` link from creation); existing trips are never
+  interrupted, and a trip without a start is still valid.
+- **The map is a way to choose, never to add.** In the editor, clicking a
+  Google place icon opens its panel; clicking anywhere else shows a marker and
+  nearby places. Adding always takes the button. A place already in the plan
+  says so, and adding it again is a deliberate "Add another visit".
+- A spot picked on the map that isn't a Google place is stored with its own
+  coordinates and a `custom:<uuid>` id (source `custom`). It's routed by
+  coordinates, labelled "Pinned spot", and never given a made-up Google id.
+  Its coordinates are the travellers' choice, so they don't expire.
 - **No chat, comments, reviews, social feeds, bookings, payments, expenses,
   AI-generated trips or multi-day route optimisation** (V1 scope). Ask first.
 
@@ -65,16 +79,20 @@ contradict the README, stop and ask. Don't quietly change the product.
   check:google` runs the live checks against a running app; `spec/` only ever
   mocks Google.
 - Google calls happen on intent only: autocomplete is debounced (300 ms) with
-  a session token; details and photos load when a place is opened; routes
-  load when "Get travel times" is pressed. Public Google-backed endpoints are
-  rate-limited per IP.
+  a session token; details and photos load when a place is opened; nearby
+  places load on a map click (one request per category per click, reused when
+  switching back); routes load when a route button is pressed. Public
+  Google-backed endpoints are rate-limited per IP.
 - Cover photos for curated itineraries and destinations are freely licensed
   Wikimedia Commons files, resized into `public/img/covers/` and listed in
   `public/photos.js` with author, license and source page. Every one is
-  credited on its card or on `/credits`. Never hotlink or scrape images, and
-  never put Google place photos on cards or result lists: they load only when
-  a place is opened. A missing photo falls back to the gradient, never a
-  broken image.
+  credited on its card or on `/credits`. Never hotlink or scrape images. A
+  missing photo falls back to the gradient, never a broken image.
+- Google place photos appear in a place's panel when it's opened, and as small
+  thumbnails (160 px) in the editor's map-click nearby list only
+  (`/api/places/nearby?rich=1`, which counts double against the rate limit).
+  Each shows Google's author credit. Not on cards, search results or the
+  homepage lists.
 
 ## Truthful transportation
 
@@ -89,6 +107,9 @@ contradict the README, stop and ask. Don't quietly change the product.
 - Route lookups are explicit (a button) and deduplicated server-side by
   pair + departure. Never call Google on drag, render, or snapshot receipt.
   A time change marks a route *stale*; it doesn't recalculate on its own.
+  Adding, removing, reordering or changing the start doesn't either: the
+  affected legs show "Route not calculated", and "Calculate N missing routes"
+  looks up only those.
 - Demo places (`demo:` ids) are labelled "Demo place" everywhere, have no
   opening hours, and can't be routed.
 

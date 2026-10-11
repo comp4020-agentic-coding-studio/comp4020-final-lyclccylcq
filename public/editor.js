@@ -12,6 +12,7 @@ import {
   icon,
   KIND_DURATION,
   KIND_LABEL,
+  km,
   openDialog,
   parseTime,
   relTime,
@@ -43,7 +44,16 @@ export async function openEditor(root, tripId, ctx) {
     editing: null,
     openLegs: new Set(),
     busyLegs: new Set(),
+    // a map click: { lat, lng, label, type, results, source, loading, error, cache }
+    explore: null,
+    // choosing the starting point: { step: "choose" | "map" | "search" | "confirm", candidate, message, locating }
+    starting: null,
+    hint: false, // "explore the map or search to add your next stop", after a start is set
   };
+  const params = new URLSearchParams(location.search);
+  if (params.has("new")) history.replaceState(history.state, "", location.pathname);
+  const startOf = () => S.trip.days.flatMap((d) => d.activities).find((a) => a.role === "start") ?? null;
+  if (params.has("new") && !startOf()) S.starting = { step: "choose" };
   const dayKey = `wayline.day.${tripId}`;
   try {
     S.dayId = localStorage.getItem(dayKey);
@@ -87,6 +97,7 @@ export async function openEditor(root, tripId, ctx) {
     copilotPane,
   );
   root.replaceChildren(h("div", { class: "editor" }, bar, workspace, mobileTabs));
+  if (S.starting && matchMedia("(max-width: 899px)").matches) S.tab = "map";
 
   const map = await createMap(mapHost, {
     config: ctx.config,
@@ -94,7 +105,9 @@ export async function openEditor(root, tripId, ctx) {
       select(id, { scroll: true });
       if (isPhone()) setTab("plan");
     },
-    onSelectResult: (placeId) => pickPlace(S.results.find((r) => r.placeId === placeId)),
+    onSelectResult: (placeId) => pickPlace(shownResults().find((r) => r.placeId === placeId)),
+    onPlaceClick: (placeId, at) => placeClicked(placeId, at),
+    onMapClick: (at) => mapClicked(at),
   });
 
   const isPhone = () => matchMedia("(max-width: 899px)").matches;
@@ -242,13 +255,27 @@ export async function openEditor(root, tripId, ctx) {
       ),
     );
 
+    const missing = missingLegs(d);
+    if (missing.length > 1) {
+      dayHead.append(
+        h(
+          "p",
+          { class: "day-routes" },
+          h("button", { class: "btn btn-sm btn-outline", type: "button", disabled: missing.some(([a, b]) => S.busyLegs.has(`${a.id}>${b.id}`)), onclick: () => calcMissing(d) }, `Calculate ${missing.length} missing routes`),
+        ),
+      );
+    }
+    if (!startOf() && !S.starting && idx === 0) {
+      dayHead.append(h("p", { class: "day-start-link" }, h("button", { class: "linklike small", type: "button", onclick: () => beginStart() }, icon("pin"), "Set a starting point")));
+    }
+
     if (!d.activities.length) {
       timeline.replaceChildren(
         h(
           "li",
           { class: "timeline-empty" },
           h("h3", {}, "Start by searching for somewhere you want to visit"),
-          h("p", {}, "Search a place on the map and add it to this day, or add your own activity below. Wayline works out the travel time between consecutive stops."),
+          h("p", {}, "Explore the map or search to add a stop: click a place on the map, or click anywhere to see what's nearby. You can also add your own activity below. Wayline works out the travel time between consecutive stops."),
           h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => { if (isPhone()) setTab("map"); searchInput.focus(); } }, icon("search"), "Search places"),
         ),
       );
@@ -259,31 +286,46 @@ export async function openEditor(root, tripId, ctx) {
       items.push(stopItem(a, i, d));
       if (i + 1 < d.activities.length) items.push(legItem(d, a, d.activities[i + 1]));
     });
+    if (S.hint && d.activities.length === 1 && d.activities[0].role === "start") {
+      items.push(
+        h(
+          "li",
+          { class: "timeline-hint" },
+          h("p", {}, h("strong", {}, "Explore the map or search to add your next stop."), " Click a place on the map for details, or click anywhere to see what's nearby."),
+          h("button", { class: "icon-btn", type: "button", "aria-label": "Dismiss", onclick: () => { S.hint = false; renderTimeline(); } }, icon("close")),
+        ),
+      );
+    }
     timeline.replaceChildren(...items);
   }
 
   function stopItem(a, i, d) {
     const n = d.activities.length;
+    const isStart = a.role === "start";
+    const first = d.activities[0]?.role === "start" ? 1 : 0; // nothing moves above the start
     const end = a.startMin === null ? null : a.startMin + a.durationMin;
     const li = h(
       "li",
-      { class: `stop kind-${a.kind}${a.id === S.selectedId ? " selected" : ""}`, dataset: { id: a.id }, draggable: "true" },
-      h("div", { class: "stop-rail" }, h("span", { class: "stop-num" }, String(i + 1))),
+      { class: `stop kind-${a.kind}${isStart ? " stop-start" : ""}${a.id === S.selectedId ? " selected" : ""}`, dataset: { id: a.id }, draggable: isStart ? "false" : "true" },
+      h("div", { class: "stop-rail" }, h("span", { class: "stop-num" }, isStart ? "S" : String(i + 1 - first))),
       h(
         "article",
         { class: "stop-card", tabindex: "-1" },
         h(
           "div",
           { class: "stop-top" },
-          h("span", { class: "stop-time" }, a.startMin === null ? "No time set" : `${hhmm(a.startMin)} – ${hhmm(end)}`),
-          h("span", { class: "grip", "aria-hidden": "true", title: "Drag to reorder" }, icon("grip")),
+          isStart
+            ? h("span", { class: "stop-time" }, h("span", { class: "start-badge" }, "Start"), a.startMin === null ? "" : ` · leave ${hhmm(a.startMin)}`)
+            : h("span", { class: "stop-time" }, a.startMin === null ? "No time set" : `${hhmm(a.startMin)} – ${hhmm(end)}`),
+          !isStart && h("span", { class: "grip", "aria-hidden": "true", title: "Drag to reorder" }, icon("grip")),
         ),
-        h("h3", {}, h("button", { class: "linklike", type: "button", onclick: () => select(a.id, { focusMap: true }) }, a.title)),
+        h("h3", {}, h("button", { class: "linklike", type: "button", onclick: () => openStop(a) }, a.title)),
         h(
           "p",
           { class: "stop-meta" },
-          h("span", { class: `tag tag-${a.kind}` }, KIND_LABEL[a.kind]),
-          h("span", {}, dur(a.durationMin)),
+          !isStart && h("span", { class: `tag tag-${a.kind}` }, KIND_LABEL[a.kind]),
+          !isStart && h("span", {}, dur(a.durationMin)),
+          a.place?.source === "custom" && h("span", { class: "tag", title: "A spot picked on the map, not a Google place" }, "Pinned spot"),
           a.place?.source === "demo" && h("span", { class: "tag tag-demo", title: "Demo fixture, not data from Google" }, "Demo place"),
           a.place?.source === "curated" && h("span", { class: "tag tag-demo", title: "From Wayline's curated sample data, not matched to a Google place" }, "Approximate location"),
           !a.place && h("span", { class: "muted" }, "No place"),
@@ -293,13 +335,18 @@ export async function openEditor(root, tripId, ctx) {
         h(
           "div",
           { class: "stop-actions" },
-          h("button", { class: "icon-btn", type: "button", "aria-label": `Move ${a.title} earlier`, disabled: i === 0, onclick: () => move(a.id, d.id, i - 1) }, icon("up")),
-          h("button", { class: "icon-btn", type: "button", "aria-label": `Move ${a.title} later`, disabled: i === n - 1, onclick: () => move(a.id, d.id, i + 1) }, icon("down")),
+          isStart
+            ? h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => beginStart() }, icon("pin"), "Change start")
+            : [
+                h("button", { class: "icon-btn", type: "button", "aria-label": `Move ${a.title} earlier`, disabled: i <= first, onclick: () => move(a.id, d.id, i - 1) }, icon("up")),
+                h("button", { class: "icon-btn", type: "button", "aria-label": `Move ${a.title} later`, disabled: i === n - 1, onclick: () => move(a.id, d.id, i + 1) }, icon("down")),
+              ],
           h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => activityDialog({ activity: a }) }, icon("edit"), "Edit"),
           h("button", { class: "icon-btn icon-btn-danger", type: "button", "aria-label": `Remove ${a.title}`, onclick: () => removeActivity(a) }, icon("trash")),
         ),
       ),
     );
+    if (isStart) return li;
     li.addEventListener("dragstart", (e) => {
       S.dragging = a.id;
       e.dataTransfer.effectAllowed = "move";
@@ -391,12 +438,24 @@ export async function openEditor(root, tripId, ctx) {
     );
   }
 
+  const routable = (a) => a.place?.source === "google" || (a.place?.source === "custom" && a.place.lat !== null);
+
+  // consecutive pairs that could be routed but have no route yet
+  const missingLegs = (d) =>
+    ctx.config.routes
+      ? d.activities.slice(0, -1).map((a, i) => [a, d.activities[i + 1]]).filter(([a, b]) => routable(a) && routable(b) && !d.segments.some((s) => s.fromId === a.id && s.toId === b.id))
+      : [];
+
+  async function calcMissing(d) {
+    for (const [a, b] of missingLegs(d)) await calcRoute(a, b, false);
+  }
+
   function routeButton(prev, next, busy, label, force = false) {
-    const unverified = prev.place?.source !== "google" || next.place?.source !== "google";
+    const unverified = !routable(prev) || !routable(next);
     const disabledWhy = !ctx.config.routes
       ? "Routes need Google Maps configured on the server"
       : unverified
-        ? "Only places matched to Google Maps can be routed"
+        ? "Only Google places and spots picked on the map can be routed"
         : null;
     return h(
       "span",
@@ -519,12 +578,26 @@ export async function openEditor(root, tripId, ctx) {
 
   // --- map & search ---
 
+  // the list on screen: nearby places around a map click, else search results
+  const shownResults = () => (S.explore ? S.explore.results : S.results);
+
   function renderMap() {
     const d = day();
     const stops = (d?.activities ?? [])
       .filter((a) => a.place && a.place.lat !== null)
-      .map((a) => ({ id: a.id, title: a.title, kind: a.kind, lat: a.place.lat, lng: a.place.lng, selected: a.id === S.selectedId }));
-    map.update({ stops, results: S.results, center: S.trip.center, selectedPlaceId: S.place?.placeId ?? null });
+      .map((a) => ({ id: a.id, title: a.title, kind: a.kind, lat: a.place.lat, lng: a.place.lng, start: a.role === "start", selected: a.id === S.selectedId }));
+    // one temporary marker at most: the start being considered, the clicked
+    // spot, or a clicked place that isn't one of the listed results
+    const cand = S.starting?.candidate;
+    const clickedPlace = S.place && !shownResults().some((r) => r.placeId === S.place.placeId) && Number.isFinite(S.place.lat) ? S.place : null;
+    const temp = cand
+      ? { lat: cand.place.lat, lng: cand.place.lng, label: cand.title, start: true }
+      : clickedPlace
+        ? { lat: clickedPlace.lat, lng: clickedPlace.lng, label: clickedPlace.name }
+        : S.explore
+          ? { lat: S.explore.lat, lng: S.explore.lng, label: S.explore.label }
+          : null;
+    map.update({ stops, results: shownResults(), temp, center: S.trip.center, selectedPlaceId: S.place?.placeId ?? null });
   }
 
   searchForm.addEventListener("submit", async (e) => {
@@ -539,6 +612,8 @@ export async function openEditor(root, tripId, ctx) {
       S.resultsSource = res.source;
       S.place = null;
       S.placeDetails = null;
+      S.explore = null;
+      if (S.starting) S.starting = { ...S.starting, step: "search", candidate: null };
       renderSearch();
       renderMap();
     } catch (err) {
@@ -550,22 +625,37 @@ export async function openEditor(root, tripId, ctx) {
     S.results = [];
     S.place = null;
     S.placeDetails = null;
+    S.explore = null;
+    if (S.starting) S.starting = null;
     searchPanel.hidden = true;
     renderMap();
+    renderTimeline();
   }
 
+  // Details are fetched when a place is opened, and the place is filled in
+  // from them (a clicked map icon starts with only its id and position).
   async function pickPlace(p) {
     if (!p) return;
     S.place = p;
     S.placeDetails = null;
     renderSearch();
     renderMap();
-    map.focus(p);
+    if (Number.isFinite(p.lat)) map.focus(p);
+    if (p.source !== "google") return void ((S.placeDetails = { none: true }), renderSearch());
     try {
       const details = await api(`/api/places/${encodeURIComponent(p.placeId)}`);
       if (S.place?.placeId === p.placeId) {
+        S.place = { ...S.place, name: details.name, address: details.address, category: details.category, types: details.types, lat: details.lat, lng: details.lng, pending: false };
         S.placeDetails = details;
         renderSearch();
+        renderMap();
+        if (details.photo) {
+          const { uri } = await api(`/api/places/photo?name=${encodeURIComponent(details.photo.name)}`).catch(() => ({ uri: null }));
+          if (uri && S.placeDetails === details) {
+            details.photoUri = uri;
+            renderSearch();
+          }
+        }
       }
     } catch (err) {
       if (S.place?.placeId === p.placeId) {
@@ -575,7 +665,90 @@ export async function openEditor(root, tripId, ctx) {
     }
   }
 
+  // A click on one of Google's place icons: open it. While choosing the
+  // start, it becomes the candidate instead.
+  function placeClicked(placeId, at) {
+    const p = { placeId, name: "Loading place…", lat: at.lat, lng: at.lng, source: "google", types: [], pending: true };
+    if (S.starting) return considerStartPlace(p);
+    pickPlace(p);
+  }
+
+  // A click anywhere else: explore around it, or, while choosing the start,
+  // make that spot the candidate.
+  function mapClicked(at) {
+    if (S.starting) return considerStartSpot(at);
+    exploreAt(at);
+  }
+
+  const NEARBY = [
+    ["tourist_attraction", "Attractions"],
+    ["restaurant", "Restaurants"],
+    ["cafe", "Cafés"],
+    ["museum", "Museums"],
+    ["shopping_mall", "Shopping"],
+    ["lodging", "Hotels"],
+  ];
+
+  async function exploreAt(at) {
+    S.place = null;
+    S.placeDetails = null;
+    S.results = [];
+    S.explore = { lat: at.lat, lng: at.lng, label: null, type: "tourist_attraction", results: [], source: null, loading: false, error: null, cache: new Map() };
+    const mine = S.explore;
+    renderSearch();
+    renderMap();
+    if (isPhone()) setTab("map");
+    api(`/api/geo/reverse?lat=${at.lat}&lng=${at.lng}`)
+      .then((r) => { if (S.explore === mine) mine.label = r.label; })
+      .catch(() => {})
+      .finally(() => { if (S.explore === mine) renderSearch(); });
+    loadNearby("tourist_attraction");
+  }
+
+  // one request per category per clicked spot; switching back reuses it
+  async function loadNearby(type) {
+    const ex = S.explore;
+    if (!ex) return;
+    ex.type = type;
+    const hit = ex.cache.get(type);
+    if (hit) {
+      Object.assign(ex, { results: hit.places, source: hit.source, loading: false, error: null });
+      return void (renderSearch(), renderMap());
+    }
+    Object.assign(ex, { results: [], loading: true, error: null });
+    renderSearch();
+    renderMap();
+    try {
+      const res = await api(`/api/places/nearby?lat=${ex.lat}&lng=${ex.lng}&radius=1500&type=${type}&rich=1`);
+      ex.cache.set(type, res);
+      if (S.explore !== ex || ex.type !== type) return;
+      Object.assign(ex, { results: res.places, source: res.source, loading: false });
+    } catch (err) {
+      if (S.explore !== ex || ex.type !== type) return;
+      Object.assign(ex, { loading: false, error: err.message });
+    }
+    renderSearch();
+    renderMap();
+  }
+
+  // a timeline stop: highlight it on the map and, for a Google place, open it
+  function openStop(a) {
+    select(a.id, { focusMap: true });
+    if (a.place?.source === "google" && !S.starting) {
+      S.explore = null;
+      pickPlace({ placeId: a.place.placeId, name: a.title, lat: a.place.lat, lng: a.place.lng, source: "google", types: [] });
+    }
+  }
+
+  // every stop already planned at this place, on any day
+  const visitsOf = (placeId) =>
+    S.trip.days.flatMap((d, di) => d.activities.filter((a) => a.place?.placeId === placeId).map((a) => ({ a, day: di + 1 })));
+
   function renderSearch() {
+    // choosing the start by search shows the ordinary results and place card
+    const searchingStart = S.starting?.step === "search" && (S.results.length || S.place);
+    if (S.starting && !searchingStart) return void ((searchPanel.hidden = false), searchPanel.replaceChildren(startPanel()));
+    if (S.explore && !S.place) return void ((searchPanel.hidden = false), searchPanel.replaceChildren(explorePanel()));
     if (!S.results.length && !S.place) {
       if (S.resultsSource) {
         searchPanel.hidden = false;
@@ -634,7 +807,7 @@ export async function openEditor(root, tripId, ctx) {
         h("label", { class: "field" }, h("span", {}, "Start"), h("input", { name: "start", type: "time", step: 300, value: hhmm(suggestStart(current)) })),
         h("label", { class: "field" }, h("span", {}, "Duration (min)"), h("input", { name: "duration", type: "number", min: 5, max: 1440, step: 5, value: KIND_DURATION[kind] })),
       ),
-      h("button", { class: "btn btn-primary btn-block", type: "submit" }, icon("plus"), "Add to itinerary"),
+      h("button", { class: "btn btn-primary btn-block", type: "submit", disabled: Boolean(p.pending) }, icon("plus"), visitsOf(p.placeId).length ? "Add another visit" : "Add to itinerary"),
     );
     form.kind.addEventListener("change", () => (form.duration.value = KIND_DURATION[form.kind.value]));
     form.dayId.addEventListener("change", () => (form.start.value = hhmm(suggestStart(days.find((x) => x.id === form.dayId.value)))));
@@ -661,7 +834,12 @@ export async function openEditor(root, tripId, ctx) {
         const dayIndex = days.findIndex((x) => x.id === form.dayId.value);
         if (form.dayId.value !== S.dayId) setDay(form.dayId.value);
         S.selectedId = res.activityId;
-        closeSearch();
+        S.hint = false;
+        // from a map click: back to the nearby list, so exploring can go on
+        if (S.explore) {
+          S.place = null;
+          S.placeDetails = null;
+        } else closeSearch();
         render();
         toast(`Added ${p.name} to Day ${dayIndex + 1}.`, isPhone() ? { action: { label: "View plan", run: () => setTab("plan") } } : {});
       } catch {
@@ -669,15 +847,25 @@ export async function openEditor(root, tripId, ctx) {
       }
     });
 
+    const visits = visitsOf(p.placeId);
+    const back = S.explore ? "← Nearby places" : S.results.length ? "← Results" : null;
     return h(
       "div",
       { class: "place-card" },
       h(
         "div",
         { class: "panel-head" },
-        h("button", { class: "linklike small", type: "button", onclick: () => { S.place = null; renderSearch(); renderMap(); } }, "← Results"),
+        back ? h("button", { class: "linklike small", type: "button", onclick: () => { S.place = null; S.placeDetails = null; renderSearch(); renderMap(); } }, back) : h("span", { class: "muted small" }, "Place"),
         h("button", { class: "icon-btn", type: "button", "aria-label": "Close", onclick: closeSearch }, icon("close")),
       ),
+      d?.photoUri &&
+        h(
+          "figure",
+          { class: "place-photo" },
+          h("img", { src: d.photoUri, alt: `Photo of ${p.name}`, loading: "lazy", decoding: "async", onerror: (e) => e.currentTarget.closest("figure")?.remove() }),
+          d.photo.attributions.length > 0 &&
+            h("figcaption", { class: "photo-credit" }, "Photo: ", d.photo.attributions.map((a, i) => [i > 0 && ", ", a.uri ? h("a", { href: a.uri, target: "_blank", rel: "noopener" }, a.displayName) : a.displayName])),
+        ),
       h("h3", {}, p.name),
       h(
         "p",
@@ -685,8 +873,17 @@ export async function openEditor(root, tripId, ctx) {
         p.category && h("span", { class: "tag" }, p.category),
         p.source === "demo" && h("span", { class: "tag tag-demo" }, "Demo place"),
       ),
+      d && typeof d.rating === "number" && h("p", { class: "rating" }, h("strong", {}, d.rating.toFixed(1)), " ★", d.ratingCount ? h("span", { class: "muted" }, ` (${d.ratingCount.toLocaleString("en-AU")} Google reviews)`) : null),
       p.address && h("p", { class: "muted" }, p.address),
-      d === null && p.source === "google" && h("p", { class: "muted small" }, "Loading opening hours…"),
+      visits.length > 0 &&
+        h(
+          "p",
+          { class: "already" },
+          icon("check"),
+          "Already in your plan: ",
+          visits.map((v, i) => [i > 0 && ", ", `Day ${v.day}${v.a.role === "start" ? " (start)" : v.a.startMin !== null ? ` at ${hhmm(v.a.startMin)}` : ""}`]),
+        ),
+      d === null && p.source === "google" && h("p", { class: "muted small" }, "Loading details…"),
       d?.error && h("p", { class: "form-error small" }, d.error),
       d?.openingHours &&
         h(
@@ -697,9 +894,311 @@ export async function openEditor(root, tripId, ctx) {
         ),
       d && !d.error && !d.openingHours && h("p", { class: "muted small" }, p.source === "demo" ? "Demo places have no opening hours." : "No opening hours available for this place."),
       d?.googleMapsUri && h("p", {}, h("a", { href: d.googleMapsUri, target: "_blank", rel: "noopener" }, "Open in Google Maps")),
-      form,
+      S.starting
+        ? h(
+            "button",
+            { class: "btn btn-primary btn-block", type: "button", disabled: Boolean(p.pending), onclick: () => confirmStart({ title: p.name, place: { placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng } }) },
+            icon("pin"),
+            "Set as starting point",
+          )
+        : form,
       p.source === "google" && h("p", { class: "attrib", translate: "no" }, "Google Maps"),
     );
+  }
+
+  function explorePanel() {
+    const ex = S.explore;
+    const noThumb = () => h("span", { class: "nearby-thumb nearby-thumb-empty", "aria-hidden": "true" }, icon("pin"));
+    return h(
+      "div",
+      { class: "explore-panel" },
+      h(
+        "div",
+        { class: "panel-head" },
+        h("strong", {}, !ex.label ? "Around this spot" : /^near /i.test(ex.label) ? ex.label : `Around ${ex.label}`),
+        h("button", { class: "icon-btn", type: "button", "aria-label": "Close", onclick: closeSearch }, icon("close")),
+      ),
+      h(
+        "div",
+        { class: "cat-chips xp-cats", role: "group", "aria-label": "Place type" },
+        NEARBY.map(([t, label]) => h("button", { type: "button", class: `cat-chip${ex.type === t ? " on" : ""}`, "aria-pressed": String(ex.type === t), onclick: () => loadNearby(t) }, label)),
+      ),
+      ex.loading
+        ? h("p", { class: "muted pad", role: "status" }, "Finding places nearby…")
+        : ex.error
+          ? h("p", { class: "form-error pad" }, ex.error)
+          : !ex.results.length
+            ? h("p", { class: "muted pad" }, ex.source === "demo" ? "Nearby places need Google Maps configured on the server." : "Nothing of this kind within 1.5 km. Try another category.")
+            : h(
+                "ul",
+                { class: "results nearby" },
+                ex.results.map((r) =>
+                  h(
+                    "li",
+                    {},
+                    h(
+                      "button",
+                      { type: "button", class: "result nearby-row", onclick: () => pickPlace(r) },
+                      r.thumb
+                        ? h("img", { class: "nearby-thumb", src: r.thumb.uri, alt: "", width: 56, height: 56, loading: "lazy", decoding: "async", onerror: (e) => e.currentTarget.replaceWith(noThumb()) })
+                        : noThumb(),
+                      h(
+                        "span",
+                        { class: "nearby-text" },
+                        h("strong", {}, r.name),
+                        h("span", { class: "muted" }, [r.category, typeof r.distanceKm === "number" ? km(r.distanceKm) : null].filter(Boolean).join(" · ")),
+                        typeof r.rating === "number" && h("span", { class: "nearby-rating" }, `${r.rating.toFixed(1)} ★`, r.ratingCount ? h("span", { class: "muted" }, ` (${r.ratingCount.toLocaleString("en-AU")})`) : null),
+                        r.thumb?.credit.length > 0 && h("small", { class: "photo-credit" }, `Photo: ${r.thumb.credit.join(", ")}`),
+                      ),
+                      visitsOf(r.placeId).length > 0 && h("span", { class: "tag tag-in" }, "In plan"),
+                    ),
+                  ),
+                ),
+              ),
+      ex.source === "google" && ex.results.length > 0 && h("p", { class: "attrib", translate: "no" }, "Google Maps"),
+      customSpotForm(ex),
+    );
+  }
+
+  // A spot that isn't a listed place (a viewpoint, a meeting point): stored
+  // with its coordinates and a custom: id, never a made-up Google id.
+  function customSpotForm(ex) {
+    const name = h("input", { name: "title", maxlength: 120, value: ex.customName ?? ex.label ?? "", placeholder: "e.g. Meeting point", oninput: (e) => (ex.customName = e.target.value) });
+    const daySel = h("select", { name: "dayId" }, S.trip.days.map((x, i) => h("option", { value: x.id, selected: x.id === day()?.id }, `Day ${i + 1} · ${fmtDay(x.date)}`)));
+    const btn = h("button", { class: "btn btn-ghost btn-sm btn-block", type: "submit" }, icon("plus"), "Add this spot");
+    const clientId = uid();
+    return h(
+      "form",
+      {
+        class: "add-form custom-spot",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          const title = name.value.trim() || "Pinned spot";
+          btn.disabled = true;
+          try {
+            const res = await act(
+              api(`${base}/activities`, {
+                method: "POST",
+                body: {
+                  clientId,
+                  dayId: daySel.value,
+                  title,
+                  kind: "custom",
+                  startMin: suggestStart(S.trip.days.find((x) => x.id === daySel.value)),
+                  durationMin: 30,
+                  place: { placeId: `custom:${clientId}`, source: "custom", lat: ex.lat, lng: ex.lng },
+                },
+              }),
+            );
+            if (daySel.value !== S.dayId) setDay(daySel.value);
+            S.selectedId = res.activityId;
+            S.hint = false;
+            closeSearch();
+            render();
+            toast(`Added ${title} to the plan.`, isPhone() ? { action: { label: "View plan", run: () => setTab("plan") } } : {});
+          } catch {
+            btn.disabled = false;
+          }
+        },
+      },
+      h("p", { class: "small" }, h("strong", {}, "Not a listed place?"), " Add this exact spot, like a viewpoint or a meeting point."),
+      h("div", { class: "row-2" }, h("label", { class: "field" }, h("span", {}, "Name"), name), h("label", { class: "field" }, h("span", {}, "Day"), daySel)),
+      btn,
+    );
+  }
+
+  // --- the starting point ---
+
+  const kmBetween = (a, b) => {
+    const rad = Math.PI / 180;
+    const x = Math.sin(((b.lat - a.lat) * rad) / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(((b.lng - a.lng) * rad) / 2) ** 2;
+    return 12742 * Math.asin(Math.sqrt(x));
+  };
+
+  function beginStart() {
+    S.starting = { step: "choose" };
+    S.place = null;
+    S.placeDetails = null;
+    S.explore = null;
+    S.results = [];
+    if (isPhone()) setTab("map");
+    renderSearch();
+    renderMap();
+    renderTimeline();
+  }
+
+  function startPanel() {
+    const st = S.starting;
+    const changing = Boolean(startOf());
+    const google = map.kind === "google";
+    const head = h(
+      "div",
+      { class: "panel-head" },
+      h("strong", {}, changing ? "Change the starting point" : "Where would you like to start?"),
+      h("button", { class: "icon-btn", type: "button", "aria-label": changing ? "Cancel" : "Skip for now", onclick: closeSearch }, icon("close")),
+    );
+    if (st.step === "confirm" && st.candidate) {
+      const c = st.candidate;
+      const away = S.trip.center && Number.isFinite(c.place.lat) ? kmBetween(c.place, S.trip.center) : 0;
+      return h(
+        "div",
+        { class: "start-panel" },
+        head,
+        h(
+          "div",
+          { class: "start-body" },
+          h("p", { class: "start-cand" }, h("span", { class: "start-badge" }, "Start"), h("strong", {}, c.title)),
+          c.pending && h("p", { class: "muted small", role: "status" }, "Finding the name of this spot…"),
+          away > 150 && h("p", { class: "leg-warn small" }, `This is about ${Math.round(away).toLocaleString("en-AU")} km from ${S.trip.destination}. Fine if the trip really starts here; otherwise choose a start in ${S.trip.destination}.`),
+          h(
+            "div",
+            { class: "row-actions" },
+            h("button", { class: "btn btn-primary btn-sm", type: "button", disabled: Boolean(c.pending || st.saving), onclick: () => confirmStart(c) }, st.saving ? "Saving…" : "Start here"),
+            google && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.starting = { step: "map" }; renderSearch(); renderMap(); } }, st.via === "map" ? "Choose again" : "Adjust on map"),
+            h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.starting = { step: "choose" }; renderSearch(); renderMap(); } }, "Other options"),
+          ),
+        ),
+      );
+    }
+    if (st.step === "map") {
+      return h(
+        "div",
+        { class: "start-panel" },
+        head,
+        h(
+          "div",
+          { class: "start-body" },
+          h("p", {}, h("strong", {}, "Click the map where the trip starts."), " Click a place's icon to start there, or anywhere else to use that exact spot."),
+          h("button", { class: "linklike small", type: "button", onclick: () => { S.starting = { step: "choose" }; renderSearch(); } }, "← Other options"),
+        ),
+      );
+    }
+    return h(
+      "div",
+      { class: "start-panel" },
+      head,
+      h(
+        "div",
+        { class: "start-options" },
+        h(
+          "button",
+          { class: "start-option", type: "button", disabled: Boolean(st.locating), onclick: startFromMyLocation },
+          icon("locate"),
+          h("span", {}, h("strong", {}, st.locating ? "Finding your location…" : "Use my location"), h("small", {}, "Where you are right now")),
+        ),
+        h(
+          "button",
+          { class: "start-option", type: "button", disabled: !google, onclick: () => { S.starting = { step: "map" }; renderSearch(); } },
+          icon("pin"),
+          h("span", {}, h("strong", {}, "Choose on map"), h("small", {}, google ? "Click the spot on the map" : "Needs the Google map; search instead")),
+        ),
+        h(
+          "button",
+          { class: "start-option", type: "button", onclick: () => { S.starting = { step: "search" }; renderSearch(); searchInput.focus(); } },
+          icon("search"),
+          h("span", {}, h("strong", {}, "Search a location"), h("small", {}, "A hotel, station, airport or address")),
+        ),
+      ),
+      st.message && h("p", { class: "form-error small start-body", role: "alert" }, st.message),
+      st.step === "search" && h("p", { class: "muted small start-body" }, "Type in the search box above, then pick a result."),
+      !changing && h("p", { class: "start-body" }, h("button", { class: "linklike small", type: "button", onclick: closeSearch }, "Skip for now")),
+    );
+  }
+
+  async function considerStartSpot(at) {
+    const c = { title: "Selected spot", pending: true, place: { placeId: `custom:${uid()}`, source: "custom", lat: at.lat, lng: at.lng } };
+    S.starting = { step: "confirm", via: "map", candidate: c };
+    renderSearch();
+    renderMap();
+    try {
+      c.title = (await api(`/api/geo/reverse?lat=${at.lat}&lng=${at.lng}`)).label || "Selected spot";
+    } catch {}
+    c.pending = false;
+    if (S.starting?.candidate === c) renderSearch();
+  }
+
+  async function considerStartPlace(p) {
+    const c = { title: "Loading place…", pending: true, place: { placeId: p.placeId, source: "google", lat: p.lat, lng: p.lng } };
+    S.starting = { step: "confirm", via: "map", candidate: c };
+    renderSearch();
+    renderMap();
+    try {
+      const b = await api(`/api/places/${encodeURIComponent(p.placeId)}?view=basic`);
+      Object.assign(c, { title: b.name });
+      Object.assign(c.place, { lat: b.lat, lng: b.lng });
+      c.pending = false;
+    } catch (err) {
+      if (S.starting?.candidate === c) S.starting = { step: "map", message: err.message };
+    }
+    if (S.starting?.candidate === c || S.starting?.message) {
+      renderSearch();
+      renderMap();
+    }
+  }
+
+  // the current location as a start: only on request, through the same
+  // remembered permission the homepage uses
+  function startFromMyLocation() {
+    const say = (message) => {
+      S.starting = { step: "choose", message };
+      renderSearch();
+    };
+    let choice = null;
+    try {
+      choice = JSON.parse(localStorage.getItem("wayline.geo") ?? "null");
+    } catch {}
+    if (choice === "denied") return say("Location access is off for Wayline in this browser. Choose on the map or search for the start instead.");
+    if (!navigator.geolocation) return say("This browser can't share its location. Choose on the map or search for the start instead.");
+    S.starting = { step: "choose", locating: true };
+    renderSearch();
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        if (!S.starting?.locating) return;
+        try {
+          localStorage.setItem("wayline.geo", JSON.stringify("allowed"));
+        } catch {}
+        const at = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        await considerStartSpot(at);
+        if (S.starting?.candidate) S.starting.via = "location";
+        renderSearch();
+        map.focus(at);
+      },
+      (err) => {
+        if (!S.starting?.locating) return;
+        if (err.code === 1) {
+          try {
+            localStorage.setItem("wayline.geo", JSON.stringify("denied"));
+          } catch {}
+          say("Location permission was denied. Choose on the map or search for the start instead.");
+        } else say(err.code === 3 ? "Finding your location took too long. Try again, or choose on the map or search." : "Your location couldn't be determined. Choose on the map or search instead.");
+      },
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 10 * 60_000 },
+    );
+  }
+
+  async function confirmStart(c) {
+    const changed = Boolean(startOf());
+    if (S.starting) S.starting = { ...S.starting, saving: true };
+    renderSearch();
+    try {
+      const res = await act(api(`${base}/start`, { method: "PUT", body: { clientId: uid(), title: c.title, place: c.place } }));
+      S.starting = null;
+      S.place = null;
+      S.placeDetails = null;
+      S.results = [];
+      S.explore = null;
+      searchPanel.hidden = true;
+      S.hint = true;
+      const first = S.trip.days[0];
+      if (first && S.dayId !== first.id) setDay(first.id);
+      S.selectedId = res.activityId;
+      render();
+      if (Number.isFinite(c.place.lat)) map.focus(c.place);
+      toast(changed ? `Starting from ${c.title}.` : "Starting point set.");
+    } catch {
+      if (S.starting) S.starting = { ...S.starting, saving: false };
+      renderSearch();
+    }
   }
 
   function suggestStart(d) {

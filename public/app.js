@@ -361,7 +361,7 @@ function newTripDialog() {
         body: Object.fromEntries(["title", "destination", "startDate", "endDate", "timezone"].map((k) => [k, form[k].value])),
       });
       dialog.close();
-      navigate(`/trips/${trip.id}`);
+      navigate(`/trips/${trip.id}?new=1`); // opens with "Where would you like to start?"
     } catch (err) {
       error.textContent = err.message;
       error.hidden = false;

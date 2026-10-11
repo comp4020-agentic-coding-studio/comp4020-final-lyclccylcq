@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mapsKeyWarnings } from "../src/google.ts";
-import { anon, signUp, startApp } from "./helpers.ts";
+import { anon, newTrip, signUp, startApp } from "./helpers.ts";
 
 // MOCKED Google Maps Platform. These checks run a private copy of the app
 // against a local stand-in that answers in the shapes Google's Places API
@@ -55,7 +55,20 @@ beforeAll(async () => {
       return send({ places: placesFor(body) });
     }
     if (url.pathname === "/v1/places:searchNearby") {
-      return send({ places: [{ id: "ChIJ_eiffel_tower_id", displayName: { text: "Eiffel Tower" }, location: { latitude: 48.8584, longitude: 2.2945 }, primaryTypeDisplayName: { text: "Tourist attraction" }, types: ["tourist_attraction"] }] });
+      return send({
+        places: [
+          {
+            id: "ChIJ_eiffel_tower_id",
+            displayName: { text: "Eiffel Tower" },
+            location: { latitude: 48.8584, longitude: 2.2945 },
+            primaryTypeDisplayName: { text: "Tourist attraction" },
+            types: ["tourist_attraction"],
+            rating: 4.6,
+            userRatingCount: 400000,
+            photos: [{ name: "places/ChIJ_eiffel_tower_id/photos/p1", authorAttributions: [{ displayName: "Mock Photographer", uri: "https://maps.google.com/contrib/2" }] }],
+          },
+        ],
+      });
     }
     if (url.pathname.endsWith("/media")) return send({ name: "x", photoUri: "https://lh3.googleusercontent.com/mock-photo" });
     if (url.pathname.startsWith("/v1/places/")) {
@@ -167,6 +180,38 @@ describe("Google service layer (mocked Google)", () => {
     const far = await c.send("POST", "/api/routes", { origin: { lat: 48.85, lng: 2.35 }, destination: { lat: 48.86, lng: 2.29 }, mode: "TRANSIT", departureTime: "2030-01-01T09:00:00Z" });
     expect(far.data).toMatchObject({ status: "error" });
     expect(seen.filter((s) => s.path.startsWith("/directions")).length).toBe(calls);
+  });
+
+  it("lists places around a clicked spot with rating and a credited small photo, on request only", async () => {
+    const c = anon(base);
+    const plain = await c.get("/api/places/nearby?lat=48.8566&lng=2.3522&radius=1500&type=tourist_attraction");
+    expect(last("/v1/places:searchNearby").headers["x-goog-fieldmask"]).not.toContain("photos");
+    expect(plain.data.places[0].thumb).toBeUndefined();
+    const before = seen.filter((s) => s.path.includes("/media")).length;
+    const rich = await c.get("/api/places/nearby?lat=48.8566&lng=2.3522&radius=1500&type=tourist_attraction&rich=1");
+    expect(last("/v1/places:searchNearby").headers["x-goog-fieldmask"]).toContain("places.photos");
+    expect(rich.data.places[0]).toMatchObject({ name: "Eiffel Tower", rating: 4.6, ratingCount: 400000, thumb: { uri: "https://lh3.googleusercontent.com/mock-photo", credit: ["Mock Photographer"] } });
+    expect(seen.filter((s) => s.path.includes("/media")).length).toBe(before + 1);
+    expect(last("/v1/places/ChIJ_eiffel_tower_id/photos/p1/media").path).toContain("maxWidthPx=160");
+    expect(JSON.stringify(rich.data)).not.toContain(KEY);
+  });
+
+  it("routes a trip leg from a spot picked on the map by its coordinates, and a Google place by its id", async () => {
+    const c = await signUp(base);
+    const trip = await newTrip(c, { destination: "Paris", timezone: "Europe/Paris" });
+    const start = await c.send("PUT", `/api/trips/${trip.id}/start`, { clientId: crypto.randomUUID(), title: "Gare du Nord", place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: 48.8809, lng: 2.3553 } });
+    const stop = await c.send("POST", `/api/trips/${trip.id}/activities`, { clientId: crypto.randomUUID(), dayId: trip.days[0].id, title: "Eiffel Tower", kind: "attraction", startMin: 600, durationMin: 90, place: { placeId: "ChIJ_eiffel_tower_id", source: "google", lat: 48.8584, lng: 2.2945 } });
+    const r = await c.send("POST", `/api/trips/${trip.id}/routes`, { fromId: start.data.activityId, toId: stop.data.activityId });
+    expect(r.status).toBe(200);
+    const req = last("/directions/v2:computeRoutes").body;
+    expect(req.origin).toEqual({ location: { latLng: { latitude: 48.8809, longitude: 2.3553 } } });
+    expect(req.destination).toEqual({ placeId: "ChIJ_eiffel_tower_id" });
+    expect(r.data.days[0].segments).toHaveLength(1);
+
+    // changing the start drops only the route that touched it
+    const moved = await c.send("PUT", `/api/trips/${trip.id}/start`, { clientId: crypto.randomUUID(), title: "Gare de Lyon", place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: 48.8443, lng: 2.3744 } });
+    expect(moved.data.trip.days[0].segments).toHaveLength(0);
+    expect(moved.data.trip.days[0].activities.map((a: any) => a.title)).toEqual(["Gare de Lyon", "Eiffel Tower"]);
   });
 
   it("verifies curated stops against Google once, rejecting a match in the wrong place", async () => {

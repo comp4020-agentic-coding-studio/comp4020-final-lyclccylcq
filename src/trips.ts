@@ -35,6 +35,7 @@ export type Activity = {
   durationMin: number;
   notes: string;
   place: { placeId: string; source: string; lat: number | null; lng: number | null } | null;
+  role: "start" | null;
   version: number;
   updatedBy: string | null;
   updatedAt: number;
@@ -133,10 +134,14 @@ function placeInput(v: unknown): { placeId: string; source: string; lat: number;
   const p = v as Row;
   const placeId = text(p.placeId, "Place id", 300);
   // demo: Wayline's fixtures; curated: a template stop with no verified
-  // Google id (tpl: prefix); google: a real place id. Only google routes.
-  const source = p.source === "demo" ? "demo" : p.source === "curated" ? "curated" : "google";
-  const prefix = source === "demo" ? "demo:" : source === "curated" ? "tpl:" : null;
-  if (prefix ? !placeId.startsWith(prefix) : placeId.startsWith("demo:") || placeId.startsWith("tpl:")) throw bad("Invalid place.");
+  // Google id (tpl: prefix); custom: a point someone picked on the map, with
+  // no Google id (custom: prefix); google: a real place id. google and
+  // custom can be routed.
+  const source = p.source === "demo" ? "demo" : p.source === "curated" ? "curated" : p.source === "custom" ? "custom" : "google";
+  const PREFIXES = { demo: "demo:", curated: "tpl:", custom: "custom:" } as Record<string, string>;
+  const prefix = PREFIXES[source] ?? null;
+  if (prefix ? !placeId.startsWith(prefix) : Object.values(PREFIXES).some((x) => placeId.startsWith(x))) throw bad("Invalid place.");
+  if (source === "custom" && !/^custom:[A-Za-z0-9_-]{8,64}$/.test(placeId)) throw bad("Invalid place.");
   const lat = Number(p.lat);
   const lng = Number(p.lng);
   if (!(Math.abs(lat) <= 90) || !(Math.abs(lng) <= 180)) throw bad("Invalid place coordinates.");
@@ -166,7 +171,8 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
   }
 
   const toActivity = (r: Row): Activity => {
-    const fresh = r.place_cached_at !== null && now() - Number(r.place_cached_at) < CACHE_MS;
+    // a custom point is the travellers' own choice, not Google content, so it never expires
+    const fresh = r.place_source === "custom" || (r.place_cached_at !== null && now() - Number(r.place_cached_at) < CACHE_MS);
     return {
       id: String(r.id),
       dayId: String(r.day_id),
@@ -184,6 +190,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
             lng: fresh ? Number(r.lng) : null,
           }
         : null,
+      role: r.role === "start" ? "start" : null,
       version: Number(r.version),
       updatedBy: r.updated_by === null ? null : String(r.updated_by),
       updatedAt: Number(r.updated_at),
@@ -200,6 +207,8 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
   function dayActivities(dayId: string): Activity[] {
     return q("select * from activities where day_id = ? order by position, id").all(dayId).map(toActivity);
   }
+
+  const startsDay = (dayId: string): boolean => Boolean(q("select 1 from activities where day_id = ? and role = 'start'").get(dayId));
 
   function renumber(dayId: string): void {
     const ids = q("select id from activities where day_id = ? order by position, id").all(dayId);
@@ -509,7 +518,8 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
 
       const trip = mutate(tripId, userId, () => {
         const count = Number((q("select count(*) as n from activities where day_id = ?").get(day.id) as Row).n);
-        const at = Number.isInteger(input.index) ? Math.max(0, Math.min(count, input.index as number)) : count;
+        const first = startsDay(day.id) ? 1 : 0; // nothing goes before the starting point
+        const at = Number.isInteger(input.index) ? Math.max(first, Math.min(count, input.index as number)) : count;
         q("update activities set position = position + 1 where day_id = ? and position >= ?").run(day.id, at);
         q(
           `insert into activities (id, trip_id, day_id, client_id, position, title, kind, start_min, duration_min, notes,
@@ -555,13 +565,14 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     moveActivity(userId: string, tripId: string, activityId: string, input: Row): TripSnapshot {
       requireMember(tripId, userId);
       const cur = getActivity(tripId, activityId);
+      if (cur.role === "start") throw bad("The starting point stays first. Change it instead of moving it.");
       const day = getDay(tripId, input.dayId ?? cur.dayId);
       if (!Number.isInteger(input.index)) throw bad("Say where to move it (index).");
       return mutate(tripId, userId, () => {
         const ids = q("select id from activities where day_id = ? and id != ? order by position, id")
           .all(day.id, activityId)
           .map((r) => String(r.id));
-        const at = Math.max(0, Math.min(ids.length, input.index as number));
+        const at = Math.max(startsDay(day.id) ? 1 : 0, Math.min(ids.length, input.index as number));
         ids.splice(at, 0, activityId);
         q("update activities set day_id = ?, updated_at = ? where id = ?").run(day.id, now(), activityId);
         const set = q("update activities set position = ? where id = ?");
@@ -569,6 +580,43 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         if (day.id !== cur.dayId) renumber(cur.dayId);
         return snapshot(tripId);
       });
+    },
+
+    // The starting point: the first activity of the first day, marked
+    // role = 'start'. Setting it again moves it to the new place and drops
+    // only the routes that touch it; the other stops are untouched.
+    setStart(userId: string, tripId: string, input: Row): { activityId: string; trip: TripSnapshot } {
+      requireMember(tripId, userId);
+      const title = text(input.title, "Title", 120);
+      const place = placeInput(input.place);
+      if (!place) throw bad("Choose where the trip starts.");
+      const existing = q("select id from activities where trip_id = ? and role = 'start'").get(tripId);
+      if (existing) {
+        const id = String(existing.id);
+        const trip = mutate(tripId, userId, () => {
+          q("delete from transport_segments where from_activity_id = ? or to_activity_id = ?").run(id, id);
+          q(
+            "update activities set title = ?, place_id = ?, place_source = ?, lat = ?, lng = ?, place_cached_at = ?, version = version + 1, updated_by = ?, updated_at = ? where id = ?",
+          ).run(title, place.placeId, place.source, place.lat, place.lng, now(), userId, now(), id);
+          return snapshot(tripId);
+        });
+        return { activityId: id, trip };
+      }
+      const clientId = text(input.clientId, "clientId", 64, 8);
+      const firstDay = q("select id from trip_days where trip_id = ? order by date limit 1").get(tripId);
+      if (!firstDay) throw bad("This trip has no days to start on.");
+      const id = randomUUID();
+      const trip = mutate(tripId, userId, () => {
+        q("update activities set position = position + 1 where day_id = ?").run(String(firstDay.id));
+        q(
+          `insert into activities (id, trip_id, day_id, client_id, position, title, kind, start_min, duration_min, notes,
+                                   place_id, place_source, lat, lng, place_cached_at, role, created_by, updated_by, updated_at)
+           values (?, ?, ?, ?, 0, ?, 'custom', null, ?, '', ?, ?, ?, ?, ?, 'start', ?, ?, ?)`,
+        ).run(id, tripId, String(firstDay.id), clientId, title, MIN_DURATION, place.placeId, place.source, place.lat, place.lng, now(), userId, userId, now());
+        renumber(String(firstDay.id));
+        return snapshot(tripId);
+      });
+      return { activityId: id, trip };
     },
 
     deleteActivity(userId: string, tripId: string, activityId: string): TripSnapshot {

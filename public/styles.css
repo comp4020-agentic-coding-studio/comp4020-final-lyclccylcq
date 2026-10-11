@@ -709,3 +709,49 @@ textarea { resize: vertical; }
 .postcard .cover-img { border-radius: 10px; }
 
 .credits-list { display: grid; gap: 8px; padding-left: 20px; }
+
+/* --- map interactions in the editor --- */
+.pin-start { --c: var(--ink) !important; border-radius: 8px; transform: none; width: 34px; height: 34px; }
+.pin-start > * { transform: none; }
+.pin-temp { --c: #fff; color: var(--coral); border: 3px solid var(--coral); width: 28px; height: 28px; font-size: 15px; pointer-events: none; animation: pin-drop .18s ease-out; }
+.pin-temp-start { color: var(--ink); border-color: var(--ink); border-radius: 8px; transform: none; }
+.pin-temp-start > * { transform: none; }
+@keyframes pin-drop { from { opacity: 0; translate: 0 -8px; } }
+.schematic-stop.start circle { fill: var(--ink); }
+
+.start-panel .start-body { padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 10px; }
+.start-options { display: grid; gap: 8px; padding: 12px 12px 4px; }
+.start-option { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); cursor: pointer; }
+.start-option:hover:not(:disabled), .start-option:focus-visible { border-color: var(--ink); background: var(--paper); }
+.start-option:disabled { opacity: .55; cursor: not-allowed; }
+.start-option > svg { flex: none; width: 22px; height: 22px; color: var(--sea); }
+.start-option span { display: flex; flex-direction: column; gap: 1px; }
+.start-option small { color: var(--muted); font-size: 12.5px; }
+.start-cand { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.start-badge { display: inline-block; background: var(--ink); color: #fff; font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; }
+.stop-start .stop-num { background: var(--ink); border-radius: 8px; }
+.timeline-hint { display: flex; align-items: flex-start; gap: 10px; justify-content: space-between; margin: 6px 0 0 44px; padding: 12px 14px; font-size: 14px; background: #e6f3f4; color: #0b4f58; border-radius: 12px; }
+.day-routes, .day-start-link { margin-top: 8px; }
+.day-start-link button { display: inline-flex; align-items: center; gap: 4px; }
+.day-start-link svg { width: 15px; height: 15px; }
+
+.explore-panel .xp-cats { padding: 10px 12px 0; margin-bottom: 4px; }
+.nearby-row { flex-direction: row; align-items: center; gap: 12px; }
+.nearby-thumb { flex: none; width: 56px; height: 56px; border-radius: 10px; object-fit: cover; background: var(--paper-2); }
+.nearby-thumb-empty { display: grid; place-items: center; color: var(--muted); }
+.nearby-thumb-empty svg { width: 20px; height: 20px; }
+.nearby-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.nearby-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nearby-rating { font-size: 13px; font-weight: 700; }
+.nearby-row .photo-credit { margin-top: 0; font-size: 11px; }
+.tag-in { flex: none; background: #e3f1e9; color: #1f6b44; }
+.custom-spot { margin: 6px 12px 12px; }
+.already { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 14px; font-weight: 600; color: #1f6b44; background: #e3f1e9; padding: 8px 12px; border-radius: 10px; }
+.already svg { width: 16px; height: 16px; }
+.place-card .place-photo { margin: 0 16px; }
+.place-card .place-photo img { width: 100%; max-height: 200px; object-fit: cover; border-radius: 12px; display: block; }
+
+@media (max-width: 899px) {
+  /* a bottom sheet on phones, so the map stays visible above it */
+  .search-panel { top: auto; bottom: 10px; max-height: 58%; }
+}

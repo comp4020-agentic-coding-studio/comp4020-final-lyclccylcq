@@ -307,3 +307,126 @@ describe.skipIf(!chromePath)("location on the homepage", () => {
     expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
   });
 });
+
+// A new trip starts with one light question: where does it start? Then the
+// editor, with the start first in the timeline and on the map.
+describe.skipIf(!chromePath)("starting a trip in the editor", () => {
+  const prompt = `document.querySelector('.start-panel')?.textContent ?? ''`;
+  const option = (label: string) => `[...document.querySelectorAll('.start-option')].find(b => b.textContent.includes(${JSON.stringify(label)}))`;
+  const sydneyTrip = (page: Page) => inPage(page, "POST", "/api/trips", { title: "Start trip", destination: "Sydney", startDate: "2026-12-01", endDate: "2026-12-02", timezone: "Australia/Sydney" });
+  const searchFor = (page: Page, q: string) => page.eval(`document.querySelector('.search input').value = ${JSON.stringify(q)}; document.querySelector('.search').requestSubmit()`);
+
+  for (const vp of VIEWPORTS) {
+    it(`asks where a new trip starts, sets it from a search, and doesn't ask again (${vp.name})`, async () => {
+      const page = await browser!.newPage();
+      await page.viewport(vp.width, vp.height, vp.mobile);
+      await signUpIn(page, baseUrl, uniqueName("start"));
+      const trip = await sydneyTrip(page);
+      await page.goto(new URL(`/trips/${trip.id}?new=1`, baseUrl).href);
+      await page.waitFor(`/Where would you like to start\\?/.test(${prompt})`);
+      expect(await page.eval(`location.search`)).toBe(""); // asked once, not on every reload
+      expect(await page.eval<number>(`document.querySelectorAll('.start-option').length`)).toBe(3);
+      expect(await page.eval(`${option("Choose on map")}.disabled`)).toBe(true); // the schematic isn't a map
+      expect(await page.eval(`getComputedStyle(document.querySelector('.search-panel')).display !== 'none' && document.querySelector('.search-panel').getBoundingClientRect().width > 0`)).toBe(true);
+
+      await page.eval(`${option("Search a location")}.click()`);
+      await searchFor(page, "opera");
+      await page.waitFor(`document.querySelector('.result')`);
+      const name = await page.eval<string>(`document.querySelector('.result strong').textContent`);
+      await page.click(".result");
+      await page.waitFor(`[...document.querySelectorAll('.place-card button')].some(b => b.textContent.includes('Set as starting point'))`);
+      await page.eval(`[...document.querySelectorAll('.place-card button')].find(b => b.textContent.includes('Set as starting point')).click()`);
+      await page.waitFor(`document.querySelector('.stop-start h3')?.textContent === ${JSON.stringify(name)}`);
+      expect(await page.eval(`document.querySelector('.stop-start .stop-num').textContent`)).toBe("S");
+      expect(await page.eval(`document.querySelector('.timeline-hint')?.textContent ?? ''`)).toMatch(/Explore the map or search to add your next stop/);
+      expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+
+      await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+      await page.waitFor(`document.querySelector('.stop-start h3')?.textContent === ${JSON.stringify(name)}`);
+      await sleep(200);
+      expect(await page.eval(`Boolean(document.querySelector('.start-panel'))`)).toBe(false);
+    });
+  }
+
+  it("lets the start change later, keeping the other stops below it", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    await signUpIn(page, baseUrl, uniqueName("chg"));
+    const trip = await tripWithStops(page);
+    await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await page.waitFor(`document.querySelectorAll('.timeline .stop').length === 3`);
+    expect(await page.eval(`Boolean(document.querySelector('.start-panel'))`)).toBe(false); // an existing trip isn't interrupted
+    await page.eval(`document.querySelector('.day-start-link button').click()`);
+    await page.waitFor(`/Where would you like to start\\?/.test(${prompt})`);
+    await page.eval(`${option("Search a location")}.click()`);
+    await searchFor(page, "zoo");
+    await page.waitFor(`document.querySelector('.result')`);
+    await page.click(".result");
+    await page.waitFor(`[...document.querySelectorAll('.place-card button')].some(b => b.textContent.includes('Set as starting point'))`);
+    await page.eval(`[...document.querySelectorAll('.place-card button')].find(b => b.textContent.includes('Set as starting point')).click()`);
+    await page.waitFor(`document.querySelectorAll('.timeline .stop').length === 4 && document.querySelector('.timeline .stop').classList.contains('stop-start')`);
+    expect(await page.eval<string[]>(`${stopTitles}.slice(1)`)).toEqual(["Zoo", "Lunch", "Opera House"]);
+    expect(await page.eval(`document.querySelectorAll('.timeline .stop')[1].querySelector('[aria-label^="Move"][aria-label$="earlier"]').disabled`)).toBe(true);
+
+    await page.eval(`[...document.querySelectorAll('.stop-start button')].find(b => b.textContent.includes('Change start')).click()`);
+    await page.waitFor(`/Change the starting point/.test(${prompt})`);
+    await page.eval(`${option("Search a location")}.click()`);
+    await searchFor(page, "bondi");
+    await page.waitFor(`document.querySelector('.result')`);
+    const other = await page.eval<string>(`document.querySelector('.result strong').textContent`);
+    await page.click(".result");
+    await page.waitFor(`[...document.querySelectorAll('.place-card button')].some(b => b.textContent.includes('Set as starting point'))`);
+    await page.eval(`[...document.querySelectorAll('.place-card button')].find(b => b.textContent.includes('Set as starting point')).click()`);
+    await page.waitFor(`document.querySelector('.stop-start h3')?.textContent === ${JSON.stringify(other)}`);
+    expect(await page.eval<string[]>(`${stopTitles}.slice(1)`)).toEqual(["Zoo", "Lunch", "Opera House"]);
+  });
+
+  it("starts from the current location only when asked, and copes with a refusal", async () => {
+    const denied = await browser!.newPage();
+    await denied.viewport(1920, 1080);
+    await signUpIn(denied, baseUrl, uniqueName("deny"));
+    await denied.geolocation(baseUrl, "denied");
+    const t1 = await sydneyTrip(denied);
+    await denied.goto(new URL(`/trips/${t1.id}?new=1`, baseUrl).href);
+    await denied.waitFor(option("Use my location"));
+    await denied.eval(`${option("Use my location")}.click()`);
+    await denied.waitFor(`/denied/.test(${prompt})`);
+    expect(await denied.eval(`${option("Search a location")}.disabled`)).toBe(false); // other ways stay open
+
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    await signUpIn(page, baseUrl, uniqueName("here"));
+    await page.geolocation(baseUrl, { lat: -35.2809, lng: 149.13 }); // Canberra, while planning Sydney
+    const t2 = await sydneyTrip(page);
+    await page.goto(new URL(`/trips/${t2.id}?new=1`, baseUrl).href);
+    await page.waitFor(option("Use my location"));
+    await page.eval(`${option("Use my location")}.click()`);
+    await page.waitFor(`[...document.querySelectorAll('.start-panel button')].some(b => b.textContent === 'Start here' && !b.disabled)`);
+    expect(await page.eval(prompt)).toMatch(/km from Sydney/); // the physical location isn't assumed to be the start
+    await page.eval(`[...document.querySelectorAll('.start-panel button')].find(b => b.textContent === 'Start here').click()`);
+    await page.waitFor(`document.querySelector('.stop-start')`);
+    const saved = await inPage(page, "GET", `/api/trips/${t2.id}`);
+    expect(saved.days[0].activities[0]).toMatchObject({ role: "start", place: { source: "custom" } });
+    expect(saved.days[0].activities[0].place.placeId).toMatch(/^custom:/);
+  });
+
+  it("says when a place is already in the plan, and only adds it again on purpose", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    await signUpIn(page, baseUrl, uniqueName("dup"));
+    const trip = await sydneyTrip(page);
+    await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await page.waitFor(`document.querySelector('.timeline-empty')`);
+    for (const round of [0, 1]) {
+      await searchFor(page, "zoo");
+      await page.waitFor(`document.querySelector('.result')`);
+      await page.click(".result");
+      await page.waitFor(`document.querySelector('.add-form [type=submit]')`);
+      const label = await page.eval<string>(`document.querySelector('.add-form [type=submit]').textContent`);
+      expect(label).toBe(round === 0 ? "Add to itinerary" : "Add another visit");
+      if (round === 1) expect(await page.eval(`document.querySelector('.already')?.textContent ?? ''`)).toMatch(/Already in your plan: Day 1/);
+      await page.click(".add-form [type=submit]");
+      await page.waitFor(`document.querySelectorAll('.timeline .stop').length === ${round + 1}`);
+    }
+  });
+});

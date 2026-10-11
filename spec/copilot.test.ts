@@ -15,8 +15,8 @@ const baseUrl = inject("baseUrl");
 
 function day(): Day {
   const activities = [
-    { id: "zoo", dayId: "d", position: 0, title: "Taronga Zoo", kind: "attraction" as const, startMin: 540, durationMin: 180, notes: "", place: { placeId: "p1", source: "google", lat: 0, lng: 0 }, version: 1, updatedBy: null, updatedAt: 0 },
-    { id: "lunch", dayId: "d", position: 1, title: "Lunch", kind: "food" as const, startMin: 735, durationMin: 60, notes: "", place: { placeId: "p2", source: "google", lat: 0, lng: 0 }, version: 1, updatedBy: null, updatedAt: 0 },
+    { id: "zoo", dayId: "d", position: 0, title: "Taronga Zoo", kind: "attraction" as const, startMin: 540, durationMin: 180, notes: "", place: { placeId: "p1", source: "google", lat: 0, lng: 0 }, role: null, version: 1, updatedBy: null, updatedAt: 0 },
+    { id: "lunch", dayId: "d", position: 1, title: "Lunch", kind: "food" as const, startMin: 735, durationMin: 60, notes: "", place: { placeId: "p2", source: "google", lat: 0, lng: 0 }, role: null, version: 1, updatedBy: null, updatedAt: 0 },
   ];
   const segments = [{ id: "s", fromId: "zoo", toId: "lunch", options: [{ mode: "TRANSIT" as const, status: "ok" as const, durationSec: 2100, distanceM: 5000 }], selectedMode: "TRANSIT" as const, computedAt: 0, departKey: "", stale: false }];
   return {
