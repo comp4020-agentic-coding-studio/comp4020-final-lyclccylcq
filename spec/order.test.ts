@@ -189,3 +189,20 @@ describe("where collaborators' maps are looking", () => {
     expect((await a.send("POST", `/api/trips/${trip.id}/view`, { session: crypto.randomUUID(), lat: 1, lng: 1, zoom: 10 })).status).toBe(409);
   });
 });
+
+describe("trip cover photos in My Trips", () => {
+  it("uses the curated itinerary a trip came from, else the nearest curated city, else none", async () => {
+    const c = await signUp(baseUrl);
+    const copied = (await c.send("POST", "/api/itineraries/tpl-sydney-harbour-highlights/copy", { startDate: "2026-12-01" })).data;
+    const sydney = await newTrip(c, { destination: "Sydney" }); // without a key, the demo fixtures place Sydney
+    const far = await newTrip(c, { destination: "Reykjavik", timezone: "Atlantic/Reykjavik" });
+    const tokyo = await newTrip(c, { destination: "Somewhere in Japan", timezone: "Asia/Tokyo" });
+    await addActivity(c, tokyo, { title: "Asakusa", startMin: at(9), place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: 35.7148, lng: 139.7967 } });
+    const list = (await c.get("/api/trips")).data.owned;
+    const cover = (id: string) => list.find((t: any) => t.id === id).cover;
+    expect(cover(copied.id)).toBe("tpl-sydney-harbour-highlights");
+    expect(cover(sydney.id)).toBe("dest-sydney");
+    expect(cover(tokyo.id)).toBe("dest-tokyo");
+    expect(cover(far.id)).toBe(null);
+  });
+});

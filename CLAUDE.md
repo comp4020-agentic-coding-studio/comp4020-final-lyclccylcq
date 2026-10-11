@@ -95,7 +95,11 @@ contradict the README, stop and ask. Don't quietly change the product.
   Wikimedia Commons files, resized into `public/img/covers/` and listed in
   `public/photos.js` with author, license and source page. Every one is
   credited on its card or on `/credits`. Never hotlink or scrape images. A
-  missing photo falls back to the gradient, never a broken image.
+  missing photo falls back to the gradient, never a broken image. My Trips
+  cards use the same photos (`cover` from `trips.list`): the curated
+  itinerary a trip was copied from (`dest_place_id` `tpl:`), else the curated
+  city within 100 km of its destination or first stop, else the colour band.
+  No Google request is made for them.
 - Google place photos appear in a place's panel when it's opened, and as small
   thumbnails (160 px) in the editor's map-click nearby list only
   (`/api/places/nearby?rich=1`, which counts double against the rate limit).

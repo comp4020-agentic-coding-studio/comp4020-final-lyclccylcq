@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { newToken, sha256 } from "./auth.ts";
+import { DESTINATIONS } from "./curated.ts";
 import { transaction } from "./db.ts";
+import { haversineKm } from "./geo.ts";
 import { bad, HttpError, notFound } from "./errors.ts";
 import type { TemplateDetail } from "./itineraries.ts";
 import {
@@ -395,6 +397,29 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     });
   }
 
+  // Which photo a trip card shows, as a key into public/photos.js (no Google
+  // request): the curated itinerary it was copied from, else the curated city
+  // nearest its destination or first stop (within 100 km, using only
+  // coordinates still allowed to be kept), else none and the card keeps its
+  // colour band.
+  function coverFor(t: Row): string | null {
+    const placeId = t.dest_place_id === null ? "" : String(t.dest_place_id);
+    if (placeId.startsWith("tpl:")) return placeId.slice(4);
+    const fresh = t.dest_cached_at !== null && now() - Number(t.dest_cached_at) < CACHE_MS && t.dest_lat !== null;
+    let at = fresh ? { lat: Number(t.dest_lat), lng: Number(t.dest_lng) } : null;
+    if (!at) {
+      const s = q(
+        `select a.lat, a.lng from activities a join trip_days d on d.id = a.day_id
+          where a.trip_id = ? and a.lat is not null and (a.place_source = 'custom' or a.place_cached_at > ?)
+          order by d.date, a.position limit 1`,
+      ).get(String(t.id), now() - CACHE_MS);
+      if (s) at = { lat: Number(s.lat), lng: Number(s.lng) };
+    }
+    if (!at) return null;
+    const near = DESTINATIONS.map((d) => ({ id: d.id, km: haversineKm(d, at) })).sort((a, b) => a.km - b.km)[0];
+    return near && near.km <= 100 ? `dest-${near.id}` : null;
+  }
+
   const store = {
     roleOf,
     requireMember,
@@ -408,6 +433,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     list(userId: string) {
       const rows = q(
         `select t.id, t.title, t.destination, t.start_date, t.end_date, t.updated_at, m.role,
+                t.dest_place_id, t.dest_lat, t.dest_lng, t.dest_cached_at,
                 o.display_name as owner_name,
                 (select count(*) from trip_members x where x.trip_id = t.id) as people
            from trip_members m join trips t on t.id = m.trip_id join users o on o.id = t.owner_id
@@ -423,6 +449,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         role: r.role as Role,
         ownerName: String(r.owner_name),
         people: Number(r.people),
+        cover: coverFor(r),
       }));
       return { owned: trips.filter((t) => t.role === "owner"), shared: trips.filter((t) => t.role !== "owner") };
     },

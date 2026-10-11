@@ -1,6 +1,6 @@
 import { openEditor } from "/editor.js";
 import { renderHome } from "/home.js";
-import { PHOTOS } from "/photos.js";
+import { coverImg, PHOTOS, photoFor } from "/photos.js";
 import { renderPreview } from "/preview.js";
 import { api, ApiError, avatar, fmtRange, h, icon, openDialog, relTime, toast } from "/ui.js";
 
@@ -275,11 +275,14 @@ async function renderDashboard() {
     if (err.status === 401) return signOut();
     return app.querySelector(".dash").replaceChildren(h("p", { class: "form-error" }, err.message));
   }
-  const card = (t) =>
-    h(
+  // the band shows the trip's cover photo when there is one (credited on
+  // /credits), else its colour; a photo that fails to load leaves the colour
+  const card = (t) => {
+    const photo = photoFor(t.cover);
+    return h(
       "a",
       { class: "trip-card", href: `/trips/${t.id}`, "data-link": true, style: `--hue:${hue(t.destination)}` },
-      h("div", { class: "trip-card-band" }, h("span", { class: "trip-card-dest" }, t.destination)),
+      h("div", { class: `trip-card-band${photo ? " has-photo" : ""}` }, coverImg(photo, { decorative: true }), h("span", { class: "trip-card-dest" }, t.destination)),
       h(
         "div",
         { class: "trip-card-body" },
@@ -294,6 +297,7 @@ async function renderDashboard() {
         ),
       ),
     );
+  };
   const section = (title, list, empty) =>
     h("section", { class: "dash-section" }, h("h2", {}, title), list.length ? h("div", { class: "trip-grid" }, list.map(card)) : empty);
 

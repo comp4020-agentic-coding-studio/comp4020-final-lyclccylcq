@@ -547,3 +547,26 @@ describe.skipIf(!chromePath)("collaborating live, every kind of change", () => {
     await bob.waitFor(`${stopTitles}.includes('Late dinner') && ${stopTitles}.length === 3`, 3000);
   });
 });
+
+describe.skipIf(!chromePath)("My Trips", () => {
+  it("shows a cover photo on each trip that has one, the colour band otherwise, after a reload too", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(390, 844, true);
+    await signUpIn(page, baseUrl, uniqueName("mytrips"));
+    await inPage(page, "POST", "/api/itineraries/tpl-tokyo-asakusa-ueno/copy", { startDate: "2026-12-01" });
+    await inPage(page, "POST", "/api/trips", { title: "Somewhere new", destination: "Reykjavik", startDate: "2026-12-01", endDate: "2026-12-02", timezone: "Atlantic/Reykjavik" });
+    for (const pass of [1, 2]) {
+      await page.goto(new URL("/trips", baseUrl).href);
+      await page.waitFor(`document.querySelectorAll('.trip-card').length === 2`);
+      await page.eval(`document.querySelectorAll('.trip-card img').forEach(i => (i.loading = 'eager'))`);
+      await page.waitFor(`[...document.querySelectorAll('.trip-card img')].every(i => i.complete)`, 8000);
+      const cards = await page.eval<any[]>(`[...document.querySelectorAll('.trip-card')].map(c => ({ title: c.querySelector('h3').textContent, img: c.querySelector('img.cover-img')?.naturalWidth ?? null, alt: c.querySelector('img.cover-img')?.getAttribute('alt') ?? null }))`);
+      const tokyo = cards.find((c) => /Asakusa/.test(c.title));
+      const iceland = cards.find((c) => c.title === "Somewhere new");
+      expect(tokyo.img, `pass ${pass}`).toBeGreaterThan(0);
+      expect(tokyo.alt).toBe(""); // decorative: the card already names the place
+      expect(iceland.img).toBe(null); // no photo: the colour band, never a broken image
+      expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+    }
+  });
+});

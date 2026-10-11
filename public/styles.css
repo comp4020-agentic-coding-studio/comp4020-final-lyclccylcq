@@ -198,7 +198,7 @@ textarea { resize: vertical; }
 }
 .trip-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
 .trip-card-band {
-  height: 110px; padding: 14px 16px; display: flex; align-items: flex-end;
+  height: 150px; padding: 14px 16px; display: flex; align-items: flex-end;
   background:
     radial-gradient(circle at 80% 20%, hsl(calc(var(--hue) + 40) 90% 75% / .9), transparent 45%),
     linear-gradient(135deg, hsl(var(--hue) 70% 55%), hsl(calc(var(--hue) + 25) 75% 42%));
@@ -851,3 +851,8 @@ textarea { resize: vertical; }
 .stop-actions { flex-wrap: wrap; }
 .stop-actions .btn { margin-left: 0; }
 .stop-actions .icon-btn-danger { margin-left: auto; }
+
+/* My Trips: the card band carries the cover photo like the homepage cards */
+.trip-card-band.has-photo { position: relative; overflow: hidden; isolation: isolate; }
+.trip-card-band.has-photo::after { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,.05) 35%, rgba(0,0,0,.55)); }
+.trip-card-band.has-photo > .trip-card-dest { position: relative; z-index: 2; }
