@@ -126,6 +126,11 @@ describe("Google service layer (mocked Google)", () => {
     expect(n.data.places[0]).toMatchObject({ name: "Eiffel Tower", source: "google" });
     expect(n.data.places[0].distanceKm).toBeGreaterThan(3);
     expect(last("/v1/places:searchNearby").body).toMatchObject({ includedTypes: ["tourist_attraction"], maxResultCount: 12, locationRestriction: { circle: { radius: 5000 } } });
+    // restaurants by primary type, so a hotel that merely has one isn't listed
+    await c.get("/api/places/nearby?lat=48.8566&lng=2.3522&radius=5000&type=restaurant");
+    const food = last("/v1/places:searchNearby").body;
+    expect(food).toMatchObject({ includedPrimaryTypes: ["restaurant"] });
+    expect(food.includedTypes).toBeUndefined();
 
     const full = await c.get("/api/places/ChIJ_paris_city_id");
     expect(full.data).toMatchObject({ rating: 4.7, ratingCount: 1234, openingHours: ["Monday: Open 24 hours"], photo: { name: "places/ChIJ_paris_city_id/photos/abc123", attributions: [{ displayName: "A Photographer" }] } });

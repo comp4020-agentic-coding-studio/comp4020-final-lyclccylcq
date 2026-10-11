@@ -237,3 +237,73 @@ describe.skipIf(!chromePath)("explore places on the homepage map", () => {
     expect(trip.days[0].activities[0].place.placeId).toBeTruthy();
   });
 });
+
+// First-visit location: offered, never forced, remembered, and kept apart from
+// the destination someone picks.
+describe.skipIf(!chromePath)("location on the homepage", () => {
+  const chip = `document.querySelector('.chip-place')?.textContent ?? ''`;
+  const promptShown = `Boolean(document.querySelector('.geo-prompt') && !document.querySelector('.geo-prompt').hidden)`;
+  const cards = `[...document.querySelectorAll('#near .it-card:not(.skeleton) h3')].map(e => e.textContent)`;
+
+  it("offers location on a first visit, and remembers 'Not now'", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(390, 844, true);
+    await page.goto(new URL("/", baseUrl).href);
+    await page.waitFor(`${cards}.length > 4`);
+    await page.waitFor(promptShown);
+    await page.eval(`[...document.querySelectorAll('.geo-prompt button')].find(b => b.textContent === 'Not now').click()`);
+    expect(await page.eval(promptShown)).toBe(false);
+    await page.goto(new URL("/", baseUrl).href);
+    await page.waitFor(`${cards}.length > 4`);
+    await sleep(300);
+    expect(await page.eval(promptShown)).toBe(false);
+    expect(await page.eval(`[...document.querySelectorAll('button')].some(b => b.textContent.includes('Use my location') && !b.hidden && b.offsetParent)`)).toBe(true);
+  });
+
+  it("uses the location once allowed, keeps it on the next visit, and keeps a picked destination apart", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    await page.geolocation(baseUrl, { lat: -35.2835, lng: 149.1281 }); // central Canberra
+    await page.goto(new URL("/", baseUrl).href);
+    await page.waitFor(promptShown);
+    await page.eval(`[...document.querySelectorAll('.geo-prompt button')].find(b => b.textContent === 'Use my location').click()`);
+    await page.waitFor(`/^Current location:/.test(${chip}) && ${cards}.length === 4`);
+    expect(await page.eval(promptShown)).toBe(false);
+    const here = await page.eval<string>(`document.querySelector('.chip-place strong').textContent`);
+
+    // next visit: no prompt, same place, without pressing anything
+    await page.goto(new URL("/", baseUrl).href);
+    await page.waitFor(`/^Current location:/.test(${chip}) && ${cards}.length === 4`);
+    expect(await page.eval(promptShown)).toBe(false);
+
+    // a destination takes over without touching the current location
+    await page.eval(`[...document.querySelectorAll('.dest-card')].find(b => b.textContent.includes('Tokyo')).click()`);
+    await page.waitFor(`/Exploring: ?Tokyo/.test(${chip})`);
+    await page.waitFor(`[...document.querySelectorAll('#near .it-cover-dest')].length > 0 && [...document.querySelectorAll('#near .it-cover-dest')].every(e => /Tokyo|Kamakura/.test(e.textContent))`);
+    const stored = await page.eval<any>(`JSON.parse(localStorage.getItem('wayline.location'))`);
+    expect(stored.label).toBe(here);
+    expect(Math.abs(stored.lat - -35.28)).toBeLessThan(0.02); // rounded, ~1 km
+
+    // it survives a reload, then "Back to …" returns to where you are
+    await page.goto(new URL("/", baseUrl).href);
+    await page.waitFor(`/Exploring: ?Tokyo/.test(${chip})`);
+    await page.eval(`[...document.querySelectorAll('.place-chip button')].find(b => b.textContent.startsWith('Back to')).click()`);
+    await page.waitFor(`/^Current location:/.test(${chip}) && ${cards}.length === 4`);
+    expect(await page.eval(`localStorage.getItem('wayline.destination')`)).toBe(null);
+  });
+
+  it("shows destination photos, credits them, and falls back to the gradient when one fails", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    await page.goto(new URL("/", baseUrl).href);
+    await page.waitFor(`${cards}.length > 4 && document.querySelectorAll('.dest-card').length > 0`);
+    await page.eval(`document.querySelectorAll('img.cover-img').forEach(i => (i.loading = 'eager'))`);
+    await page.waitFor(`[...document.querySelectorAll('img.cover-img')].every(i => i.complete)`, 8000);
+    const broken = await page.eval<number>(`[...document.querySelectorAll('img.cover-img')].filter(i => !i.naturalWidth).length`);
+    expect(broken).toBe(0);
+    expect(await page.eval<number>(`document.querySelectorAll('#near .it-cover.has-photo .cover-credit a[href*="commons.wikimedia.org"]').length`)).toBe(await page.eval<number>(`document.querySelectorAll('#near .it-cover.has-photo').length`));
+    await page.eval(`document.querySelector('#near .it-cover .cover-img').src = '/img/covers/no-such-photo.jpg'`);
+    await page.waitFor(`!document.querySelector('#near .it-card .it-cover > img') || document.querySelectorAll('#near .it-cover > img').length < document.querySelectorAll('#near .it-cover').length`);
+    expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  });
+});

@@ -65,7 +65,7 @@ export function placeDialog(place, ctx = null) {
           const { uri } = await api(`/api/places/photo?name=${encodeURIComponent(d.photo.name)}`);
           fill(
             photoBox,
-            h("img", { src: uri, alt: `Photo of ${d.name}`, loading: "lazy" }),
+            h("img", { src: uri, alt: `Photo of ${d.name}`, loading: "lazy", decoding: "async", onerror: () => photoBox.remove() }),
             d.photo.attributions.length > 0 &&
               h(
                 "p",

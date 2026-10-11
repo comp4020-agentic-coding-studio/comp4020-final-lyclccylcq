@@ -59,10 +59,12 @@ const json = (res: ServerResponse, status: number, data: unknown, headers: Recor
 // Files only by a plain name (no slashes, no dots up front), so nothing
 // outside the folder can be asked for.
 function serveFile(res: ServerResponse, dir: string, name: string): boolean {
-  if (!/^[\w-][\w.-]*$/.test(name)) return false;
+  if (!/^(img\/covers\/)?[\w-][\w.-]*$/.test(name)) return false;
   const path = join(dir, name);
   if (!existsSync(path)) return false;
-  send(res, 200, readFileSync(path), TYPES[extname(name)] ?? "application/octet-stream");
+  // photos don't change in place (a new photo gets a new name), so browsers may keep them
+  const cache: Record<string, string> = name.startsWith("img/") ? { "cache-control": "public, max-age=604800" } : {};
+  send(res, 200, readFileSync(path), TYPES[extname(name)] ?? "application/octet-stream", cache);
   return true;
 }
 
@@ -308,7 +310,7 @@ async function refreshStalePlaces(tripId: string): Promise<void> {
   }
 }
 
-const APP_PAGES = /^\/(login|privacy|trips|trips\/[0-9a-f-]{36}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80})?$/;
+const APP_PAGES = /^\/(login|privacy|credits|trips|trips\/[0-9a-f-]{36}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80})?$/;
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");

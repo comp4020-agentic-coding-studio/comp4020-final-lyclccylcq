@@ -1,5 +1,6 @@
 import { openEditor } from "/editor.js";
 import { renderHome } from "/home.js";
+import { PHOTOS } from "/photos.js";
 import { renderPreview } from "/preview.js";
 import { api, ApiError, avatar, fmtRange, h, icon, openDialog, relTime, toast } from "/ui.js";
 
@@ -35,6 +36,7 @@ async function route() {
   if (path === "/") return void (cleanup = renderHome(app, ctx()));
   if (itinerary) return void (cleanup = await renderPreview(app, itinerary[1], ctx()));
   if (path === "/privacy") return renderPrivacy();
+  if (path === "/credits") return renderCredits();
   if (path === "/login") return state.me ? navigate(next || "/", { replace: true }) : renderAuth(next);
 
   // everything else needs an account
@@ -98,6 +100,7 @@ function footer() {
       { "aria-label": "Legal and about" },
       h("a", { href: "/readme/" }, "About"),
       h("a", { href: "/privacy", "data-link": true }, "Privacy"),
+      h("a", { href: "/credits", "data-link": true }, "Photo credits"),
       h("a", { href: "https://maps.google.com/help/terms_maps/", target: "_blank", rel: "noopener" }, "Google Maps Terms"),
       h("a", { href: "https://policies.google.com/privacy", target: "_blank", rel: "noopener" }, "Google Privacy Policy"),
     ),
@@ -120,7 +123,7 @@ function renderPrivacy() {
       h(
         "p",
         {},
-        "Wayline only asks for your location when you press “Use my location”. The coordinates go with that request to find nearby itineraries and the name of your area, and are not stored on the server. Your browser keeps a rounded copy (about 1 km) for the current tab so the homepage remembers where you were exploring.",
+        "On your first visit the homepage offers to use your location; your browser only asks for permission after you press “Use my location”, and “Not now” is remembered. The coordinates go to Wayline's server with each request to find nearby itineraries and places and the name of your area, and are not stored or logged there. Your browser keeps a rounded copy (about 1 km) on this device, with any destination you picked, so the homepage remembers them next time. If you said yes and your browser still allows it, Wayline refreshes that copy at most once per visit; it never tracks you continuously. “Forget” on the homepage removes it, and so does clearing this site's data.",
       ),
       h("h2", {}, "Google Maps Platform"),
       h(
@@ -131,6 +134,27 @@ function renderPrivacy() {
         " and the ",
         ext("https://policies.google.com/privacy", "Google Privacy Policy"),
         ". Wayline keeps Google place IDs, not copies of Google's place content.",
+      ),
+    ),
+    footer(),
+  );
+}
+
+function renderCredits() {
+  const ext = (href, label, rel = "noopener") => h("a", { href, target: "_blank", rel }, label);
+  app.replaceChildren(
+    topbar(),
+    h(
+      "main",
+      { class: "readme" },
+      h("h1", {}, "Photo credits"),
+      h("p", {}, "The destination photos on Wayline come from Wikimedia Commons. Each is shown resized, under the license named below. Place photos inside place details come from Google Maps and are credited where they appear."),
+      h(
+        "ul",
+        { class: "credits-list" },
+        Object.values(PHOTOS).map((p) =>
+          h("li", {}, h("strong", {}, p.alt), " · ", ext(p.page, p.author ?? "Wikimedia Commons"), " · ", ext(p.licenseUrl, p.license, "noopener license")),
+        ),
       ),
     ),
     footer(),

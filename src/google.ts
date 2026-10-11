@@ -223,6 +223,8 @@ export async function searchPlaces(
   return { source: "google", places };
 }
 
+const FOOD_TYPES = new Set(["restaurant", "cafe"]);
+
 // Notable places around a point, for when Wayline has no itinerary nearby.
 export async function nearbyPlaces(center: LatLng, radiusM: number, type: string): Promise<{ source: "google" | "demo"; places: (PlaceSummary & { distanceKm: number })[] }> {
   const withDistance = (list: PlaceSummary[]) =>
@@ -230,10 +232,13 @@ export async function nearbyPlaces(center: LatLng, radiusM: number, type: string
   if (!googleConfigured()) {
     return { source: "demo", places: withDistance(DEMO_PLACES.filter((p) => haversineKm(center, p) * 1000 <= radiusM)) };
   }
+  // Food by primary type, or hotels with a restaurant inside come first;
+  // attractions by any type, since a museum's primary type is "museum".
+  const types = FOOD_TYPES.has(type) ? { includedPrimaryTypes: [type] } : { includedTypes: [type] };
   const data = await google(`${PLACES()}/v1/places:searchNearby`, {
     method: "POST",
     fieldMask: LIST_MASK,
-    body: { includedTypes: [type], maxResultCount: 12, rankPreference: "POPULARITY", locationRestriction: circle(center, radiusM) },
+    body: { ...types, maxResultCount: 12, rankPreference: "POPULARITY", locationRestriction: circle(center, radiusM) },
   });
   // Google's popularity order is kept; distance is shown, not used to re-sort.
   const places = (Array.isArray(data.places) ? data.places : []).map(toSummary).filter((p: PlaceSummary) => Number.isFinite(p.lat));

@@ -44,10 +44,16 @@ contradict the README, stop and ask. Don't quietly change the product.
   "Approximate location".
 - Rank by great-circle distance (`haversineKm`, to the template or its
   nearest stop), never by matching city names.
-- Location: ask only when the user presses "Use my location"; if refused,
-  don't ask again that session. Coordinates are used for the request and
-  never stored or logged on the server; the browser keeps a ~1 km rounded copy
-  in sessionStorage only.
+- Location: the browser's permission prompt appears only after the user
+  presses "Use my location" (the first-visit card or the hero button); "Not
+  now" and a refusal are remembered, and a refusal is never re-asked. The
+  current location and the chosen destination are kept apart; the destination
+  wins while set, and changing it never changes the current location.
+  Coordinates are used for the request and never stored or logged on the
+  server. The browser keeps ~1 km rounded copies in localStorage, and refreshes
+  the location at most once per visit, only if the user said yes before and
+  the browser still grants permission. No continuous tracking (no
+  `watchPosition`). The privacy page (`/privacy`) must describe this.
 - When nothing curated is near, show Google places as *individual places*,
   visibly distinct from itineraries. The "Explore places on the map" section
   (`public/explore-map.js`) is the same: places, never routes or itineraries.
@@ -62,6 +68,13 @@ contradict the README, stop and ask. Don't quietly change the product.
   a session token; details and photos load when a place is opened; routes
   load when "Get travel times" is pressed. Public Google-backed endpoints are
   rate-limited per IP.
+- Cover photos for curated itineraries and destinations are freely licensed
+  Wikimedia Commons files, resized into `public/img/covers/` and listed in
+  `public/photos.js` with author, license and source page. Every one is
+  credited on its card or on `/credits`. Never hotlink or scrape images, and
+  never put Google place photos on cards or result lists: they load only when
+  a place is opened. A missing photo falls back to the gradient, never a
+  broken image.
 
 ## Truthful transportation
 
