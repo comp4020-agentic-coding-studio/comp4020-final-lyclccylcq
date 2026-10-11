@@ -75,5 +75,6 @@ Two behaviours added for Crit 9, both following the decision above:
 Measured on one machine (two Chrome sessions, local server, n=10 each): add,
 reorder, retime and remove reached the other session in a median of 29–31 ms
 (max 34 ms). After a server restart with both pages open, the other page
-reconnected on its own and showed a new change 0.8 s after it was made. A
-production measurement is still to be taken after deploy.
+reconnected on its own and showed a new change 0.8 s after it was made. On
+production (Fly `syd`, one machine, measured from the author's machine, n=10
+each) the medians were 30–42 ms (max 86 ms).

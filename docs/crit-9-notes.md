@@ -52,7 +52,16 @@ Decisions asked of the author in this session: view-only links — not now
 - Real dropped connection: the server was restarted with both pages open. The
   receiver showed "Reconnecting…", reconnected by itself, and showed a change
   made after the restart 786 ms after it was made, with no reload.
-- Production latency: to be measured after deploy.
+- Production latency (commit `b4bb133`, Fly `syd`, one machine), two Chrome
+  sessions (1440×900 and 390×844) on the author's machine against
+  https://comp4020-final-lyclccylcq.fly.dev, same method, n=10 each: add
+  median 30 ms (max 63), reorder 39 ms (max 42), retime 42 ms (max 48),
+  remove 31 ms (max 86). Both sessions ended with identical timelines.
+  Devices on another network will add their own network time.
+- Production access check: a signed-in outsider got 404 for reading the
+  trip, opening its live stream, changing its start and renaming it; the
+  owner's trip was unchanged.
+- Not tested on production: reconnect after a server restart (local only).
 
 ## Known limits
 
