@@ -10,6 +10,7 @@ import {
   photoUri,
   placeBasic,
   placeDetails,
+  placeGuide,
   resolvePlace,
   reverseGeocode,
   SEARCH_TYPES,
@@ -155,13 +156,15 @@ export function createDiscovery(deps: { itineraries: ItineraryStore; trips: Trip
     if (method === "GET" && path === "/api/places/photo") {
       if (!googleConfigured()) throw new HttpError(503, "Photos need Google Maps configured on the server.");
       placesLimit(ip);
-      return ok({ uri: await photoUri(p.get("name") ?? "") });
+      const w = parseBounded(p.get("w"), "w", 100, 800, 640); // small photos for the place card
+      return ok({ uri: await photoUri(p.get("name") ?? "", w) });
     }
     m = path.match(/^\/api\/places\/([^/]+)$/);
     if (method === "GET" && m) {
       const id = decodeURIComponent(m[1]);
       placesLimit(ip);
-      return ok(p.get("view") === "basic" ? await placeBasic(id, sessionToken(p.get("session"))) : await placeDetails(id));
+      const view = p.get("view");
+      return ok(view === "basic" ? await placeBasic(id, sessionToken(p.get("session"))) : view === "guide" ? await placeGuide(id) : await placeDetails(id));
     }
 
     // --- area & routes ---

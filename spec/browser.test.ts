@@ -68,24 +68,46 @@ describe.skipIf(!chromePath)("in a real browser", () => {
     });
   }
 
-  it("adds a place from search into the day, and it's still there after a reload", async () => {
-    const page = await browser!.newPage();
-    await page.viewport(1920, 1080);
-    await signUpIn(page, baseUrl, uniqueName("add"));
-    const trip = await inPage(page, "POST", "/api/trips", { title: "Search trip", destination: "Sydney", startDate: "2026-12-01", endDate: "2026-12-01", timezone: "Australia/Sydney" });
-    await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
-    await page.waitFor(`document.querySelector('.timeline-empty')`);
-    await page.eval(`document.querySelector('.search input').value = 'zoo'; document.querySelector('.search').requestSubmit()`);
-    await page.waitFor(`document.querySelector('.result')`);
-    const name = await page.eval<string>(`document.querySelector('.result strong').textContent`);
-    await page.click(".result");
-    await page.waitFor(`document.querySelector('.add-form')`);
-    await page.click(".add-form [type=submit]");
-    await page.waitFor(`${stopTitles}.includes(${JSON.stringify(name)})`);
+  for (const vp of VIEWPORTS) {
+    it(`opens a place for reading, then schedules it in a separate card; Cancel changes nothing (${vp.name})`, async () => {
+      const page = await browser!.newPage();
+      await page.viewport(vp.width, vp.height, vp.mobile);
+      await signUpIn(page, baseUrl, uniqueName("add"));
+      const trip = await inPage(page, "POST", "/api/trips", { title: "Search trip", destination: "Sydney", startDate: "2026-12-01", endDate: "2026-12-01", timezone: "Australia/Sydney" });
+      await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+      await page.waitFor(`document.querySelector('.timeline-empty')`);
+      if (vp.mobile) await page.click(".mobile-tabs button:nth-child(1)");
+      await page.eval(`document.querySelector('.search input').value = 'zoo'; document.querySelector('.search').requestSubmit()`);
+      await page.waitFor(`document.querySelector('.result')`);
+      const name = await page.eval<string>(`document.querySelector('.result strong').textContent`);
+      await page.click(".result");
+      await page.waitFor(`document.querySelector('.place-card .add-to-trip')`);
+      // the place card is for reading: no day, time or duration inputs
+      expect(await page.eval<number>(`document.querySelectorAll('.place-card select, .place-card input, .place-card textarea').length`)).toBe(0);
 
-    await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
-    await page.waitFor(`${stopTitles}.includes(${JSON.stringify(name)})`);
-  });
+      // Cancel: the card closes, nothing is added, the place stays open
+      await page.click(".place-card .add-to-trip");
+      await page.waitFor(`document.querySelector('dialog[open].schedule-card')`);
+      expect(await page.eval(`document.querySelector('dialog[open].schedule-card h2').textContent`)).toBe(name);
+      await page.eval(`[...document.querySelectorAll('dialog[open].schedule-card button')].find(b => b.textContent === 'Cancel').click()`);
+      await page.waitFor(`!document.querySelector('dialog[open]')`);
+      expect(await page.eval(`Boolean(document.querySelector('.place-card'))`)).toBe(true);
+      expect((await inPage(page, "GET", `/api/trips/${trip.id}`)).days[0].activities).toEqual([]);
+
+      // Confirm & add, with a chosen time, length and note
+      await page.click(".place-card .add-to-trip");
+      await page.waitFor(`document.querySelector('dialog[open].schedule-card')`);
+      await page.eval(`(() => { const f = document.querySelector('dialog[open].schedule-card form'); f.start.value = '10:15'; f.duration.value = '45'; f.notes.value = 'Ferry from Circular Quay'; f.requestSubmit(); })()`);
+      await page.waitFor(`!document.querySelector('dialog[open]') && ${stopTitles}.includes(${JSON.stringify(name)})`);
+      const saved = (await inPage(page, "GET", `/api/trips/${trip.id}`)).days[0].activities[0];
+      expect(saved).toMatchObject({ title: name, startMin: 615, durationMin: 45, notes: "Ferry from Circular Quay" });
+      expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+
+      await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+      await page.waitFor(`${stopTitles}.includes(${JSON.stringify(name)})`);
+      expect(await page.eval(`document.querySelector('.timeline .stop .stop-time').textContent`)).toMatch(/^10:15 – 11:00/);
+    });
+  }
 
   it("reorders with the move buttons, no dragging needed", async () => {
     const page = await browser!.newPage();
@@ -421,11 +443,13 @@ describe.skipIf(!chromePath)("starting a trip in the editor", () => {
       await searchFor(page, "zoo");
       await page.waitFor(`document.querySelector('.result')`);
       await page.click(".result");
-      await page.waitFor(`document.querySelector('.add-form [type=submit]')`);
-      const label = await page.eval<string>(`document.querySelector('.add-form [type=submit]').textContent`);
-      expect(label).toBe(round === 0 ? "Add to itinerary" : "Add another visit");
+      await page.waitFor(`document.querySelector('.place-card .add-to-trip')`);
+      const label = await page.eval<string>(`document.querySelector('.place-card .add-to-trip').textContent`);
+      expect(label).toBe(round === 0 ? "Add to Itinerary" : "Add another visit");
       if (round === 1) expect(await page.eval(`document.querySelector('.already')?.textContent ?? ''`)).toMatch(/Already in your plan: Day 1/);
-      await page.click(".add-form [type=submit]");
+      await page.click(".place-card .add-to-trip");
+      await page.waitFor(`document.querySelector('dialog[open].schedule-card')`);
+      await page.eval(`document.querySelector('dialog[open].schedule-card form').requestSubmit()`);
       await page.waitFor(`document.querySelectorAll('.timeline .stop').length === ${round + 1}`);
     }
   });

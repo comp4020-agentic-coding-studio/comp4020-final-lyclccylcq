@@ -93,6 +93,16 @@ contradict the README, stop and ask. Don't quietly change the product.
   (`/api/places/nearby?rich=1`, which counts double against the rate limit).
   Each shows Google's author credit. Not on cards, search results or the
   homepage lists.
+- In the editor, the place card is for reading and the scheduling card is
+  for adding. The place card (`?view=guide`, the only request for Google's
+  editorial summary, reviews and attributes, billed at the Enterprise +
+  Atmosphere rate) shows only what Google returns: no scheduling inputs, no
+  invented descriptions, and up to three of Google's reviews, unedited, with
+  author links (long ones shortened until opened). Missing data is said
+  plainly ("Google has no description…", "No Google reviews…"). "Add to
+  Itinerary" opens the scheduling card (day, arrival, length, notes); nothing
+  is sent or shared until "Confirm & add", and Cancel sends nothing. The
+  suggested arrival is the previous stop's end, never a guessed travel time.
 
 ## Truthful transportation
 

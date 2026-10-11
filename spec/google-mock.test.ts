@@ -82,7 +82,26 @@ beforeAll(async () => {
         userRatingCount: 1234,
         regularOpeningHours: { weekdayDescriptions: ["Monday: Open 24 hours"] },
         googleMapsUri: "https://maps.google.com/?cid=1",
-        photos: [{ name: "places/ChIJ_paris_city_id/photos/abc123", authorAttributions: [{ displayName: "A Photographer", uri: "https://maps.google.com/contrib/1" }] }],
+        photos: [
+          { name: "places/ChIJ_paris_city_id/photos/abc123", authorAttributions: [{ displayName: "A Photographer", uri: "https://maps.google.com/contrib/1" }] },
+          { name: "places/ChIJ_paris_city_id/photos/def456", authorAttributions: [{ displayName: "B Photographer" }] },
+          { name: "places/ChIJ_paris_city_id/photos/ghi789", authorAttributions: [] },
+          { name: "places/ChIJ_paris_city_id/photos/jkl000", authorAttributions: [] },
+        ],
+        // only sent when asked for (the guide view); harmless otherwise
+        editorialSummary: { text: "Capital city known for its museums, cafés and the Seine.", languageCode: "en" },
+        websiteUri: "https://www.paris.fr/",
+        priceLevel: "PRICE_LEVEL_MODERATE",
+        servesLunch: true,
+        servesBreakfast: false,
+        outdoorSeating: true,
+        reviews: [
+          { rating: 5, relativePublishTimeDescription: "a week ago", text: { text: "Short." }, authorAttribution: { displayName: "Ana", uri: "https://maps.google.com/contrib/a" }, googleMapsUri: "https://maps.google.com/review/a" },
+          { rating: 4, relativePublishTimeDescription: "a month ago", text: { text: "The Louvre queue moved fast if you book the 9am slot; the Marais is best on foot." }, authorAttribution: { displayName: "Ben" } },
+          { rating: 3, relativePublishTimeDescription: "2 months ago", text: { text: "" }, authorAttribution: { displayName: "Cy" } },
+          { rating: 5, relativePublishTimeDescription: "3 months ago", text: { text: "Great bakeries everywhere, and the metro makes it easy to see a lot in a day." }, authorAttribution: { displayName: "Dee" } },
+          { rating: 2, relativePublishTimeDescription: "a year ago", text: { text: "Crowded in August and some sights close on Mondays, so check before you go." }, authorAttribution: { displayName: "Eli" } },
+        ],
       });
     }
     if (url.pathname === "/directions/v2:computeRoutes") {
@@ -180,6 +199,30 @@ describe("Google service layer (mocked Google)", () => {
     const far = await c.send("POST", "/api/routes", { origin: { lat: 48.85, lng: 2.35 }, destination: { lat: 48.86, lng: 2.29 }, mode: "TRANSIT", departureTime: "2030-01-01T09:00:00Z" });
     expect(far.data).toMatchObject({ status: "error" });
     expect(seen.filter((s) => s.path.startsWith("/directions")).length).toBe(calls);
+  });
+
+  it("gives the editor's place card a description, attributes and real reviews, asked for only in that view", async () => {
+    const c = anon(base);
+    await c.get("/api/places/ChIJ_paris_city_id");
+    expect(last("/v1/places/ChIJ_paris_city_id").headers["x-goog-fieldmask"]).not.toMatch(/reviews|editorialSummary/);
+
+    const g = await c.get("/api/places/ChIJ_paris_city_id?view=guide");
+    const mask = last("/v1/places/ChIJ_paris_city_id").headers["x-goog-fieldmask"];
+    for (const f of ["reviews", "editorialSummary", "websiteUri", "priceLevel", "servesLunch", "photos"]) expect(mask).toContain(f);
+    expect(g.data).toMatchObject({
+      summary: "Capital city known for its museums, cafés and the Seine.",
+      website: "https://www.paris.fr/",
+      price: "$$",
+      features: ["Lunch", "Outdoor seating"], // false and missing attributes aren't shown
+    });
+    expect(g.data.photos).toHaveLength(3);
+    // up to three reviews with text, the most informative, in Google's order, unedited
+    expect(g.data.reviews.map((r: any) => r.author)).toEqual(["Ben", "Dee", "Eli"]);
+    expect(g.data.reviews[0]).toEqual({ author: "Ben", authorUri: null, rating: 4, when: "a month ago", text: "The Louvre queue moved fast if you book the 9am slot; the Marais is best on foot.", uri: null });
+
+    await c.get(`/api/places/photo?name=${encodeURIComponent(g.data.photos[1].name)}&w=320`);
+    expect(last("/v1/places/ChIJ_paris_city_id/photos/def456/media").path).toContain("maxWidthPx=320");
+    expect(JSON.stringify(g.data)).not.toContain(KEY);
   });
 
   it("lists places around a clicked spot with rating and a credited small photo, on request only", async () => {

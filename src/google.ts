@@ -314,6 +314,99 @@ export async function placeDetails(placeId: string): Promise<PlaceDetails> {
   };
 }
 
+export type PlaceReview = {
+  author: string;
+  authorUri: string | null;
+  rating: number | null;
+  when: string | null;
+  text: string;
+  uri: string | null;
+};
+
+export type PlaceGuide = PlaceDetails & {
+  summary: string | null; // Google's editorial summary, when it has one
+  website: string | null;
+  price: string | null;
+  features: string[]; // only attributes Google reports as true
+  photos: { name: string; attributions: { displayName: string; uri: string | null }[] }[];
+  reviews: PlaceReview[];
+};
+
+const FEATURES: [string, string][] = [
+  ["servesBreakfast", "Breakfast"],
+  ["servesLunch", "Lunch"],
+  ["servesDinner", "Dinner"],
+  ["servesVegetarianFood", "Vegetarian options"],
+  ["servesCoffee", "Coffee"],
+  ["dineIn", "Dine-in"],
+  ["takeout", "Takeaway"],
+  ["reservable", "Takes reservations"],
+  ["outdoorSeating", "Outdoor seating"],
+  ["goodForChildren", "Good for children"],
+  ["goodForGroups", "Good for groups"],
+];
+const PRICE: Record<string, string> = {
+  PRICE_LEVEL_FREE: "Free",
+  PRICE_LEVEL_INEXPENSIVE: "$",
+  PRICE_LEVEL_MODERATE: "$$",
+  PRICE_LEVEL_EXPENSIVE: "$$$",
+  PRICE_LEVEL_VERY_EXPENSIVE: "$$$$",
+};
+const photoRef = (p: any) => ({
+  name: String(p.name),
+  attributions: (p.authorAttributions ?? []).map((a: any) => ({ displayName: String(a.displayName ?? "Unknown"), uri: a.uri ?? null })),
+});
+
+// The editor's place card: details plus what helps decide whether to go.
+// These fields bill at Google's Enterprise + Atmosphere rate, so only this
+// view asks for them, once per opened place. Reviews are Google's own (it
+// returns at most five, in its "most relevant" order); the card shows up to
+// three, preferring ones with more to say, never edited.
+export async function placeGuide(placeId: string): Promise<PlaceGuide> {
+  const demo = DEMO_PLACES.find((p) => p.placeId === placeId);
+  if (demo) {
+    return { ...demo, rating: null, ratingCount: null, openingHours: null, openNow: null, googleMapsUri: null, photo: null, summary: null, website: null, price: null, features: [], photos: [], reviews: [] };
+  }
+  if (!validPlaceId(placeId)) throw new HttpError(400, "That isn't a place id.");
+  const data = await google(`${PLACES()}/v1/places/${encodeURIComponent(placeId)}`, {
+    method: "GET",
+    fieldMask: [
+      "id,displayName,formattedAddress,location,primaryTypeDisplayName,types,rating,userRatingCount",
+      "regularOpeningHours.weekdayDescriptions,currentOpeningHours.openNow,googleMapsUri,photos",
+      "editorialSummary,websiteUri,priceLevel,reviews",
+      FEATURES.map(([f]) => f).join(","),
+    ].join(","),
+  });
+  const photos = (Array.isArray(data.photos) ? data.photos : []).filter((p: any) => p?.name).slice(0, 3).map(photoRef);
+  const all: PlaceReview[] = (Array.isArray(data.reviews) ? data.reviews : [])
+    .map((r: any) => ({
+      author: String(r.authorAttribution?.displayName ?? "A Google user"),
+      authorUri: r.authorAttribution?.uri ?? null,
+      rating: typeof r.rating === "number" ? r.rating : null,
+      when: r.relativePublishTimeDescription ?? null,
+      text: String(r.text?.text ?? r.originalText?.text ?? "").trim(),
+      uri: r.googleMapsUri ?? null,
+    }))
+    .filter((r: PlaceReview) => r.text);
+  // the three with the most to say, shown in Google's order
+  const keep = new Set([...all].sort((a, b) => b.text.length - a.text.length).slice(0, 3));
+  return {
+    ...toSummary(data),
+    rating: typeof data.rating === "number" ? data.rating : null,
+    ratingCount: typeof data.userRatingCount === "number" ? data.userRatingCount : null,
+    openingHours: data.regularOpeningHours?.weekdayDescriptions ?? null,
+    openNow: typeof data.currentOpeningHours?.openNow === "boolean" ? data.currentOpeningHours.openNow : null,
+    googleMapsUri: data.googleMapsUri ?? null,
+    photo: photos[0] ?? null,
+    summary: typeof data.editorialSummary?.text === "string" && data.editorialSummary.text.trim() ? data.editorialSummary.text.trim() : null,
+    website: typeof data.websiteUri === "string" && /^https?:\/\//.test(data.websiteUri) ? data.websiteUri : null,
+    price: PRICE[data.priceLevel] ?? null,
+    features: FEATURES.filter(([f]) => data[f] === true).map(([, label]) => label),
+    photos,
+    reviews: all.filter((r) => keep.has(r)),
+  };
+}
+
 // A short-lived image URL for one photo. Google returns a URL without the
 // key, so the browser can load it directly.
 export async function photoUri(photoName: string, maxWidthPx = 640): Promise<string> {

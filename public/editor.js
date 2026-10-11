@@ -648,18 +648,20 @@ export async function openEditor(root, tripId, ctx) {
     if (Number.isFinite(p.lat)) map.focus(p);
     if (p.source !== "google") return void ((S.placeDetails = { none: true }), renderSearch());
     try {
-      const details = await api(`/api/places/${encodeURIComponent(p.placeId)}`);
+      // the guide view: description, reviews and attributes, once per opened place
+      const details = await api(`/api/places/${encodeURIComponent(p.placeId)}?view=guide`);
       if (S.place?.placeId === p.placeId) {
         S.place = { ...S.place, name: details.name, address: details.address, category: details.category, types: details.types, lat: details.lat, lng: details.lng, pending: false };
         S.placeDetails = details;
         renderSearch();
         renderMap();
-        if (details.photo) {
-          const { uri } = await api(`/api/places/photo?name=${encodeURIComponent(details.photo.name)}`).catch(() => ({ uri: null }));
-          if (uri && S.placeDetails === details) {
-            details.photoUri = uri;
-            renderSearch();
-          }
+        // one large photo and up to two small ones, fetched once
+        const uris = await Promise.all(
+          (details.photos ?? []).map((ph, i) => api(`/api/places/photo?name=${encodeURIComponent(ph.name)}&w=${i === 0 ? 640 : 320}`).then((r) => r.uri, () => null)),
+        );
+        if (S.placeDetails === details && uris.some(Boolean)) {
+          details.photoUris = uris;
+          renderSearch();
         }
       }
     } catch (err) {
@@ -792,68 +794,19 @@ export async function openEditor(root, tripId, ctx) {
   const panelHead = (title) =>
     h("div", { class: "panel-head" }, h("strong", {}, title), h("button", { class: "icon-btn", type: "button", "aria-label": "Close search results", onclick: closeSearch }, icon("close")));
 
+  // The place card is for deciding whether a place is worth it: what Google
+  // knows about it, and nothing that changes the plan. Adding opens the
+  // separate scheduling card.
   function placeCard(p) {
     const d = S.placeDetails;
-    const kind = guessKind(p.types);
-    const days = S.trip.days;
-    const current = day();
-    const form = h(
-      "form",
-      { class: "add-form" },
-      h(
-        "div",
-        { class: "row-2" },
-        h("label", { class: "field" }, h("span", {}, "Day"), h("select", { name: "dayId" }, days.map((x, i) => h("option", { value: x.id, selected: x.id === current?.id }, `Day ${i + 1} · ${fmtDay(x.date)}`)))),
-        h("label", { class: "field" }, h("span", {}, "Type"), h("select", { name: "kind" }, Object.entries(KIND_LABEL).map(([k, v]) => h("option", { value: k, selected: k === kind }, v)))),
-      ),
-      h(
-        "div",
-        { class: "row-2" },
-        h("label", { class: "field" }, h("span", {}, "Start"), h("input", { name: "start", type: "time", step: 300, value: hhmm(suggestStart(current)) })),
-        h("label", { class: "field" }, h("span", {}, "Duration (min)"), h("input", { name: "duration", type: "number", min: 5, max: 1440, step: 5, value: KIND_DURATION[kind] })),
-      ),
-      h("button", { class: "btn btn-primary btn-block", type: "submit", disabled: Boolean(p.pending) }, icon("plus"), visitsOf(p.placeId).length ? "Add another visit" : "Add to itinerary"),
-    );
-    form.kind.addEventListener("change", () => (form.duration.value = KIND_DURATION[form.kind.value]));
-    form.dayId.addEventListener("change", () => (form.start.value = hhmm(suggestStart(days.find((x) => x.id === form.dayId.value)))));
-    const clientId = uid();
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const btn = form.querySelector("[type=submit]");
-      btn.disabled = true;
-      try {
-        const res = await act(
-          api(`${base}/activities`, {
-            method: "POST",
-            body: {
-              clientId,
-              dayId: form.dayId.value,
-              title: p.name,
-              kind: form.kind.value,
-              startMin: parseTime(form.start.value),
-              durationMin: Number(form.duration.value),
-              place: { placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng },
-            },
-          }),
-        );
-        const dayIndex = days.findIndex((x) => x.id === form.dayId.value);
-        if (form.dayId.value !== S.dayId) setDay(form.dayId.value);
-        S.selectedId = res.activityId;
-        S.hint = false;
-        // from a map click: back to the nearby list, so exploring can go on
-        if (S.explore) {
-          S.place = null;
-          S.placeDetails = null;
-        } else closeSearch();
-        render();
-        toast(`Added ${p.name} to Day ${dayIndex + 1}.`, isPhone() ? { action: { label: "View plan", run: () => setTab("plan") } } : {});
-      } catch {
-        btn.disabled = false;
-      }
-    });
-
     const visits = visitsOf(p.placeId);
     const back = S.explore ? "← Nearby places" : S.results.length ? "← Results" : null;
+    const credit = (ph) =>
+      ph.attributions.length > 0 &&
+      h("figcaption", { class: "photo-credit" }, "Photo: ", ph.attributions.map((a, i) => [i > 0 && ", ", a.uri ? h("a", { href: a.uri, target: "_blank", rel: "noopener" }, a.displayName) : a.displayName]));
+    const uris = d?.photoUris ?? [];
+    const loaded = !d || d.error || d.none ? null : d;
+    const about = loaded && p.source === "google"; // shown even when Google has little, saying so
     return h(
       "div",
       { class: "place-card" },
@@ -863,22 +816,40 @@ export async function openEditor(root, tripId, ctx) {
         back ? h("button", { class: "linklike small", type: "button", onclick: () => { S.place = null; S.placeDetails = null; renderSearch(); renderMap(); } }, back) : h("span", { class: "muted small" }, "Place"),
         h("button", { class: "icon-btn", type: "button", "aria-label": "Close", onclick: closeSearch }, icon("close")),
       ),
-      d?.photoUri &&
+      uris[0] &&
         h(
           "figure",
           { class: "place-photo" },
-          h("img", { src: d.photoUri, alt: `Photo of ${p.name}`, loading: "lazy", decoding: "async", onerror: (e) => e.currentTarget.closest("figure")?.remove() }),
-          d.photo.attributions.length > 0 &&
-            h("figcaption", { class: "photo-credit" }, "Photo: ", d.photo.attributions.map((a, i) => [i > 0 && ", ", a.uri ? h("a", { href: a.uri, target: "_blank", rel: "noopener" }, a.displayName) : a.displayName])),
+          h("img", { src: uris[0], alt: `Photo of ${p.name}`, loading: "lazy", decoding: "async", onerror: (e) => e.currentTarget.closest("figure")?.remove() }),
+          credit(d.photos[0]),
+        ),
+      uris.slice(1).some(Boolean) &&
+        h(
+          "div",
+          { class: "place-photos-more" },
+          uris.slice(1).map(
+            (u, i) =>
+              u &&
+              h(
+                "figure",
+                {},
+                h("img", { src: u, alt: `Another photo of ${p.name}`, loading: "lazy", decoding: "async", onerror: (e) => e.currentTarget.closest("figure")?.remove() }),
+                credit(d.photos[i + 1]),
+              ),
+          ),
         ),
       h("h3", {}, p.name),
       h(
         "p",
         { class: "stop-meta" },
         p.category && h("span", { class: "tag" }, p.category),
+        loaded?.price && h("span", { class: "tag" }, loaded.price),
         p.source === "demo" && h("span", { class: "tag tag-demo" }, "Demo place"),
+        loaded?.openNow === true && h("span", { class: "tag tag-open" }, "Open now"),
+        loaded?.openNow === false && h("span", { class: "tag" }, "Closed now"),
       ),
-      d && typeof d.rating === "number" && h("p", { class: "rating" }, h("strong", {}, d.rating.toFixed(1)), " ★", d.ratingCount ? h("span", { class: "muted" }, ` (${d.ratingCount.toLocaleString("en-AU")} Google reviews)`) : null),
+      loaded && typeof loaded.rating === "number" &&
+        h("p", { class: "rating" }, h("strong", {}, loaded.rating.toFixed(1)), " ★", loaded.ratingCount ? h("span", { class: "muted" }, ` (${loaded.ratingCount.toLocaleString("en-AU")} Google reviews)`) : null),
       p.address && h("p", { class: "muted" }, p.address),
       visits.length > 0 &&
         h(
@@ -888,27 +859,169 @@ export async function openEditor(root, tripId, ctx) {
           "Already in your plan: ",
           visits.map((v, i) => [i > 0 && ", ", `Day ${v.day}${v.a.role === "start" ? " (start)" : v.a.startMin !== null ? ` at ${hhmm(v.a.startMin)}` : ""}`]),
         ),
-      d === null && p.source === "google" && h("p", { class: "muted small" }, "Loading details…"),
+      d === null && p.source === "google" && h("p", { class: "muted small", role: "status" }, "Loading details…"),
       d?.error && h("p", { class: "form-error small" }, d.error),
-      d?.openingHours &&
+      p.source === "demo" && h("p", { class: "muted small" }, "A demo place: no Google details, photos or reviews."),
+
+      about &&
         h(
-          "details",
-          { class: "hours" },
-          h("summary", {}, d.openNow === true ? "Open now · opening hours" : d.openNow === false ? "Closed now · opening hours" : "Opening hours"),
-          h("ul", {}, d.openingHours.map((line) => h("li", {}, line))),
+          "section",
+          { class: "guide-section" },
+          h("h4", {}, "About this place"),
+          loaded.summary ? h("p", { class: "guide-summary" }, loaded.summary) : h("p", { class: "muted small" }, "Google has no description of this place."),
+          loaded.features?.length > 0 && h("ul", { class: "guide-features", "aria-label": "Reported by Google" }, loaded.features.map((f) => h("li", {}, f))),
+          loaded.openingHours &&
+            h(
+              "details",
+              { class: "hours" },
+              h("summary", {}, "Opening hours"),
+              h("ul", {}, loaded.openingHours.map((line) => h("li", {}, line))),
+            ),
+          loaded.website && h("p", { class: "small" }, h("a", { href: loaded.website, target: "_blank", rel: "noopener" }, "Official website")),
         ),
-      d && !d.error && !d.openingHours && h("p", { class: "muted small" }, p.source === "demo" ? "Demo places have no opening hours." : "No opening hours available for this place."),
-      d?.googleMapsUri && h("p", {}, h("a", { href: d.googleMapsUri, target: "_blank", rel: "noopener" }, "Open in Google Maps")),
-      S.starting
-        ? h(
-            "button",
-            { class: "btn btn-primary btn-block", type: "button", disabled: Boolean(p.pending), onclick: () => confirmStart({ title: p.name, place: { placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng } }) },
-            icon("pin"),
-            "Set as starting point",
-          )
-        : form,
+
+      loaded &&
+        p.source === "google" &&
+        h(
+          "section",
+          { class: "guide-section" },
+          h("h4", {}, "What visitors say"),
+          loaded.reviews?.length
+            ? h(
+                "ul",
+                { class: "reviews" },
+                loaded.reviews.map((r) => {
+                  const long = r.text.length > 260;
+                  const body = h("p", { class: "review-text" }, long ? `${r.text.slice(0, 240).trimEnd()}…` : r.text);
+                  const more = long && h("button", { class: "linklike small", type: "button", onclick: (e) => { body.textContent = r.text; e.currentTarget.remove(); } }, "Read the whole review");
+                  return h(
+                    "li",
+                    { class: "review" },
+                    h(
+                      "p",
+                      { class: "review-head" },
+                      r.authorUri ? h("a", { href: r.authorUri, target: "_blank", rel: "noopener" }, r.author) : h("strong", {}, r.author),
+                      typeof r.rating === "number" && h("span", { class: "review-stars", "aria-label": `${r.rating} out of 5` }, "★".repeat(Math.round(r.rating)) + "☆".repeat(5 - Math.round(r.rating))),
+                      r.when && h("span", { class: "muted" }, r.when),
+                    ),
+                    body,
+                    more,
+                    r.uri && h("a", { class: "small", href: r.uri, target: "_blank", rel: "noopener" }, "View on Google Maps"),
+                  );
+                }),
+              )
+            : h("p", { class: "muted small" }, "No Google reviews for this place yet."),
+          loaded.reviews?.length > 0 && h("p", { class: "muted tiny" }, "Reviews from Google, unedited; long ones are shortened until opened."),
+        ),
+
+      h(
+        "div",
+        { class: "place-actions" },
+        loaded?.googleMapsUri && h("a", { class: "btn btn-ghost btn-sm", href: loaded.googleMapsUri, target: "_blank", rel: "noopener" }, "View on Google Maps"),
+        S.starting
+          ? h(
+              "button",
+              { class: "btn btn-primary", type: "button", disabled: Boolean(p.pending), onclick: () => confirmStart({ title: p.name, place: { placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng } }) },
+              icon("pin"),
+              "Set as starting point",
+            )
+          : h(
+              "button",
+              { class: "btn btn-primary add-to-trip", type: "button", disabled: Boolean(p.pending), onclick: () => scheduleCard({ title: p.name, kind: guessKind(p.types), place: { placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng } }) },
+              icon("plus"),
+              visits.length ? "Add another visit" : "Add to Itinerary",
+            ),
+      ),
       p.source === "google" && h("p", { class: "attrib", translate: "no" }, "Google Maps"),
     );
+  }
+
+  // The scheduling card: a small dialog over the place card. Nothing is
+  // shared until "Confirm & add"; Cancel leaves the plan and the place card as
+  // they were. custom: a spot picked on the map, so the name is editable.
+  function scheduleCard({ title, kind, place, custom = false }) {
+    const days = S.trip.days;
+    const current = day();
+    const clientId = uid();
+    const prevOf = (d) => [...(d?.activities ?? [])].filter((a) => a.startMin !== null).sort((a, b) => a.startMin + a.durationMin - (b.startMin + b.durationMin)).pop() ?? null;
+    const error = h("p", { class: "form-error", role: "alert", hidden: true });
+    const hint = h("p", { class: "muted small schedule-hint" });
+    const form = h(
+      "form",
+      { method: "dialog", class: "stack" },
+      h("p", { class: "schedule-kicker" }, "Add to itinerary"),
+      custom
+        ? h("label", { class: "field" }, h("span", {}, "Name"), h("input", { name: "title", required: true, maxlength: 120, value: title, placeholder: "e.g. Meeting point" }))
+        : h("h2", {}, title),
+      h("label", { class: "field" }, h("span", {}, "Day"), h("select", { name: "dayId" }, days.map((x, i) => h("option", { value: x.id, selected: x.id === current?.id }, `Day ${i + 1} · ${fmtDay(x.date)}`)))),
+      h(
+        "div",
+        { class: "row-2" },
+        h("label", { class: "field" }, h("span", {}, "Arrival"), h("input", { name: "start", type: "time", step: 300, required: true })),
+        h("label", { class: "field" }, h("span", {}, "Visit length (min)"), h("input", { name: "duration", type: "number", min: 5, max: 1440, step: 5, required: true, value: KIND_DURATION[kind] ?? 60 })),
+      ),
+      hint,
+      h("label", { class: "field" }, h("span", {}, "Notes (optional)"), h("textarea", { name: "notes", rows: 2, maxlength: 2000, placeholder: "Book ahead, what to try, who's coming…" })),
+      error,
+      h(
+        "div",
+        { class: "dialog-actions" },
+        h("button", { class: "btn btn-ghost", type: "button", onclick: () => done() }, "Cancel"),
+        h("button", { class: "btn btn-primary", type: "submit" }, "Confirm & add"),
+      ),
+    );
+    // a suggestion only: right after the day's last timed stop, without travel
+    // time, which isn't known until a route is calculated
+    const suggest = () => {
+      const d = days.find((x) => x.id === form.dayId.value);
+      form.start.value = hhmm(suggestStart(d));
+      const prev = prevOf(d);
+      hint.textContent = prev ? `Suggested: when ${prev.title} ends (${hhmm(prev.startMin + prev.durationMin)}). Travel time isn't included yet; it appears once the route is calculated.` : "Suggested: 09:00, as nothing on this day has a time yet.";
+    };
+    form.dayId.addEventListener("change", suggest);
+    suggest();
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector("[type=submit]");
+      btn.disabled = true;
+      error.hidden = true;
+      const name = custom ? form.title.value.trim() || "Pinned spot" : title;
+      try {
+        const res = await act(
+          api(`${base}/activities`, {
+            method: "POST",
+            body: { clientId, dayId: form.dayId.value, title: name, kind, startMin: parseTime(form.start.value), durationMin: Number(form.duration.value), notes: form.notes.value.trim(), place },
+          }),
+          { quiet: true },
+        );
+        done();
+        const dayIndex = days.findIndex((x) => x.id === form.dayId.value);
+        if (form.dayId.value !== S.dayId) setDay(form.dayId.value);
+        S.selectedId = res.activityId;
+        S.hint = false;
+        // from a map click: back to the nearby list, so exploring can go on;
+        // a custom spot closes the panel; otherwise the place card stays open
+        if (custom) closeSearch();
+        else if (S.explore) {
+          S.place = null;
+          S.placeDetails = null;
+        }
+        render();
+        toast(`Added ${name} to Day ${dayIndex + 1}.`, isPhone() ? { action: { label: "View plan", run: () => setTab("plan") } } : {});
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+        btn.disabled = false;
+      }
+    });
+    const dialog = openDialog(h("dialog", { class: "dialog schedule-card", "aria-label": `Add ${title} to the itinerary` }, form));
+    // gone at once, not on the later "close" event, so a closed card never lingers
+    const done = () => {
+      dialog.close();
+      dialog.remove();
+    };
+    (custom ? form.title : form.start).focus();
+    return dialog;
   }
 
   function explorePanel() {
@@ -965,50 +1078,25 @@ export async function openEditor(root, tripId, ctx) {
     );
   }
 
-  // A spot that isn't a listed place (a viewpoint, a meeting point): stored
-  // with its coordinates and a custom: id, never a made-up Google id.
+  // A spot that isn't a listed place (a viewpoint, a meeting point): only
+  // what's known about the location is shown, never business details, and
+  // adding stores its coordinates with a custom: id, never a made-up Google id.
   function customSpotForm(ex) {
-    const name = h("input", { name: "title", maxlength: 120, value: ex.customName ?? ex.label ?? "", placeholder: "e.g. Meeting point", oninput: (e) => (ex.customName = e.target.value) });
-    const daySel = h("select", { name: "dayId" }, S.trip.days.map((x, i) => h("option", { value: x.id, selected: x.id === day()?.id }, `Day ${i + 1} · ${fmtDay(x.date)}`)));
-    const btn = h("button", { class: "btn btn-ghost btn-sm btn-block", type: "submit" }, icon("plus"), "Add this spot");
-    const clientId = uid();
     return h(
-      "form",
-      {
-        class: "add-form custom-spot",
-        onsubmit: async (e) => {
-          e.preventDefault();
-          const title = name.value.trim() || "Pinned spot";
-          btn.disabled = true;
-          try {
-            const res = await act(
-              api(`${base}/activities`, {
-                method: "POST",
-                body: {
-                  clientId,
-                  dayId: daySel.value,
-                  title,
-                  kind: "custom",
-                  startMin: suggestStart(S.trip.days.find((x) => x.id === daySel.value)),
-                  durationMin: 30,
-                  place: { placeId: `custom:${clientId}`, source: "custom", lat: ex.lat, lng: ex.lng },
-                },
-              }),
-            );
-            if (daySel.value !== S.dayId) setDay(daySel.value);
-            S.selectedId = res.activityId;
-            S.hint = false;
-            closeSearch();
-            render();
-            toast(`Added ${title} to the plan.`, isPhone() ? { action: { label: "View plan", run: () => setTab("plan") } } : {});
-          } catch {
-            btn.disabled = false;
-          }
-        },
-      },
+      "div",
+      { class: "add-form custom-spot" },
       h("p", { class: "small" }, h("strong", {}, "Not a listed place?"), " Add this exact spot, like a viewpoint or a meeting point."),
-      h("div", { class: "row-2" }, h("label", { class: "field" }, h("span", {}, "Name"), name), h("label", { class: "field" }, h("span", {}, "Day"), daySel)),
-      btn,
+      h("p", { class: "muted small" }, ex.label ? `${/^near /i.test(ex.label) ? ex.label : `In ${ex.label}`} · ` : "", `${ex.lat.toFixed(5)}, ${ex.lng.toFixed(5)}`),
+      h(
+        "button",
+        {
+          class: "btn btn-ghost btn-sm btn-block",
+          type: "button",
+          onclick: () => scheduleCard({ title: ex.label && !/^near /i.test(ex.label) ? ex.label : "Pinned spot", kind: "custom", custom: true, place: { placeId: `custom:${uid()}`, source: "custom", lat: ex.lat, lng: ex.lng } }),
+        },
+        icon("plus"),
+        "Add this spot",
+      ),
     );
   }
 
