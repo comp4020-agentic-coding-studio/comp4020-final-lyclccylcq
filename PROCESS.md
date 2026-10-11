@@ -30,6 +30,7 @@ Two further choices follow the same reasoning. The server decides order from tim
 - **A gap review before the crit** ([`b4bb133`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b4bb133)) found three things the first build missed: a simultaneous start change silently replaced the other, a collaborator's edit reset everyone's map, and a route request reached a configuration check before the membership check. Each fix has a test.
 - **A stray "false" in the UI** came from native DOM calls given a boolean. It was fixed at six call sites, and a spec check now fails on the pattern ([`a32c15b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/a32c15b)).
 - **Reading versus scheduling.** I asked for a place's information to be kept apart from adding it, so nothing is shared until "Confirm & add" ([`19fbd1c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/19fbd1c)).
+- **The audit's find.** The server checked the start's version only when a request included it, so a request without it overwrote the start in production; only the editor, which always sends it, was protected. The field is now required. The new test failed against the old code with the audit's 200, and the rule is in `CLAUDE.md` ([`7278cfe`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/7278cfe)).
 - **Order by time.** Asked whether manual order or times should win, I chose times. That changed a README sentence and the product rules, and new tests caught the server answering in the old order ([`3f27110`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3f27110)).
 
 ## Evidence
@@ -45,7 +46,6 @@ These are small samples, not guarantees. Details and screenshots are in [`docs/c
 
 ## Limitations
 
-- The audit found that the server checks the start's version only when a request includes it, so a hand-made request can overwrite the start. The editor always sends it. This is recorded in ADR 0003 and not yet fixed.
 - Recovery after a production restart is untested.
 - Keeping your map still during others' edits, and the edge arrows, were checked by hand only.
 - My Trips photos cover template trips and those near a curated city.

@@ -45,11 +45,12 @@ grounded and corrected the work. Crit group Bada: cutoff Monday 12 October
   idempotent by `clientId`. Order is decided by the server from times, so it
   needs no version.
 - The starting point: the editor always sends the version it saw (a number,
-  or `null` for "no start yet"), and a mismatch is a 409. **The server only
-  checks when the field is present** (`src/trips.ts`, `setStart`: `if
-  (input.baseVersion !== undefined && …)`), so a request that leaves it out
-  replaces the start without a check. The app's own UI never sends such a
-  request; a hand-made API call can. Not fixed at the time of writing.
+  or `null` for "no start yet"), and a mismatch is a 409. At `54c282e` the
+  server only checked when the field was present (`setStart`: `if
+  (input.baseVersion !== undefined && …)`), so a request that left it out
+  replaced the start unchecked. Only the app's own UI, which never sends such
+  a request, was protected. Fixed in [`7278cfe`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/7278cfe): the field is required, and a
+  missing or malformed one is a 400 that writes nothing.
 - Permissions: owner and collaborators via revocable 256-bit invite links;
   non-members get 404 on the trip, its stream and every edit.
 - Shared vs personal: the itinerary (stops, times, order, start, meals) is
@@ -75,9 +76,11 @@ grounded and corrected the work. Crit group Bada: cutoff Monday 12 October
   dropped, 404 for outsiders, 400 for bad input, never a revision
   (`spec/order.test.ts`); data and sessions kept across a restart
   (`spec/restart.test.ts`, against a local server).
-- Not covered by any check: a start change that omits `baseVersion` (see
-  above); the client keeping its map still when a snapshot arrives; the edge
-  arrows; recovery after a production restart.
+- Since [`7278cfe`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/7278cfe), a start change with `baseVersion` missing, a string or a
+  fraction is refused with 400 and changes nothing (`spec/start.test.ts`; run
+  against the old code, it failed with the audit's 200). 111 tests.
+- Not covered by any check: the client keeping its map still when a snapshot
+  arrives; the edge arrows; recovery after a production restart.
 - `pnpm check:evidence` passes when *any* of `crit-8.md`, `crit-9.md` or
   `crit-10.md` exists, so it doesn't show that the Crit 9 reflection is in
   place.
@@ -126,7 +129,7 @@ samples, not a performance guarantee.
 | Collaborator removed | Trip and event-stream requests returned 404 |
 | My Trips | The Sydney cover photo loaded |
 | Start change with a stale `baseVersion` | 409 |
-| **Start change with no `baseVersion`** | **200, start overwritten: the defect above, reproduced in production** |
+| **Start change with no `baseVersion`** | **200, start overwritten: the defect above, reproduced in production (fixed afterwards in [`7278cfe`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/7278cfe))** |
 
 Not tested by the audit: recovery after a production restart or redeploy
 (the network test is a different thing); the map staying still for one
@@ -148,7 +151,9 @@ from the missing-version test):
    the start could be silently overwritten by a simultaneous change; a
    collaborator's change reset everyone's map; a route request reached a
    configuration check before the membership check. Each has a test. The
-   independent audit later found the start check incomplete (see above).
+   independent audit later found the start check incomplete. It was fixed
+   in [`7278cfe`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/7278cfe), with a test that failed on the old code and a `CLAUDE.md`
+   rule.
 2. **Questions put to the author and the answers taken**, recorded as rules
    in `CLAUDE.md` in the commits that implemented them:
    - travel times stay on a button rather than recalculating on every edit
@@ -175,10 +180,8 @@ in the GitHub Actions log); while building time ordering, new tests showed the
 server answered the person making a change in the old order until the fix in
 [`3f27110`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3f27110).
 
-## Known limitations at `54c282e`
+## Known limitations
 
-- A start change without `baseVersion` overwrites the start (reproduced in
-  production). Only the app's own UI is protected.
 - Recovery after a production restart or redeploy is untested; reconnect was
   measured after a local restart and after a real network drop.
 - Keeping the map still for one person when another edits, and the edge
@@ -196,7 +199,7 @@ server answered the person making a change in the old order until the fix in
 | Requirement | State |
 |---|---|
 | Real-time, deployed: a change reaches other sessions in about a second, no reload | Done; automated checks plus two rounds of production measurement |
-| One multi-user decision written down with options and costs | ADR 0003, accepted, with the start-version defect stated |
+| One multi-user decision written down with options and costs | ADR 0003, accepted; the start-version defect and its fix are in its History |
 | Commits that grew with the work | Done (table above) |
 | `PROCESS.md` rewritten for Crit 9 | Rewritten; personal passages need the author |
 | `reflections/crit-9.md` | Needs the author's answers before it's final |
