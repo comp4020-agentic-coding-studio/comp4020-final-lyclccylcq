@@ -192,7 +192,23 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
 
   if (method === "GET" && rest === "/events") {
     const snap = trips.view(user.id, tripId);
-    return hub.join(tripId, user, res, snap);
+    const session = url.searchParams.get("session");
+    return hub.join(tripId, user, res, snap, session && /^[A-Za-z0-9-]{8,64}$/.test(session) ? session : null);
+  }
+
+  // Where this tab's map is looking, for the other people on the trip. Not
+  // saved, not a revision, never a location from the device.
+  if (method === "POST" && rest === "/view") {
+    trips.requireMember(tripId, user.id);
+    const v = await body(req);
+    const num = (x: unknown, lo: number, hi: number) => typeof x === "number" && Number.isFinite(x) && x >= lo && x <= hi;
+    if (typeof v.session !== "string" || !/^[A-Za-z0-9-]{8,64}$/.test(v.session) || !num(v.lat, -90, 90) || !num(v.lng, -180, 180) || !num(v.zoom, 0, 23) || !num(v.heading ?? 0, -360, 360)) {
+      throw new HttpError(400, "Invalid map view.");
+    }
+    const round = (x: number) => Math.round(x * 1e5) / 1e5;
+    const [lat, lng, zoom] = [v.lat, v.lng, v.zoom] as number[];
+    const ok = hub.setView(tripId, user.id, v.session, { lat: round(lat), lng: round(lng), zoom: Math.round(zoom * 10) / 10, heading: Math.round(Number(v.heading ?? 0)) });
+    return json(res, ok ? 200 : 409, ok ? { ok: true } : { error: "Open the trip first." });
   }
 
   if (rest === "/invite") {
@@ -214,6 +230,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     return json(res, created ? 201 : 200, { activityId, trip });
   }
   if (method === "PUT" && rest === "/start") return json(res, 200, trips.setStart(user.id, tripId, await body(req)));
+  r = rest.match(/^\/activities\/([0-9a-f-]{36})\/place$/);
+  if (method === "PUT" && r) return json(res, 200, trips.setPlace(user.id, tripId, r[1], await body(req)));
   r = rest.match(/^\/activities\/([0-9a-f-]{36})(\/move)?$/);
   if (r) {
     if (method === "PATCH" && !r[2]) return json(res, 200, trips.updateActivity(user.id, tripId, r[1], await body(req)));

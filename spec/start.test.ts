@@ -36,8 +36,8 @@ describe("the starting point", () => {
     const c = await signUp(baseUrl);
     const trip = await newTrip(c);
     const start = (await setStart(c, trip, "Hotel", custom(-33.87, 151.2))).data.activityId;
-    const zoo = (await addActivity(c, trip, { title: "Zoo" })).data.activityId;
-    const early = await addActivity(c, trip, { title: "Breakfast", index: 0 });
+    const zoo = (await addActivity(c, trip, { title: "Zoo", startMin: null })).data.activityId;
+    const early = await addActivity(c, trip, { title: "Breakfast", startMin: null, index: 0 });
     expect(titles(early.data.trip)).toEqual(["Hotel", "Breakfast", "Zoo"]);
     const moved = await c.send("POST", `/api/trips/${trip.id}/activities/${zoo}/move`, { dayId: trip.days[0].id, index: 0 });
     expect(titles(moved.data)).toEqual(["Hotel", "Zoo", "Breakfast"]);

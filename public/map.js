@@ -26,16 +26,23 @@ function loadGoogle(key) {
 }
 
 const MODE_COLOUR = { WALK: "#0F7C8C", TRANSIT: "#7A5AF8", DRIVE: "#F2603D" };
+const distanceKm = (a, b) => {
+  const rad = Math.PI / 180;
+  const x = Math.sin(((b.lat - a.lat) * rad) / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(((b.lng - a.lng) * rad) / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(x));
+};
+const formatKm = (k) => (k < 1 ? `${Math.round(k * 1000)} m` : `${k < 10 ? k.toFixed(1) : Math.round(k)} km`);
 // the start shows "S"; the stops after it are numbered from 1, as in the timeline
 const stopLabel = (stops, i) => (stops[i].start ? "S" : String(i + 1 - (stops[0]?.start ? 1 : 0)));
 const KIND_COLOUR = { attraction: "#F2603D", food: "#E08A00", shopping: "#7A5AF8", accommodation: "#0F7C8C", custom: "#5F6B7A" };
 
 // onPlaceClick(placeId, latLng): one of Google's own place icons was clicked.
-// onMapClick(latLng): anywhere else. Both are optional; without them the map
+// onMapClick(latLng): anywhere else. onViewChange({ lat, lng, zoom, heading }):
+// the map moved (throttled). All optional; without them the map
 // keeps Google's icons inert, as before. The schematic has no real geography,
 // so it never reports map clicks.
-export async function createMap(el, { config, onSelectStop, onSelectResult, onPlaceClick, onMapClick }) {
-  const handlers = { onSelectStop, onSelectResult, onPlaceClick, onMapClick };
+export async function createMap(el, { config, onSelectStop, onSelectResult, onPlaceClick, onMapClick, onViewChange }) {
+  const handlers = { onSelectStop, onSelectResult, onPlaceClick, onMapClick, onViewChange };
   if (config.mapsBrowserKey && !authFailed) {
     try {
       return await googleMap(el, config, handlers);
@@ -79,10 +86,101 @@ async function googleMap(el, config, handlers) {
   let routeLines = [];
   let lastFit = "";
 
+  // --- where the other people on the trip are looking ---
+  // An OverlayView is only here for its projection: it turns a latitude and
+  // longitude into this map's pixels, accounting for zoom, rotation and tilt.
+  let peers = [];
+  const peerLayer = h("div", { class: "peer-layer" });
+  el.append(peerLayer);
+  const overlay = new google.maps.OverlayView();
+  overlay.onAdd = () => {};
+  overlay.onRemove = () => {};
+  overlay.draw = () => layoutPeers();
+  overlay.setMap(map);
+  // keep clear of the search bar (top), Google's attribution (bottom) and the
+  // zoom buttons (right)
+  const EDGE = { top: 86, right: 64, bottom: 42, left: 18 };
+
+  function layoutPeers() {
+    const proj = overlay.getProjection();
+    if (!proj) return;
+    const w = canvas.clientWidth;
+    const hgt = canvas.clientHeight;
+    const centre = map.getCenter();
+    peerLayer.replaceChildren(
+      ...peers.map((p) => {
+        const pt = proj.fromLatLngToContainerPixel(new google.maps.LatLng(p.lat, p.lng));
+        const label = `Jump to ${p.displayName}'s view`;
+        const jump = () => {
+          map.panTo({ lat: p.lat, lng: p.lng });
+          map.setZoom(Math.round(p.zoom));
+        };
+        const inside = pt && pt.x >= EDGE.left && pt.x <= w - EDGE.right && pt.y >= EDGE.top && pt.y <= hgt - EDGE.bottom;
+        if (inside) {
+          return h(
+            "button",
+            { class: "peer-marker", type: "button", style: `--pc:${p.colour}; left:${pt.x}px; top:${pt.y}px`, title: `${p.displayName} is looking here`, "aria-label": `${p.displayName} is looking at this area. ${label}`, onclick: jump },
+            h("span", { class: "peer-initials" }, p.initials),
+            h("span", { class: "peer-name" }, `${p.displayName}'s view`),
+          );
+        }
+        // off screen: an arrow on the edge, along the line from this map's
+        // centre to theirs, in screen space
+        const cx = w / 2;
+        const cy = hgt / 2;
+        const dx = (pt?.x ?? cx) - cx;
+        const dy = (pt?.y ?? cy) - cy;
+        const sx = dx === 0 ? Infinity : (dx > 0 ? w - EDGE.right - cx : cx - EDGE.left) / Math.abs(dx);
+        const sy = dy === 0 ? Infinity : (dy > 0 ? hgt - EDGE.bottom - cy : cy - EDGE.top) / Math.abs(dy);
+        const s = Math.min(sx, sy);
+        const x = cx + dx * s;
+        const y = cy + dy * s;
+        // anchor the label inward from the edge it sits on, so none of it is cut off
+        const side = sx <= sy ? (dx > 0 ? "right" : "left") : dy > 0 ? "bottom" : "top";
+        const shift = { left: "translate(0, -50%)", right: "translate(-100%, -50%)", top: "translate(-50%, 0)", bottom: "translate(-50%, -100%)" }[side];
+        const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+        const km = centre ? distanceKm({ lat: centre.lat(), lng: centre.lng() }, p) : null;
+        return h(
+          "button",
+          { class: `peer-edge${side === "right" ? " peer-edge-right" : ""}`, type: "button", style: `--pc:${p.colour}; left:${x}px; top:${y}px; transform:${shift}`, title: label, "aria-label": `${p.displayName} is exploring ${km === null ? "elsewhere" : `${formatKm(km)} away`}. ${label}`, onclick: jump },
+          h("span", { class: "peer-arrow", style: `transform: rotate(${angle}deg)`, "aria-hidden": "true" }, "➤"),
+          h("span", { class: "peer-tag" }, h("strong", {}, p.initials), ` ${p.displayName}${km === null ? "" : ` · ${formatKm(km)}`}`),
+        );
+      }),
+    );
+  }
+  map.addListener("bounds_changed", layoutPeers);
+
+  // report this map's view, throttled: at most every 400 ms while moving, and
+  // once more when it settles
+  let lastSent = 0;
+  let pendingView = null;
+  const viewNow = () => {
+    const c = map.getCenter();
+    return c ? { lat: c.lat(), lng: c.lng(), zoom: map.getZoom() ?? 0, heading: map.getHeading?.() ?? 0 } : null;
+  };
+  const report = () => {
+    if (!handlers.onViewChange) return;
+    const v = viewNow();
+    if (!v) return;
+    const wait = 400 - (Date.now() - lastSent);
+    if (wait > 0) {
+      clearTimeout(pendingView);
+      pendingView = setTimeout(report, wait);
+      return;
+    }
+    lastSent = Date.now();
+    handlers.onViewChange(v);
+  };
+  map.addListener("bounds_changed", report);
+  map.addListener("idle", report);
+
   const onAuthFail = () => {
     schematic(el, handlers, "Google Maps rejected the browser key. Check its website restrictions and that the Maps JavaScript API is enabled.").then((s) => {
       api.update = s.update;
       api.focus = s.focus;
+      api.setPeers = s.setPeers;
+      peerLayer.remove();
       s.update(api.last);
     });
   };
@@ -160,8 +258,15 @@ async function googleMap(el, config, handlers) {
       map.panTo({ lat: p.lat, lng: p.lng });
       if (map.getZoom() < 14) map.setZoom(15);
     },
+    // the other people's views: [{ displayName, initials, colour, lat, lng, zoom }]
+    setPeers(list) {
+      peers = list;
+      layoutPeers();
+    },
     destroy() {
       window.removeEventListener("wayline:maps-auth-failed", onAuthFail);
+      clearTimeout(pendingView);
+      overlay.setMap(null);
       for (const m of markers) m.map = null;
     },
   };
@@ -259,6 +364,7 @@ async function schematic(el, handlers, problem) {
       });
     },
     focus() {},
+    setPeers() {}, // not a map: there's nowhere true to show someone's view
     destroy() {
       resize.disconnect();
     },

@@ -14,7 +14,7 @@ Small groups, roughly two to six people, planning a short trip together, who car
 
 ## How collaboration works
 
-Everyone invited to a trip edits the same itinerary, which lives on the server. When someone adds a stop, moves lunch or changes a time, the change is saved and then pushed to every open editor, appearing within about a second. An edit made against an outdated version is refused instead of silently overwriting someone. Trips are private: only the owner and people they invite through a revocable link can see or change them.
+Everyone invited to a trip edits the same itinerary, which lives on the server. When someone adds a stop, moves lunch to one o'clock or changes how long the museum takes, the change is saved and then pushed to every open editor, appearing within about a second. An edit made against an outdated version is refused instead of silently overwriting someone. Trips are private: only the owner and people they invite through a revocable link can see or change them.
 
 ## The planned role of AI
 

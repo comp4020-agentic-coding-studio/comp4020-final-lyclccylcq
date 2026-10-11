@@ -9,7 +9,14 @@ import type { ServerResponse } from "node:http";
 // The hub is in memory, which holds because Fly runs exactly one machine for
 // this app. A second machine would need a shared channel (see ADR 0003).
 
-type Conn = { userId: string; displayName: string; res: ServerResponse };
+// view: where this tab's map is looking (centre, zoom, heading), shared with
+// the other people on the trip so they can see where everyone is exploring.
+// It's the map view only (never the device's location), lives in memory with
+// the stream, and is never written to the database or counted as a revision.
+export type MapView = { lat: number; lng: number; zoom: number; heading: number; at: number };
+type Conn = { userId: string; displayName: string; session: string | null; view: MapView | null; res: ServerResponse };
+const VIEW_TTL_MS = 60_000;
+const VIEW_MIN_GAP_MS = 150;
 
 export function createHub() {
   const rooms = new Map<string, Set<Conn>>();
@@ -30,13 +37,27 @@ export function createHub() {
   };
 
   // Fly's proxy drops a connection that's silent for a minute.
+  const viewEvent = (c: Conn) => ({ session: c.session, userId: c.userId, displayName: c.displayName, ...c.view });
+  const toOthers = (tripId: string, from: Conn, event: string, data: unknown) => {
+    for (const o of rooms.get(tripId) ?? []) if (o !== from) write(o, event, data);
+  };
+
   const heartbeat = setInterval(() => {
-    for (const room of rooms.values()) for (const c of room) c.res.write(": keep-alive\n\n");
+    for (const [tripId, room] of rooms) {
+      for (const c of room) {
+        c.res.write(": keep-alive\n\n");
+        // a view nobody has moved for a minute is stale
+        if (c.view && Date.now() - c.view.at > VIEW_TTL_MS) {
+          c.view = null;
+          toOthers(tripId, c, "view-gone", { session: c.session });
+        }
+      }
+    }
   }, 20_000);
   heartbeat.unref();
 
   return {
-    join(tripId: string, user: { id: string; displayName: string }, res: ServerResponse, initial: unknown): void {
+    join(tripId: string, user: { id: string; displayName: string }, res: ServerResponse, initial: unknown, session: string | null = null): void {
       res.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",
         "cache-control": "no-cache, no-transform",
@@ -44,14 +65,17 @@ export function createHub() {
         "x-accel-buffering": "no",
       });
       res.write("retry: 2000\n\n");
-      const conn: Conn = { userId: user.id, displayName: user.displayName, res };
+      const conn: Conn = { userId: user.id, displayName: user.displayName, session, view: null, res };
       if (!rooms.has(tripId)) rooms.set(tripId, new Set());
       rooms.get(tripId)?.add(conn);
       write(conn, "snapshot", initial);
+      // where the others are looking right now, so a (re)joining tab sees them at once
+      for (const o of rooms.get(tripId) ?? []) if (o !== conn && o.view && Date.now() - o.view.at < VIEW_TTL_MS) write(conn, "view", viewEvent(o));
       announcePresence(tripId);
       res.on("close", () => {
         const room = rooms.get(tripId);
         room?.delete(conn);
+        if (conn.view) toOthers(tripId, conn, "view-gone", { session: conn.session });
         if (room && room.size === 0) rooms.delete(tripId);
         else announcePresence(tripId);
       });
@@ -76,6 +100,19 @@ export function createHub() {
     },
 
     presence,
+
+    // A tab's map moved: remember it on that tab's stream and tell the others.
+    // Updates closer together than VIEW_MIN_GAP_MS are dropped (the browser
+    // already throttles; this caps a misbehaving one). Returns false when the
+    // tab has no open stream on this trip.
+    setView(tripId: string, userId: string, session: string, view: Omit<MapView, "at">): boolean {
+      const conn = [...(rooms.get(tripId) ?? [])].find((c) => c.userId === userId && c.session === session);
+      if (!conn) return false;
+      if (conn.view && Date.now() - conn.view.at < VIEW_MIN_GAP_MS) return true;
+      conn.view = { ...view, at: Date.now() };
+      toOthers(tripId, conn, "view", viewEvent(conn));
+      return true;
+    },
 
     closeAll(): void {
       clearInterval(heartbeat);

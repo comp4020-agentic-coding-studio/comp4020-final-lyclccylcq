@@ -784,3 +784,70 @@ textarea { resize: vertical; }
 @media (max-width: 899px) {
   .schedule-card { width: 100vw; max-width: 100vw; margin: auto 0 0; border-radius: 18px 18px 0 0; max-height: 85vh; overflow: auto; }
 }
+
+/* --- the day as a chronological rail --- */
+/* time | dot (the stop's map number) | card; one line runs through the dots */
+.stop { grid-template-columns: 82px 1fr; gap: 8px; }
+.stop-rail { position: relative; flex-direction: row; justify-content: flex-end; align-items: flex-start; gap: 6px; padding-top: 12px; }
+.stop-rail::after { content: ""; position: absolute; top: 46px; bottom: 0; right: 14px; width: 2px; background: var(--line-2); }
+.timeline > .stop:last-of-type .stop-rail::after { display: none; }
+.stop-clock { font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; color: var(--ink); padding-top: 6px; white-space: nowrap; }
+.stop-untimed .stop-clock { font-size: 11px; font-weight: 700; color: var(--muted); }
+.stop-num { flex: none; z-index: 1; }
+.leg { margin: 0 0 0 66px; padding: 8px 0 10px 40px; border-left: 2px solid var(--line-2); gap: 6px; } /* line under the dots' centres */
+.leg-bad { border-left: 2px solid var(--danger); }
+.leg-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.leg-summary { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.leg-summary svg { width: 18px; height: 18px; color: var(--sea); }
+.modes-compact { gap: 4px; }
+.modes-compact .mode { padding: 4px 8px; min-height: 30px; }
+.modes-compact .mode svg { width: 16px; height: 16px; }
+.leg-issue { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 13px; }
+.route-more { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.tag-meal { background: #fff0cc; color: #7d5400; }
+@media (max-width: 420px) {
+  .stop { grid-template-columns: 66px 1fr; }
+  .leg { margin-left: 50px; padding-left: 32px; }
+  .stop-clock { font-size: 13px; }
+}
+
+/* --- where the others are looking on the map (live presence) --- */
+.peer-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+.peer-layer > * { pointer-events: auto; }
+.peer-marker {
+  position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: none; border: 0; padding: 0; cursor: pointer;
+}
+.peer-initials {
+  display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--pc); color: #fff; font: 800 12px var(--sans);
+  border: 3px solid #fff; box-shadow: 0 0 0 3px var(--pc), 0 4px 14px rgba(0,0,0,.25); outline: 2px dashed rgba(255,255,255,.9); outline-offset: 4px;
+}
+.peer-name { font: 700 11px var(--sans); color: var(--ink); background: rgba(255,255,255,.94); padding: 1px 7px; border-radius: 999px; box-shadow: var(--shadow); white-space: nowrap; }
+.peer-edge {
+  position: absolute; display: flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px;
+  background: rgba(255,255,255,.96); border: 2px solid var(--pc); border-radius: 999px; box-shadow: 0 4px 14px rgba(0,0,0,.22); cursor: pointer; white-space: nowrap;
+  font: 700 12px var(--sans); color: var(--ink); max-width: 210px;
+}
+.peer-edge-right { flex-direction: row-reverse; padding: 4px 4px 4px 10px; }
+.peer-arrow { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--pc); color: #fff; font-size: 13px; line-height: 1; transition: transform .15s; }
+.peer-tag { overflow: hidden; text-overflow: ellipsis; }
+.peer-edge:hover, .peer-marker:hover .peer-name { background: #fff; }
+.view-note { position: absolute; z-index: 2; left: 12px; bottom: 30px; max-width: min(380px, calc(100% - 24px)); font-size: 12px; color: var(--ink-2); background: rgba(255,255,255,.92); padding: 4px 10px; border-radius: 999px; box-shadow: var(--shadow); }
+.view-note[hidden] { display: none; }
+@media (max-width: 899px) {
+  .view-note { bottom: auto; top: 64px; }
+  .peer-edge { max-width: 160px; font-size: 11px; }
+}
+
+/* --- meals --- */
+.meal-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.meal-chips .cat-chip { padding: 6px 11px; font-size: 12.5px; }
+.meal-times summary { cursor: pointer; font-weight: 700; font-size: 14px; }
+.meal-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px; }
+.meal-table th { text-align: left; font-weight: 700; padding: 4px 6px 4px 0; color: var(--ink-2); }
+.meal-table td { padding: 3px 4px; }
+.meal-table input { width: 100%; padding: 4px 6px; }
+/* the stop's buttons wrap instead of running off the card; delete sits at the end */
+.stop-actions { flex-wrap: wrap; }
+.stop-actions .btn { margin-left: 0; }
+.stop-actions .icon-btn-danger { margin-left: auto; }

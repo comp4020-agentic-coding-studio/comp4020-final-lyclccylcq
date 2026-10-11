@@ -17,12 +17,20 @@ contradict the README, stop and ask. Don't quietly change the product.
 - **The map and the timeline are the product.** The editor is a large map
   beside one day's timeline (tabs on phones). The copilot is a collapsible
   side panel. Don't add dashboards, feeds or panels that compete with them.
-- **Direct manipulation first.** Search, add, reorder, retime, resize and
-  remove happen on the map and timeline and show at once. Forms are for
+- **Direct manipulation first.** Search, add, retime, resize, change place
+  and remove happen on the map and timeline and show at once. Forms are for
   details (notes, exact times), never the only way to act. Every drag has a
-  button alternative (move earlier/later, move to another day).
-- **Users choose; Wayline connects.** Never add places, reorder the plan or
-  change times on the user's behalf. The app suggests; a person accepts.
+  button alternative (change time, move earlier/later, move to another day).
+- **A day follows its times.** The server keeps each day in order: the
+  starting point, then timed stops by time (equal times keep their existing
+  order), then untimed stops in the order people chose. Adding or retiming
+  puts a stop where its time belongs; a timed stop moves within its day only
+  by changing its time ("Change time"; a drop on the timeline opens it), and
+  only untimed stops have move earlier/later. Ordering never replaces,
+  recreates or retimes a stop.
+- **Users choose; Wayline connects.** Never add places, change times or
+  replace stops on the user's behalf. The app suggests (a meal's usual time,
+  a free slot); a person accepts. Overlaps are shown, never fixed silently.
 - **Activities and transport are different things.** An activity is somewhere
   the travellers chose. A transport segment connects two *consecutive*
   activities and is deleted the moment they stop being neighbours. Don't store
@@ -159,6 +167,17 @@ contradict the README, stop and ask. Don't quietly change the product.
 - Only shared itinerary data is live. A snapshot from the stream updates the
   timeline and markers but never moves someone's map (`keepView`); zoom, open
   panels, search results and exploring stay local to each browser.
+- Where each tab's map is looking (centre, zoom, heading; never the device's
+  location) is shared live with the others on the trip: `POST /view` with the
+  tab's session id, relayed by the hub as `view` / `view-gone` events, kept
+  in memory with the stream, never saved, never a revision, dropped after a
+  minute without updates. It's sent only while someone else is on the trip,
+  throttled to 400 ms, and the map says it's shared. Others' views show as a
+  coloured marker or an edge arrow; jumping to one is a click, never automatic.
+- Meals: a food stop can carry a meal (breakfast, brunch, lunch, afternoon
+  tea, dinner). Each trip has usual meal times (`mealTimes`, owner-edited in
+  Trip settings); picking a meal suggests its usual time, or the nearest free
+  slot in its range, and says so. Nothing is replaced.
 
 ## Access and secrets
 

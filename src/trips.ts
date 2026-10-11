@@ -21,6 +21,17 @@ import {
 export const KINDS = ["attraction", "food", "shopping", "accommodation", "custom"] as const;
 export type Kind = (typeof KINDS)[number];
 export type Role = "owner" | "collaborator";
+export const MEALS = ["breakfast", "brunch", "lunch", "afternoon_tea", "dinner"] as const;
+export type Meal = (typeof MEALS)[number];
+export type MealTimes = Record<Meal, { from: number; to: number; usual: number }>;
+// Suggestions only, in minutes after midnight; each trip's owner can change them.
+export const DEFAULT_MEAL_TIMES: MealTimes = {
+  breakfast: { from: 7 * 60, to: 10 * 60, usual: 8 * 60 },
+  brunch: { from: 10 * 60, to: 12 * 60, usual: 10 * 60 + 30 },
+  lunch: { from: 11 * 60 + 30, to: 14 * 60, usual: 12 * 60 },
+  afternoon_tea: { from: 14 * 60, to: 17 * 60, usual: 15 * 60 },
+  dinner: { from: 17 * 60 + 30, to: 21 * 60, usual: 18 * 60 + 30 },
+};
 
 const MAX_DAYS = 30;
 const CACHE_MS = 30 * 86_400_000; // how long a copy of Google coordinates or route data is kept
@@ -36,6 +47,7 @@ export type Activity = {
   notes: string;
   place: { placeId: string; source: string; lat: number | null; lng: number | null } | null;
   role: "start" | null;
+  meal: Meal | null;
   version: number;
   updatedBy: string | null;
   updatedAt: number;
@@ -66,6 +78,7 @@ export type TripSnapshot = {
   updatedAt: number;
   hasInvite: boolean;
   members: { id: string; displayName: string; role: Role }[];
+  mealTimes: MealTimes;
   days: Day[];
 };
 
@@ -122,6 +135,27 @@ const duration = (v: unknown): number => {
   }
   return v as number;
 };
+
+const meal = (v: unknown): Meal | null => {
+  if (v === null || v === undefined || v === "") return null;
+  if (!MEALS.includes(v as Meal)) throw bad(`Meal must be one of: ${MEALS.join(", ")}.`);
+  return v as Meal;
+};
+
+function mealTimesInput(v: unknown): MealTimes {
+  if (!v || typeof v !== "object") throw bad("Meal times must list every meal.");
+  const out = {} as MealTimes;
+  for (const m of MEALS) {
+    const t = (v as Row)[m] as Row | undefined;
+    const [from, to, usual] = [t?.from, t?.to, t?.usual];
+    const ok = [from, to, usual].every((x) => Number.isInteger(x) && (x as number) >= 0 && (x as number) < MAX_DAY_MIN);
+    if (!ok || !((from as number) <= (usual as number) && (usual as number) < (to as number))) {
+      throw bad(`${m.replace("_", " ")}: the usual time must sit inside its range.`);
+    }
+    out[m] = { from: from as number, to: to as number, usual: usual as number };
+  }
+  return out;
+}
 
 const kind = (v: unknown): Kind => {
   if (!KINDS.includes(v as Kind)) throw bad(`Activity type must be one of: ${KINDS.join(", ")}.`);
@@ -191,6 +225,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
           }
         : null,
       role: r.role === "start" ? "start" : null,
+      meal: (r.meal as Meal | null) ?? null,
       version: Number(r.version),
       updatedBy: r.updated_by === null ? null : String(r.updated_by),
       updatedAt: Number(r.updated_at),
@@ -233,12 +268,39 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     }
   }
 
-  // Every change to a trip goes through here: one transaction, the trip's
-  // revision bumped, stale segments pruned, then (after commit) the change
-  // is announced so live sessions get the new snapshot.
+  // A day's order follows the plan's times: the starting point first, then
+  // every timed stop by its time, then the untimed stops in the order people
+  // put them. Equal times keep their existing order (so the one added first
+  // stays first), which makes the result deterministic. Only positions move;
+  // no stop is replaced or recreated.
+  function orderDay(dayId: string): void {
+    const rows = q("select id, role, start_min from activities where day_id = ? order by position, id").all(dayId);
+    const start = rows.filter((r) => r.role === "start");
+    const timed = rows.filter((r) => r.role !== "start" && r.start_min !== null).sort((a, b) => Number(a.start_min) - Number(b.start_min));
+    const untimed = rows.filter((r) => r.role !== "start" && r.start_min === null);
+    const set = q("update activities set position = ? where id = ?");
+    [...start, ...timed, ...untimed].forEach((r, i) => set.run(i, String(r.id)));
+  }
+
+  function orderTrip(tripId: string): void {
+    for (const d of q("select id from trip_days where trip_id = ?").all(tripId)) orderDay(String(d.id));
+  }
+
+  // Every change to a trip goes through here: one transaction, the days put
+  // in time order, the trip's revision bumped, segments between stops that are
+  // no longer neighbours pruned, then (after commit) the change is announced
+  // so live sessions get the new snapshot.
+  let mutating: string | null = null; // the trip a change is in progress for
   function mutate<T>(tripId: string, userId: string, fn: () => T): T {
     const out = transaction(db, () => {
-      const result = fn();
+      mutating = tripId;
+      let result: T;
+      try {
+        result = fn();
+      } finally {
+        mutating = null;
+      }
+      orderTrip(tripId);
       pruneSegments(tripId);
       q("update trips set rev = rev + 1, updated_at = ? where id = ?").run(now(), tripId);
       return result;
@@ -260,6 +322,12 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
   }
 
   function snapshot(tripId: string): TripSnapshot {
+    // built during a change: order the days first, so the answer the person
+    // gets already shows where the changed stop now sits
+    if (mutating === tripId) {
+      orderTrip(tripId);
+      pruneSegments(tripId);
+    }
     const t = q("select * from trips where id = ?").get(tripId);
     if (!t) throw notFound("Trip not found.");
     const tz = String(t.timezone);
@@ -312,8 +380,19 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       updatedAt: Number(t.updated_at),
       hasInvite: t.invite_hash !== null,
       members,
+      mealTimes: t.meal_times ? (JSON.parse(String(t.meal_times)) as MealTimes) : DEFAULT_MEAL_TIMES,
       days,
     };
+  }
+
+  // Trips saved before stops followed their times are put in time order once,
+  // at startup, exactly as the next edit would; routes between stops that
+  // stop being neighbours are dropped as usual. Nothing else changes.
+  for (const t of q("select id from trips").all()) {
+    transaction(db, () => {
+      orderTrip(String(t.id));
+      pruneSegments(String(t.id));
+    });
   }
 
   const store = {
@@ -419,7 +498,9 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       const title = input.title === undefined ? String(cur.title) : text(input.title, "Trip name", 80);
       const destination = input.destination === undefined ? String(cur.destination) : text(input.destination, "Destination", 120);
       const { startDate, endDate } = dateRange(input.startDate ?? cur.start_date, input.endDate ?? cur.end_date);
+      const mealTimes = input.mealTimes === undefined ? undefined : input.mealTimes === null ? null : mealTimesInput(input.mealTimes);
       return mutate(tripId, userId, () => {
+        if (mealTimes !== undefined) q("update trips set meal_times = ? where id = ?").run(mealTimes === null ? null : JSON.stringify(mealTimes), tripId);
         const wanted = new Set(datesBetween(startDate, endDate));
         for (const d of q("select id, date from trip_days where trip_id = ?").all(tripId)) {
           if (wanted.has(String(d.date))) {
@@ -514,6 +595,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       const dur = duration(input.durationMin ?? 60);
       const notes = input.notes === undefined ? "" : text(input.notes, "Notes", 2000, 0);
       const place = placeInput(input.place);
+      const m = meal(input.meal);
       const id = randomUUID();
 
       const trip = mutate(tripId, userId, () => {
@@ -523,11 +605,11 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         q("update activities set position = position + 1 where day_id = ? and position >= ?").run(day.id, at);
         q(
           `insert into activities (id, trip_id, day_id, client_id, position, title, kind, start_min, duration_min, notes,
-                                   place_id, place_source, lat, lng, place_cached_at, created_by, updated_by, updated_at)
-           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                   place_id, place_source, lat, lng, place_cached_at, meal, created_by, updated_by, updated_at)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           id, tripId, day.id, clientId, at, title, k, start, dur, notes,
-          place?.placeId ?? null, place?.source ?? null, place?.lat ?? null, place?.lng ?? null, place ? now() : null,
+          place?.placeId ?? null, place?.source ?? null, place?.lat ?? null, place?.lng ?? null, place ? now() : null, m,
           userId, userId, now(),
         );
         renumber(day.id);
@@ -551,11 +633,12 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         startMin: input.startMin === undefined ? cur.startMin : startMinute(input.startMin),
         durationMin: input.durationMin === undefined ? cur.durationMin : duration(input.durationMin),
         notes: input.notes === undefined ? cur.notes : text(input.notes, "Notes", 2000, 0),
+        meal: input.meal === undefined ? cur.meal : meal(input.meal),
       };
       return mutate(tripId, userId, () => {
         q(
-          "update activities set title = ?, kind = ?, start_min = ?, duration_min = ?, notes = ?, version = version + 1, updated_by = ?, updated_at = ? where id = ?",
-        ).run(next.title, next.kind, next.startMin, next.durationMin, next.notes, userId, now(), activityId);
+          "update activities set title = ?, kind = ?, start_min = ?, duration_min = ?, notes = ?, meal = ?, version = version + 1, updated_by = ?, updated_at = ? where id = ?",
+        ).run(next.title, next.kind, next.startMin, next.durationMin, next.notes, next.meal, userId, now(), activityId);
         return snapshot(tripId);
       });
     },
@@ -568,6 +651,11 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       if (cur.role === "start") throw bad("The starting point stays first. Change it instead of moving it.");
       const day = getDay(tripId, input.dayId ?? cur.dayId);
       if (!Number.isInteger(input.index)) throw bad("Say where to move it (index).");
+      // a timed stop sits where its time puts it; moving it to another day keeps
+      // its time, but within a day the way to move it is to change its time
+      if (cur.startMin !== null && day.id === cur.dayId) {
+        throw bad("This stop has a time, so its place in the day follows its time. Change its time to move it.");
+      }
       return mutate(tripId, userId, () => {
         const ids = q("select id from activities where day_id = ? and id != ? order by position, id")
           .all(day.id, activityId)
@@ -578,6 +666,29 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         const set = q("update activities set position = ? where id = ?");
         ids.forEach((id, i) => set.run(i, id));
         if (day.id !== cur.dayId) renumber(cur.dayId);
+        return snapshot(tripId);
+      });
+    },
+
+    // Points an existing stop at a different place. The stop keeps its id, day,
+    // time, length, notes and meal (so its position too); only the routes that
+    // touch it are dropped, since they were for the old place. Versioned like
+    // any content edit.
+    setPlace(userId: string, tripId: string, activityId: string, input: Row): TripSnapshot {
+      requireMember(tripId, userId);
+      const cur = getActivity(tripId, activityId);
+      if (cur.role === "start") throw bad("Use 'Change start' for the starting point.");
+      if (input.baseVersion !== cur.version) {
+        throw new HttpError(409, "Someone else changed this stop while you were choosing a new place.", { current: cur });
+      }
+      const place = placeInput(input.place);
+      if (!place) throw bad("Choose the new place.");
+      const title = input.title === undefined ? cur.title : text(input.title, "Title", 120);
+      return mutate(tripId, userId, () => {
+        q("delete from transport_segments where from_activity_id = ? or to_activity_id = ?").run(activityId, activityId);
+        q(
+          "update activities set title = ?, place_id = ?, place_source = ?, lat = ?, lng = ?, place_cached_at = ?, version = version + 1, updated_by = ?, updated_at = ? where id = ?",
+        ).run(title, place.placeId, place.source, place.lat, place.lng, now(), userId, now(), activityId);
         return snapshot(tripId);
       });
     },

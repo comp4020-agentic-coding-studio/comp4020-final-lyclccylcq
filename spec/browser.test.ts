@@ -105,22 +105,45 @@ describe.skipIf(!chromePath)("in a real browser", () => {
 
       await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
       await page.waitFor(`${stopTitles}.includes(${JSON.stringify(name)})`);
-      expect(await page.eval(`document.querySelector('.timeline .stop .stop-time').textContent`)).toMatch(/^10:15 – 11:00/);
+      expect(await page.eval(`document.querySelector('.timeline .stop .stop-clock').textContent`)).toBe("10:15");
+      expect(await page.eval(`document.querySelector('.timeline .stop .stop-meta').textContent`)).toContain("Visit 45 min");
     });
   }
 
-  it("reorders with the move buttons, no dragging needed", async () => {
+  it("orders timed stops by time (moved by changing the time), untimed ones by the move buttons", async () => {
     const page = await browser!.newPage();
     await page.viewport(390, 844, true);
     await signUpIn(page, baseUrl, uniqueName("kb"));
-    const trip = await tripWithStops(page);
+    const trip = await inPage(page, "POST", "/api/trips", { title: "Order trip", destination: "Sydney", startDate: "2026-12-01", endDate: "2026-12-01", timezone: "Australia/Sydney" });
+    // with places, so each has a numbered marker on the map
+    for (const [title, startMin, slug, lat, lng] of [["Zoo", 540, "taronga-zoo", -33.8435, 151.2413], ["Lunch", 720, "the-rocks", -33.8599, 151.209], ["Opera House", 840, "opera-house", -33.8568, 151.2153]] as const) {
+      await inPage(page, "POST", `/api/trips/${trip.id}/activities`, { clientId: `${title}-${Math.random()}`, dayId: trip.days[0].id, title, kind: "attraction", startMin, durationMin: 60, place: { placeId: `demo:${slug}`, source: "demo", lat, lng } });
+    }
+    for (const title of ["Souvenirs", "Gelato"]) {
+      await inPage(page, "POST", `/api/trips/${trip.id}/activities`, { clientId: `${title}-${Math.random()}`, dayId: trip.days[0].id, title, kind: "custom", startMin: null, durationMin: 30 });
+    }
     await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
-    await page.waitFor(`document.querySelectorAll('.timeline .stop').length === 3`);
-    expect(await page.eval(`document.querySelector('[aria-label="Move Zoo earlier"]').disabled`)).toBe(true);
-    await page.click('[aria-label="Move Opera House earlier"]');
-    await page.waitFor(`JSON.stringify(${stopTitles}) === '["Zoo","Opera House","Lunch"]'`);
-    await page.click('[aria-label="Move Zoo later"]');
-    await page.waitFor(`JSON.stringify(${stopTitles}) === '["Opera House","Zoo","Lunch"]'`);
+    await page.waitFor(`document.querySelectorAll('.timeline .stop').length === 5`);
+    expect(await page.eval<string[]>(stopTitles)).toEqual(["Zoo", "Lunch", "Opera House", "Souvenirs", "Gelato"]);
+    expect(await page.eval<string[]>(`[...document.querySelectorAll('.timeline .stop-clock')].map(e => e.textContent)`)).toEqual(["09:00", "12:00", "14:00", "No time", "No time"]);
+    // a timed stop has no arrows: its time decides where it is
+    expect(await page.eval(`Boolean(document.querySelector('[aria-label="Move Zoo earlier"]'))`)).toBe(false);
+
+    // moving Opera House to the morning: change its time
+    await page.click('[aria-label="Change the time of Opera House"]');
+    await page.waitFor(`document.querySelector('dialog[open] input[name=start]') === document.activeElement`);
+    await page.eval(`(() => { const f = document.querySelector('dialog[open] form'); f.start.value = '08:00'; f.requestSubmit(); })()`);
+    await page.waitFor(`JSON.stringify(${stopTitles}) === '["Opera House","Zoo","Lunch","Souvenirs","Gelato"]'`);
+    // the map's numbers follow the new order
+    await page.click(".mobile-tabs button:nth-child(1)");
+    await page.waitFor(`document.querySelectorAll('.schematic-stop').length === 3`);
+    expect(await page.eval<string[]>(`[...document.querySelectorAll('.schematic-stop')].map(g => g.getAttribute('aria-label'))`)).toEqual(expect.arrayContaining(["Stop 1: Opera House", "Stop 2: Zoo", "Stop 3: Lunch"]));
+    await page.click(".mobile-tabs button:nth-child(2)");
+
+    // untimed stops still move with the buttons, after the timed ones
+    expect(await page.eval(`document.querySelector('[aria-label="Move Souvenirs earlier"]').disabled`)).toBe(true);
+    await page.click('[aria-label="Move Souvenirs later"]');
+    await page.waitFor(`JSON.stringify(${stopTitles}.slice(3)) === '["Gelato","Souvenirs"]'`);
   });
 
   it("shows one collaborator's changes in the other's browser within about a second", async () => {
@@ -150,17 +173,19 @@ describe.skipIf(!chromePath)("in a real browser", () => {
     const added = await bob.waitFor(`${stopTitles}.includes('Ferry to Manly')`, 3000);
     expect(added).toBeLessThan(1500);
 
-    // Bob reorders on his phone; Alice sees the new order
-    await bob.click('[aria-label="Move Opera House earlier"]');
-    const moved = await alice.waitFor(`JSON.stringify(${stopTitles}.slice(0, 3)) === '["Zoo","Opera House","Lunch"]'`, 3000);
+    // Bob moves Opera House to the morning on his phone (by its time); Alice sees the new order
+    await bob.click('[aria-label="Change the time of Opera House"]');
+    await bob.waitFor(`document.querySelector('dialog[open] input[name=start]')`);
+    await bob.eval(`(() => { const f = document.querySelector('dialog[open] form'); f.start.value = '08:00'; f.requestSubmit(); })()`);
+    const moved = await alice.waitFor(`JSON.stringify(${stopTitles}.slice(0, 3)) === '["Opera House","Zoo","Lunch"]'`, 3000);
     expect(moved).toBeLessThan(1500);
 
     // Alice edits a time; it reaches Bob too
     const zoo = trip.days[0].activities?.[0];
     const fresh = await inPage(alice, "GET", `/api/trips/${trip.id}`);
     const zooNow = fresh.days[0].activities.find((a: any) => a.title === "Zoo") ?? zoo;
-    await inPage(alice, "PATCH", `/api/trips/${trip.id}/activities/${zooNow.id}`, { baseVersion: zooNow.version, startMin: 8 * 60 });
-    await bob.waitFor(`document.querySelector('.timeline .stop .stop-time').textContent.startsWith('08:00')`, 3000);
+    await inPage(alice, "PATCH", `/api/trips/${trip.id}/activities/${zooNow.id}`, { baseVersion: zooNow.version, startMin: 7 * 60 + 30 });
+    await bob.waitFor(`document.querySelector('.timeline .stop h3').textContent === 'Zoo' && document.querySelector('.timeline .stop .stop-clock').textContent === '07:30'`, 3000);
     await sleep(50);
   });
 });
@@ -388,7 +413,8 @@ describe.skipIf(!chromePath)("starting a trip in the editor", () => {
     await page.eval(`[...document.querySelectorAll('.place-card button')].find(b => b.textContent.includes('Set as starting point')).click()`);
     await page.waitFor(`document.querySelectorAll('.timeline .stop').length === 4 && document.querySelector('.timeline .stop').classList.contains('stop-start')`);
     expect(await page.eval<string[]>(`${stopTitles}.slice(1)`)).toEqual(["Zoo", "Lunch", "Opera House"]);
-    expect(await page.eval(`document.querySelectorAll('.timeline .stop')[1].querySelector('[aria-label^="Move"][aria-label$="earlier"]').disabled`)).toBe(true);
+    // nothing can go ahead of the start: timed stops move by time, not arrows
+    expect(await page.eval(`Boolean(document.querySelectorAll('.timeline .stop')[1].querySelector('[aria-label^="Move"]'))`)).toBe(false);
 
     await page.eval(`[...document.querySelectorAll('.stop-start button')].find(b => b.textContent.includes('Change start')).click()`);
     await page.waitFor(`/Change the starting point/.test(${prompt})`);
@@ -482,7 +508,7 @@ describe.skipIf(!chromePath)("collaborating live, every kind of change", () => {
     // Bob retimes the Zoo; Alice's timeline shows the new time
     const zoo = ids.find((a: any) => a.title === "Zoo");
     await inPage(bob, "PATCH", `/api/trips/${trip.id}/activities/${zoo.id}`, { baseVersion: zoo.version, startMin: 8 * 60 + 30 });
-    timings.retime = await alice.waitFor(`document.querySelector('.timeline .stop .stop-time').textContent.startsWith('08:30')`, 3000);
+    timings.retime = await alice.waitFor(`document.querySelector('.timeline .stop .stop-clock').textContent === '08:30'`, 3000);
     expect(await alice.eval(`document.querySelector('.stop-touched')?.textContent ?? ''`)).toMatch(/Changed by/);
 
     // Alice sets a starting point; it arrives first in Bob's timeline

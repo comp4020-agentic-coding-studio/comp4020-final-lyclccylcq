@@ -164,6 +164,11 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
   // the trip's starting point: always the first activity of the first day.
   const activityCols = db.prepare("pragma table_info(activities)").all().map((c) => String(c.name));
   if (!activityCols.includes("role")) db.exec("alter table activities add column role text check (role in ('start'))");
+  // which meal a food stop is for; null for everything else
+  if (!activityCols.includes("meal")) db.exec("alter table activities add column meal text check (meal in ('breakfast', 'brunch', 'lunch', 'afternoon_tea', 'dinner'))");
+  // the trip's usual meal times as JSON; null means the defaults in trips.ts
+  const tripCols = db.prepare("pragma table_info(trips)").all().map((c) => String(c.name));
+  if (!tripCols.includes("meal_times")) db.exec("alter table trips add column meal_times text");
   return db;
 }
 

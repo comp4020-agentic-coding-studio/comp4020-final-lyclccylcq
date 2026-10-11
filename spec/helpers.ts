@@ -87,12 +87,12 @@ export async function share(owner: Client, guest: Client, tripId: string) {
 }
 
 // Reads a trip's event stream and resolves when an event matches.
-export function watchEvents(baseUrl: string, c: Client, tripId: string) {
+export function watchEvents(baseUrl: string, c: Client, tripId: string, session?: string) {
   const ac = new AbortController();
   const events: { event: string; data: any; at: number }[] = [];
   const waiters: { test: (e: { event: string; data: any }) => boolean; resolve: (e: any) => void }[] = [];
   const ready = (async () => {
-    const res = await fetch(new URL(`/api/trips/${tripId}/events`, baseUrl), { headers: { cookie: c.cookie }, signal: ac.signal });
+    const res = await fetch(new URL(`/api/trips/${tripId}/events${session ? `?session=${session}` : ""}`, baseUrl), { headers: { cookie: c.cookie }, signal: ac.signal });
     if (!res.ok || !res.body) throw new Error(`events: ${res.status}`);
     const reader = res.body.getReader();
     const dec = new TextDecoder();

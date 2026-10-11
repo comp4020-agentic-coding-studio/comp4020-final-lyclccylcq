@@ -125,6 +125,12 @@ function renderPrivacy() {
         {},
         "On your first visit the homepage offers to use your location; your browser only asks for permission after you press “Use my location”, and “Not now” is remembered. The coordinates go to Wayline's server with each request to find nearby itineraries and places and the name of your area, and are not stored or logged there. Your browser keeps a rounded copy (about 1 km) on this device, with any destination you picked, so the homepage remembers them next time. If you said yes and your browser still allows it, Wayline refreshes that copy at most once per visit; it never tracks you continuously. “Forget” on the homepage removes it, and so does clearing this site's data.",
       ),
+      h("h2", {}, "Where your map is looking"),
+      h(
+        "p",
+        {},
+        "While someone else has the same trip open, the people on that trip can see roughly where your trip map is looking (its centre and zoom), shown as your initials on their map. This is the map view only, never your device's location. It goes only to people on that trip, isn't stored, and disappears when you close the trip or stop moving the map for a minute.",
+      ),
       h("h2", {}, "Google Maps Platform"),
       h(
         "p",

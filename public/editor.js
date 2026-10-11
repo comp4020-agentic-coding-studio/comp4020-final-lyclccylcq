@@ -10,17 +10,23 @@ import {
   h,
   hhmm,
   icon,
+  initials,
   KIND_DURATION,
   KIND_LABEL,
   km,
   openDialog,
   parseTime,
+  personColour,
   relTime,
   toast,
   uid,
 } from "/ui.js";
 
 const MODE_LABEL = { WALK: "Walk", TRANSIT: "Transit", DRIVE: "Drive" };
+const MODE_WORD = { WALK: "Walking", TRANSIT: "Transit", DRIVE: "Driving" };
+const MEAL_LABEL = { breakfast: "Breakfast", brunch: "Brunch", lunch: "Lunch", afternoon_tea: "Afternoon tea", dinner: "Dinner" };
+const MEAL_MINUTES = { breakfast: 45, brunch: 60, lunch: 60, afternoon_tea: 45, dinner: 90 };
+const FOOD_TYPES = new Set(["restaurant", "cafe", "bakery", "bar", "meal_takeaway", "coffee_shop", "food_court", "fast_food_restaurant", "tea_house", "brunch_restaurant", "breakfast_restaurant"]);
 const MODE_ICON = { WALK: "walk", TRANSIT: "transit", DRIVE: "drive" };
 
 export async function openEditor(root, tripId, ctx) {
@@ -80,6 +86,8 @@ export async function openEditor(root, tripId, ctx) {
   const searchForm = h("form", { class: "search", role: "search" }, icon("search"), searchInput, h("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Search"));
   const searchPanel = h("div", { class: "search-panel", hidden: true });
   const mapHost = h("div", { class: "map-host" });
+  // said whenever someone else is here, since their map shows where yours looks
+  const viewNote = h("p", { class: "view-note", hidden: true }, "Others on this trip can see where your map is looking (not your location).");
   const dayTabs = h("nav", { class: "day-tabs", role: "tablist", "aria-label": "Trip days" });
   const dayHead = h("div", { class: "day-head" });
   const timeline = h("ol", { class: "timeline", "aria-label": "Itinerary for the selected day" });
@@ -93,7 +101,7 @@ export async function openEditor(root, tripId, ctx) {
   const workspace = h(
     "main",
     { class: "workspace" },
-    h("section", { class: "pane pane-map", "aria-label": "Map and place search" }, searchForm, searchPanel, mapHost),
+    h("section", { class: "pane pane-map", "aria-label": "Map and place search" }, searchForm, searchPanel, mapHost, viewNote),
     h("section", { class: "pane pane-plan", "aria-label": "Itinerary" }, dayTabs, dayHead, timeline, planFoot),
     copilotPane,
   );
@@ -109,6 +117,7 @@ export async function openEditor(root, tripId, ctx) {
     onSelectResult: (placeId) => pickPlace(shownResults().find((r) => r.placeId === placeId)),
     onPlaceClick: (placeId, at) => placeClicked(placeId, at),
     onMapClick: (at) => mapClicked(at),
+    onViewChange: (v) => shareView(v),
   });
 
   const isPhone = () => matchMedia("(max-width: 899px)").matches;
@@ -140,12 +149,57 @@ export async function openEditor(root, tripId, ctx) {
   }
   const base = `/api/trips/${tripId}`;
 
-  const events = new EventSource(`${base}/events`);
+  // one id per open tab, so two tabs of the same person are two map views
+  const session = uid();
+  const events = new EventSource(`${base}/events?session=${session}`);
   events.addEventListener("snapshot", (e) => applySnapshot(JSON.parse(e.data), { remote: true }));
   events.addEventListener("presence", (e) => {
+    const wasAlone = S.presence.length <= 1;
     S.presence = JSON.parse(e.data);
     renderBar();
+    renderPeers();
+    // someone just arrived: let them see where this map is looking
+    if (wasAlone && S.presence.length > 1 && S.myView) postView(S.myView);
   });
+
+  // --- where everyone's map is looking (live only, never saved) ---
+  const views = new Map(); // session -> { userId, displayName, lat, lng, zoom, heading, seen }
+  events.addEventListener("view", (e) => {
+    const v = JSON.parse(e.data);
+    if (v.session === session) return;
+    views.set(v.session, { ...v, seen: Date.now() });
+    renderPeers();
+  });
+  events.addEventListener("view-gone", (e) => {
+    views.delete(JSON.parse(e.data).session);
+    renderPeers();
+  });
+  const VIEW_TTL_MS = 60_000;
+  const prune = setInterval(() => {
+    for (const [k, v] of views) if (Date.now() - v.seen > VIEW_TTL_MS) views.delete(k);
+    renderPeers();
+  }, 15_000);
+
+  function renderPeers() {
+    const here = new Set(S.presence.map((p) => p.id));
+    const list = [...views.values()]
+      .filter((v) => here.has(v.userId))
+      .map((v) => {
+        const name = v.userId === me.id ? `${v.displayName} (another tab)` : v.displayName;
+        return { displayName: name, initials: initials(v.displayName), colour: personColour(v.userId), lat: v.lat, lng: v.lng, zoom: v.zoom };
+      });
+    map.setPeers(list);
+    viewNote.hidden = !(S.presence.length > 1 && map.kind === "google");
+  }
+
+  // sent only while someone else has the trip open; nobody to tell otherwise
+  function shareView(v) {
+    S.myView = v;
+    if (S.presence.length > 1) postView(v);
+  }
+  function postView(v) {
+    fetch(`${base}/view`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ session, ...v }) }).catch(() => {});
+  }
   events.addEventListener("revoked", (e) => {
     const { reason } = JSON.parse(e.data);
     events.close();
@@ -155,9 +209,14 @@ export async function openEditor(root, tripId, ctx) {
   events.onopen = () => {
     S.live = true;
     renderBar();
+    // a reconnect starts a new stream: the server sends the others' views again,
+    // and this map's view goes out once more if anyone else is here
+    if (S.presence.length > 1 && S.myView) postView(S.myView);
   };
   events.onerror = () => {
     S.live = false;
+    views.clear();
+    renderPeers();
     renderBar();
   };
 
@@ -303,32 +362,36 @@ export async function openEditor(root, tripId, ctx) {
     timeline.replaceChildren(...items);
   }
 
+  // One stop on the day's rail: its time on the left, a dot carrying the same
+  // number as its map marker, then what it is. Timed stops sit where their
+  // time puts them (the server keeps that order), so they move by changing the
+  // time; untimed stops, after them, can still be moved up and down.
   function stopItem(a, i, d) {
     const n = d.activities.length;
     const isStart = a.role === "start";
-    const first = d.activities[0]?.role === "start" ? 1 : 0; // nothing moves above the start
-    const end = a.startMin === null ? null : a.startMin + a.durationMin;
+    const first = d.activities[0]?.role === "start" ? 1 : 0;
+    const firstUntimed = d.activities.findIndex((x) => x.role !== "start" && x.startMin === null);
+    const timed = a.startMin !== null;
     const li = h(
       "li",
-      { class: `stop kind-${a.kind}${isStart ? " stop-start" : ""}${a.id === S.selectedId ? " selected" : ""}`, dataset: { id: a.id }, draggable: isStart ? "false" : "true" },
-      h("div", { class: "stop-rail" }, h("span", { class: "stop-num" }, isStart ? "S" : String(i + 1 - first))),
+      { class: `stop kind-${a.kind}${isStart ? " stop-start" : ""}${timed ? "" : " stop-untimed"}${a.id === S.selectedId ? " selected" : ""}`, dataset: { id: a.id }, draggable: isStart ? "false" : "true" },
+      h(
+        "div",
+        { class: "stop-rail" },
+        h("span", { class: "stop-clock" }, timed ? hhmm(a.startMin) : isStart ? "" : "No time"),
+        h("span", { class: "stop-num", title: isStart ? "Start" : `Marker ${i + 1 - first} on the map` }, isStart ? "S" : String(i + 1 - first)),
+      ),
       h(
         "article",
         { class: "stop-card", tabindex: "-1" },
-        h(
-          "div",
-          { class: "stop-top" },
-          isStart
-            ? h("span", { class: "stop-time" }, h("span", { class: "start-badge" }, "Start"), a.startMin === null ? "" : ` · leave ${hhmm(a.startMin)}`)
-            : h("span", { class: "stop-time" }, a.startMin === null ? "No time set" : `${hhmm(a.startMin)} – ${hhmm(end)}`),
-          !isStart && h("span", { class: "grip", "aria-hidden": "true", title: "Drag to reorder" }, icon("grip")),
-        ),
+        isStart && h("p", { class: "stop-top" }, h("span", { class: "start-badge" }, "Start"), a.startMin === null ? "" : h("span", { class: "muted small" }, ` leave ${hhmm(a.startMin)}`)),
         h("h3", {}, h("button", { class: "linklike", type: "button", onclick: () => openStop(a) }, a.title)),
         h(
           "p",
           { class: "stop-meta" },
-          !isStart && h("span", { class: `tag tag-${a.kind}` }, KIND_LABEL[a.kind]),
-          !isStart && h("span", {}, dur(a.durationMin)),
+          !isStart && h("span", {}, `Visit ${dur(a.durationMin)}`),
+          a.meal && h("span", { class: "tag tag-meal" }, MEAL_LABEL[a.meal]),
+          !isStart && !a.meal && h("span", { class: `tag tag-${a.kind}` }, KIND_LABEL[a.kind]),
           a.place?.source === "custom" && h("span", { class: "tag", title: "A spot picked on the map, not a Google place" }, "Pinned spot"),
           a.place?.source === "demo" && h("span", { class: "tag tag-demo", title: "Demo fixture, not data from Google" }, "Demo place"),
           a.place?.source === "curated" && h("span", { class: "tag tag-demo", title: "From Wayline's curated sample data, not matched to a Google place" }, "Approximate location"),
@@ -341,10 +404,13 @@ export async function openEditor(root, tripId, ctx) {
           { class: "stop-actions" },
           isStart
             ? h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => beginStart() }, icon("pin"), "Change start")
-            : [
-                h("button", { class: "icon-btn", type: "button", "aria-label": `Move ${a.title} earlier`, disabled: i <= first, onclick: () => move(a.id, d.id, i - 1) }, icon("up")),
-                h("button", { class: "icon-btn", type: "button", "aria-label": `Move ${a.title} later`, disabled: i === n - 1, onclick: () => move(a.id, d.id, i + 1) }, icon("down")),
-              ],
+            : timed
+              ? h("button", { class: "btn btn-ghost btn-sm", type: "button", "aria-label": `Change the time of ${a.title}`, onclick: () => activityDialog({ activity: a, focus: "start" }) }, "Change time")
+              : [
+                  h("button", { class: "icon-btn", type: "button", "aria-label": `Move ${a.title} earlier`, disabled: i <= Math.max(first, firstUntimed), onclick: () => move(a.id, d.id, i - 1) }, icon("up")),
+                  h("button", { class: "icon-btn", type: "button", "aria-label": `Move ${a.title} later`, disabled: i === n - 1, onclick: () => move(a.id, d.id, i + 1) }, icon("down")),
+                ],
+          !isStart && h("button", { class: "icon-btn", type: "button", title: "Change place", "aria-label": `Change the place of ${a.title}`, onclick: () => beginReplace(a) }, icon("pin")),
           h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => activityDialog({ activity: a }) }, icon("edit"), "Edit"),
           h("button", { class: "icon-btn icon-btn-danger", type: "button", "aria-label": `Remove ${a.title}`, onclick: () => removeActivity(a) }, icon("trash")),
         ),
@@ -378,6 +444,8 @@ export async function openEditor(root, tripId, ctx) {
     const { index } = dropTarget(e.clientY);
     const id = S.dragging;
     S.dragging = null;
+    const a = day()?.activities.find((x) => x.id === id);
+    if (a?.startMin !== null) return void activityDialog({ activity: a, focus: "start", note: "This stop has a time, so it sits where its time puts it. Change the time to move it." });
     move(id, S.dayId, index);
   });
 
@@ -391,54 +459,54 @@ export async function openEditor(root, tripId, ctx) {
     return { index: i, target: stops[i], after: false };
   }
 
+  // The journey between two stops: how you go and how long it takes. The
+  // stops' own times already say when; departures and arrivals stay in the
+  // collapsed details. Overlaps and too-short gaps show as a warning, and
+  // nothing is rescheduled for the user.
   function legItem(d, prev, next) {
     const gap = d.analysis.gaps.find((g) => g.fromId === prev.id && g.toId === next.id);
     const seg = d.segments.find((s) => s.fromId === prev.id && s.toId === next.id);
     const issues = d.analysis.issues.filter((x) => x.fromId === prev.id && x.toId === next.id);
     const key = `${prev.id}>${next.id}`;
     const busy = S.busyLegs.has(key);
-    const free =
-      gap?.availableMin === null || gap?.availableMin === undefined
-        ? null
-        : gap.availableMin >= 0
-          ? `${dur(gap.availableMin || 0)} free`.replace(/^0 min free$/, "No time between")
-          : null;
+    const sel = seg?.options.find((o) => o.mode === seg.selectedMode);
 
     const body = [];
     if (gap?.status === "no_places") {
-      body.push(h("p", { class: "leg-line muted" }, "Travel not planned: ", !prev.place ? prev.title : next.title, " has no place on the map."));
+      body.push(h("p", { class: "leg-line muted" }, "No travel time: ", !prev.place ? prev.title : next.title, " has no place on the map."));
     } else if (gap?.status === "not_calculated") {
+      body.push(h("div", { class: "leg-line" }, h("span", { class: "muted" }, "Travel time not calculated"), routeButton(prev, next, busy, "Calculate")));
+    } else if (seg) {
       body.push(
         h(
           "div",
-          { class: "leg-line" },
-          h("span", { class: "muted" }, "Route not calculated"),
-          routeButton(prev, next, busy, "Calculate route"),
+          { class: "leg-main" },
+          sel
+            ? h("p", { class: "leg-summary" }, icon(MODE_ICON[sel.mode]), h("strong", {}, `${MODE_WORD[sel.mode]} · ${dur(Math.max(1, Math.ceil(sel.durationSec / 60)))}`))
+            : h("p", { class: "leg-summary muted" }, seg.options.map((o) => o.message).filter(Boolean)[0] ?? "No route was found."),
+          modeChips(seg),
         ),
       );
-    } else if (seg) {
-      body.push(modeChips(seg, prev));
-      const sel = seg.options.find((o) => o.mode === seg.selectedMode);
-      if (sel) body.push(routeSummary(sel, prev, key));
-      else body.push(h("p", { class: "leg-line muted" }, seg.options.map((o) => o.message).filter(Boolean)[0] ?? "No route was found."));
-      if (seg.stale) {
-        body.push(h("div", { class: "leg-line leg-warn" }, "Times changed since this route was calculated.", routeButton(prev, next, busy, "Recalculate", true)));
-      }
-      body.push(h("p", { class: "leg-attrib", translate: "no" }, `Google Maps · calculated ${relTime(seg.computedAt)}`));
+      if (sel) body.push(routeDetails(sel, key));
+      if (seg.stale) body.push(h("div", { class: "leg-line leg-warn" }, "Times changed since this was calculated.", routeButton(prev, next, busy, "Recalculate", true)));
+      body.push(h("p", { class: "leg-attrib", translate: "no" }, `Google Maps · ${relTime(seg.computedAt)}`));
     }
 
     return h(
       "li",
       { class: `leg${issues.some((x) => x.severity === "conflict") ? " leg-bad" : ""}`, "aria-label": `Travel from ${prev.title} to ${next.title}` },
-      h(
-        "div",
-        { class: "leg-head" },
-        h("span", { class: "leg-label" }, "Travel"),
-        free && h("span", { class: "chip chip-soft" }, free),
-        issues.map((x) => h("span", { class: "chip chip-danger" }, x.kind === "overlap" ? `Overlaps by ${dur(x.minutes)}` : `${dur(x.minutes)} short`)),
-      ),
       ...body,
-      issues.map((x) => h("p", { class: "leg-issue" }, x.message, " ", h("button", { class: "linklike", type: "button", onclick: openCopilot }, "See options"))),
+      issues.map((x) =>
+        h(
+          "p",
+          { class: "leg-issue" },
+          h("span", { class: "chip chip-danger" }, x.kind === "overlap" ? `Overlaps by ${dur(x.minutes)}` : `${dur(x.minutes)} short`),
+          " ",
+          x.message,
+          " ",
+          h("button", { class: "linklike", type: "button", onclick: openCopilot }, "See options"),
+        ),
+      ),
     );
   }
 
@@ -473,68 +541,67 @@ export async function openEditor(root, tripId, ctx) {
     );
   }
 
-  function modeChips(seg, prev) {
+  // switching how you go: one small button per mode, its time in the label
+  function modeChips(seg) {
     return h(
       "div",
-      { class: "modes", role: "group", "aria-label": "Transport mode" },
+      { class: "modes modes-compact", role: "group", "aria-label": "Transport mode" },
       seg.options.map((o) => {
         const ok = o.status === "ok";
+        const label = ok ? `${MODE_WORD[o.mode]}, ${dur(Math.max(1, Math.ceil(o.durationSec / 60)))}` : `${MODE_WORD[o.mode]}: ${o.message ?? "not available"}`;
         return h(
           "button",
           {
             type: "button",
             class: `mode${seg.selectedMode === o.mode ? " on" : ""}`,
             "aria-pressed": String(seg.selectedMode === o.mode),
+            "aria-label": label,
+            title: label,
             disabled: !ok,
-            title: ok ? `Use ${MODE_LABEL[o.mode].toLowerCase()}` : o.message ?? "Not available",
             onclick: () => seg.selectedMode !== o.mode && act(api(`${base}/segments/${seg.id}/mode`, { method: "POST", body: { mode: o.mode } })).catch(() => {}),
           },
           icon(MODE_ICON[o.mode]),
-          h("span", {}, MODE_LABEL[o.mode]),
-          h("b", {}, ok ? dur(Math.ceil(o.durationSec / 60)) : "n/a"),
         );
       }),
     );
   }
 
-  function routeSummary(o, prev, key) {
-    const mins = Math.ceil(o.durationSec / 60);
-    const leave = prev.startMin === null ? null : prev.startMin + prev.durationMin;
+  // the route's particulars (distance, lines, departures), out of the way
+  function routeDetails(o, key) {
     const transit = (o.steps ?? []).filter((s) => s.kind === "transit");
     const open = S.openLegs.has(key);
-    const parts = [
-      `${MODE_LABEL[o.mode]} · ${dur(mins)}`,
-      o.distanceM ? `${(o.distanceM / 1000).toFixed(o.distanceM < 10_000 ? 1 : 0)} km` : null,
-      o.mode === "TRANSIT" && transit.length ? `${transit.length - 1} transfer${transit.length === 2 ? "" : "s"}` : null,
-      leave !== null ? `leave ${hhmm(leave)}, arrive ≈ ${hhmm(leave + mins)}` : null,
-    ].filter(Boolean);
+    if (!o.distanceM && !o.steps?.length) return null;
     return h(
       "div",
       { class: "route" },
-      h("p", { class: "leg-line" }, parts.join(" · ")),
-      o.mode === "TRANSIT" && transit.length > 0 && h("p", { class: "lines" }, transit.map((s) => lineChip(s))),
-      o.steps?.length > 0 &&
-        h(
-          "button",
-          { class: "linklike small", type: "button", "aria-expanded": String(open), onclick: () => { open ? S.openLegs.delete(key) : S.openLegs.add(key); renderTimeline(); } },
-          open ? "Hide steps" : "Show steps",
-        ),
+      h(
+        "button",
+        { class: "linklike small", type: "button", "aria-expanded": String(open), onclick: () => { open ? S.openLegs.delete(key) : S.openLegs.add(key); renderTimeline(); } },
+        open ? "Hide details" : "Details",
+      ),
       open &&
         h(
-          "ol",
-          { class: "steps" },
-          o.steps.map((s) =>
-            s.kind === "walk"
-              ? h("li", { class: "step-walk" }, icon("walk"), `Walk ${dur(Math.max(1, Math.round(s.durationSec / 60)))}${s.distanceM ? ` (${Math.round(s.distanceM)} m)` : ""}`)
-              : h(
-                  "li",
-                  { class: "step-transit" },
-                  lineChip(s),
-                  s.headsign && h("span", {}, ` toward ${s.headsign}`),
-                  h("span", { class: "step-stops" }, ` ${s.from ?? "?"} ${s.localDeparture ?? ""} → ${s.to ?? "?"} ${s.localArrival ?? ""}`),
-                  s.stops !== null && h("span", { class: "muted" }, ` · ${s.stops} stop${s.stops === 1 ? "" : "s"}`),
-                ),
-          ),
+          "div",
+          { class: "route-more" },
+          h("p", { class: "small muted" }, [o.distanceM ? `${(o.distanceM / 1000).toFixed(o.distanceM < 10_000 ? 1 : 0)} km` : null, o.mode === "TRANSIT" && transit.length ? `${transit.length - 1} transfer${transit.length === 2 ? "" : "s"}` : null].filter(Boolean).join(" · ")),
+          o.mode === "TRANSIT" && transit.length > 0 && h("p", { class: "lines" }, transit.map((s) => lineChip(s))),
+          o.steps?.length > 0 &&
+            h(
+              "ol",
+              { class: "steps" },
+              o.steps.map((s) =>
+                s.kind === "walk"
+                  ? h("li", { class: "step-walk" }, icon("walk"), `Walk ${dur(Math.max(1, Math.round(s.durationSec / 60)))}${s.distanceM ? ` (${Math.round(s.distanceM)} m)` : ""}`)
+                  : h(
+                      "li",
+                      { class: "step-transit" },
+                      lineChip(s),
+                      s.headsign && h("span", {}, ` toward ${s.headsign}`),
+                      h("span", { class: "step-stops" }, ` ${s.from ?? "?"} ${s.localDeparture ?? ""} → ${s.to ?? "?"} ${s.localArrival ?? ""}`),
+                      s.stops !== null && h("span", { class: "muted" }, ` · ${s.stops} stop${s.stops === 1 ? "" : "s"}`),
+                    ),
+              ),
+            ),
         ),
     );
   }
@@ -632,6 +699,7 @@ export async function openEditor(root, tripId, ctx) {
     S.placeDetails = null;
     S.explore = null;
     if (S.starting) S.starting = null;
+    S.replacing = null;
     searchPanel.hidden = true;
     renderMap();
     renderTimeline();
@@ -755,6 +823,7 @@ export async function openEditor(root, tripId, ctx) {
     // choosing the start by search shows the ordinary results and place card
     const searchingStart = S.starting?.step === "search" && (S.results.length || S.place);
     if (S.starting && !searchingStart) return void ((searchPanel.hidden = false), searchPanel.replaceChildren(startPanel()));
+    if (S.replacing && !S.place && !S.explore && !S.results.length) return void ((searchPanel.hidden = false), searchPanel.replaceChildren(replacePanel()));
     if (S.explore && !S.place) return void ((searchPanel.hidden = false), searchPanel.replaceChildren(explorePanel()));
     if (!S.results.length && !S.place) {
       if (S.resultsSource) {
@@ -925,9 +994,16 @@ export async function openEditor(root, tripId, ctx) {
               icon("pin"),
               "Set as starting point",
             )
-          : h(
+          : S.replacing
+            ? h(
+                "button",
+                { class: "btn btn-primary", type: "button", disabled: Boolean(p.pending), onclick: () => confirmReplace({ placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng }, p.name) },
+                icon("pin"),
+                `Use for ${S.replacing.title}`,
+              )
+            : h(
               "button",
-              { class: "btn btn-primary add-to-trip", type: "button", disabled: Boolean(p.pending), onclick: () => scheduleCard({ title: p.name, kind: guessKind(p.types), place: { placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng } }) },
+              { class: "btn btn-primary add-to-trip", type: "button", disabled: Boolean(p.pending), onclick: () => scheduleCard({ title: p.name, kind: guessKind(p.types), types: p.types, place: { placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng } }) },
               icon("plus"),
               visits.length ? "Add another visit" : "Add to Itinerary",
             ),
@@ -939,10 +1015,27 @@ export async function openEditor(root, tripId, ctx) {
   // The scheduling card: a small dialog over the place card. Nothing is
   // shared until "Confirm & add"; Cancel leaves the plan and the place card as
   // they were. custom: a spot picked on the map, so the name is editable.
-  function scheduleCard({ title, kind, place, custom = false }) {
+  function scheduleCard({ title, kind, place, types = [], custom = false }) {
     const days = S.trip.days;
     const current = day();
     const clientId = uid();
+    // places to eat get a meal choice; everything else just a time
+    const dining = kind === "food" || types.some((t) => FOOD_TYPES.has(t));
+    let meal = null; // chosen meal, or null for a custom time
+    const mealPick = dining
+      ? h(
+          "div",
+          { class: "field" },
+          h("span", {}, "Meal"),
+          h(
+            "div",
+            { class: "meal-chips", role: "group", "aria-label": "Meal" },
+            [...Object.entries(MEAL_LABEL), [null, "Custom time"]].map(([k, label]) =>
+              h("button", { type: "button", class: "cat-chip", dataset: { meal: k ?? "" }, "aria-pressed": "false", onclick: () => pickMeal(k) }, label),
+            ),
+          ),
+        )
+      : null;
     const prevOf = (d) => [...(d?.activities ?? [])].filter((a) => a.startMin !== null).sort((a, b) => a.startMin + a.durationMin - (b.startMin + b.durationMin)).pop() ?? null;
     const error = h("p", { class: "form-error", role: "alert", hidden: true });
     const hint = h("p", { class: "muted small schedule-hint" });
@@ -954,6 +1047,7 @@ export async function openEditor(root, tripId, ctx) {
         ? h("label", { class: "field" }, h("span", {}, "Name"), h("input", { name: "title", required: true, maxlength: 120, value: title, placeholder: "e.g. Meeting point" }))
         : h("h2", {}, title),
       h("label", { class: "field" }, h("span", {}, "Day"), h("select", { name: "dayId" }, days.map((x, i) => h("option", { value: x.id, selected: x.id === current?.id }, `Day ${i + 1} · ${fmtDay(x.date)}`)))),
+      mealPick,
       h(
         "div",
         { class: "row-2" },
@@ -978,8 +1072,43 @@ export async function openEditor(root, tripId, ctx) {
       const prev = prevOf(d);
       hint.textContent = prev ? `Suggested: when ${prev.title} ends (${hhmm(prev.startMin + prev.durationMin)}). Travel time isn't included yet; it appears once the route is calculated.` : "Suggested: 09:00, as nothing on this day has a time yet.";
     };
-    form.dayId.addEventListener("change", suggest);
+    // A meal suggests its usual time from the trip's settings. If that overlaps
+    // a stop already planned, the nearest free slot inside the meal's range is
+    // offered instead; if there is none, the clash is named. Nothing is
+    // replaced, and the time stays editable.
+    function pickMeal(k) {
+      meal = k;
+      for (const b of mealPick.querySelectorAll("[data-meal]")) b.setAttribute("aria-pressed", String((b.dataset.meal || null) === k));
+      for (const b of mealPick.querySelectorAll("[data-meal]")) b.classList.toggle("on", (b.dataset.meal || null) === k);
+      if (!k) return suggest();
+      const range = S.trip.mealTimes[k];
+      const length = MEAL_MINUTES[k];
+      form.duration.value = String(length);
+      const d = days.find((x) => x.id === form.dayId.value);
+      const busy = (d?.activities ?? []).filter((a) => a.startMin !== null && a.role !== "start");
+      const clash = (t) => busy.find((a) => t < a.startMin + a.durationMin && a.startMin < t + length);
+      const tries = [range.usual];
+      for (let step = 15; step <= 240; step += 15) tries.push(range.usual + step, range.usual - step);
+      const free = tries.find((t) => t >= range.from && t + length <= range.to + 60 && t < range.to && !clash(t));
+      const at = free ?? range.usual;
+      form.start.value = hhmm(at);
+      const span = `${hhmm(range.from)}–${hhmm(range.to)}`;
+      hint.textContent =
+        free === range.usual
+          ? `${MEAL_LABEL[k]} usually ${span} on this trip.`
+          : free !== undefined
+            ? `${hhmm(range.usual)} overlaps ${clash(range.usual).title}, so ${hhmm(at)} is suggested instead (${MEAL_LABEL[k].toLowerCase()} usually ${span}).`
+            : `${hhmm(at)} overlaps ${clash(at).title} and there's no free slot ${span}. Adjust the time, or keep both and sort it out on the timeline.`;
+    }
+
+    form.dayId.addEventListener("change", () => (meal ? pickMeal(meal) : suggest()));
     suggest();
+    // open on the meal that fits the suggested time, if any
+    if (dining) {
+      const t = parseTime(form.start.value);
+      const fits = Object.entries(S.trip.mealTimes).find(([, r]) => t >= r.from && t < r.to);
+      pickMeal(fits ? fits[0] : null);
+    }
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const btn = form.querySelector("[type=submit]");
@@ -990,7 +1119,7 @@ export async function openEditor(root, tripId, ctx) {
         const res = await act(
           api(`${base}/activities`, {
             method: "POST",
-            body: { clientId, dayId: form.dayId.value, title: name, kind, startMin: parseTime(form.start.value), durationMin: Number(form.duration.value), notes: form.notes.value.trim(), place },
+            body: { clientId, dayId: form.dayId.value, title: name, kind: dining ? "food" : kind, meal: dining ? meal : null, startMin: parseTime(form.start.value), durationMin: Number(form.duration.value), notes: form.notes.value.trim(), place },
           }),
           { quiet: true },
         );
@@ -1092,12 +1221,69 @@ export async function openEditor(root, tripId, ctx) {
         {
           class: "btn btn-ghost btn-sm btn-block",
           type: "button",
-          onclick: () => scheduleCard({ title: ex.label && !/^near /i.test(ex.label) ? ex.label : "Pinned spot", kind: "custom", custom: true, place: { placeId: `custom:${uid()}`, source: "custom", lat: ex.lat, lng: ex.lng } }),
+          onclick: () => {
+            const name = ex.label && !/^near /i.test(ex.label) ? ex.label : "Pinned spot";
+            const place = { placeId: `custom:${uid()}`, source: "custom", lat: ex.lat, lng: ex.lng };
+            if (S.replacing) confirmReplace(place, name);
+            else scheduleCard({ title: name, kind: "custom", custom: true, place });
+          },
         },
-        icon("plus"),
-        "Add this spot",
+        icon(S.replacing ? "pin" : "plus"),
+        S.replacing ? `Use this spot for ${S.replacing.title}` : "Add this spot",
       ),
     );
+  }
+
+  // --- changing a stop's place ---
+  // The stop keeps its id, time, length, notes and meal; only where it is
+  // changes. Picking happens the usual ways (search, a place on the map, a
+  // spot on the map), then the card's button says "Use for …".
+
+  function beginReplace(a) {
+    S.replacing = { id: a.id, version: a.version, title: a.title };
+    S.starting = null;
+    S.place = null;
+    S.placeDetails = null;
+    S.explore = null;
+    S.results = [];
+    if (isPhone()) setTab("map");
+    renderSearch();
+    renderMap();
+    searchInput.focus();
+  }
+
+  function replacePanel() {
+    return h(
+      "div",
+      { class: "start-panel" },
+      h("div", { class: "panel-head" }, h("strong", {}, `New place for ${S.replacing.title}`), h("button", { class: "icon-btn", type: "button", "aria-label": "Cancel", onclick: closeSearch }, icon("close"))),
+      h(
+        "div",
+        { class: "start-body" },
+        h("p", {}, "Search above, click a place on the map, or click anywhere to use that exact spot."),
+        h("p", { class: "muted small" }, "Its time, length, notes and meal stay as they are."),
+      ),
+    );
+  }
+
+  async function confirmReplace(place, title) {
+    const r = S.replacing;
+    try {
+      const snap = await act(api(`${base}/activities/${r.id}/place`, { method: "PUT", body: { baseVersion: r.version, place, title } }), { quiet: true });
+      S.replacing = null;
+      closeSearch();
+      S.selectedId = r.id;
+      render();
+      const a = snap.days.flatMap((d) => d.activities).find((x) => x.id === r.id);
+      if (a?.place?.lat != null) map.focus(a.place);
+      toast(`${r.title} is now ${title}.`);
+    } catch (err) {
+      if (err.status === 409 && err.data?.current) {
+        S.replacing = { ...r, version: err.data.current.version, title: err.data.current.title };
+        toast(`${err.message} Their version is on screen; choose again to replace it.`, { kind: "error" });
+      } else toast(err.message, { kind: "error" });
+      render();
+    }
   }
 
   // --- the starting point ---
@@ -1499,7 +1685,8 @@ export async function openEditor(root, tripId, ctx) {
 
   // --- dialogs ---
 
-  function activityDialog({ activity }) {
+  // focus: "start" opens on the time (to move a timed stop); note: why it opened
+  function activityDialog({ activity, focus = null, note = null }) {
     const isNew = !activity;
     let baseVersion = activity?.version ?? null;
     const d = activity ? S.trip.days.find((x) => x.id === activity.dayId) : day();
@@ -1507,10 +1694,18 @@ export async function openEditor(root, tripId, ctx) {
     const banner = h("div", { class: "banner", role: "alert", hidden: true });
     const error = h("p", { class: "form-error", role: "alert", hidden: true });
     const timed = h("input", { type: "checkbox", name: "timed", checked: activity ? activity.startMin !== null : true });
+    // which meal, for food stops only
+    const mealField = h(
+      "label",
+      { class: "field" },
+      h("span", {}, "Meal"),
+      h("select", { name: "meal" }, h("option", { value: "" }, "Not a meal"), Object.entries(MEAL_LABEL).map(([k, v]) => h("option", { value: k, selected: k === activity?.meal }, v))),
+    );
     const form = h(
       "form",
       { method: "dialog", class: "stack" },
       h("h2", {}, isNew ? "Add an activity" : "Edit activity"),
+      note && h("p", { class: "muted small" }, note),
       banner,
       activity?.place && h("p", { class: "muted small" }, activity.place.source === "demo" ? "Demo place" : "Linked to a Google Maps place"),
       h("label", { class: "field" }, h("span", {}, "Title"), h("input", { name: "title", required: true, maxlength: 120, value: activity?.title ?? "", placeholder: "Picnic in the park" })),
@@ -1542,6 +1737,7 @@ export async function openEditor(root, tripId, ctx) {
           ),
         ),
       ),
+      mealField,
       h("label", { class: "field" }, h("span", {}, "Notes"), h("textarea", { name: "notes", rows: 3, maxlength: 2000, placeholder: "Booking reference, what to bring, who's paying…" }, activity?.notes ?? "")),
       error,
       h(
@@ -1556,6 +1752,9 @@ export async function openEditor(root, tripId, ctx) {
     const syncTimed = () => (form.start.disabled = !timed.checked);
     timed.addEventListener("change", syncTimed);
     syncTimed();
+    const syncMeal = () => (mealField.hidden = form.kind.value !== "food");
+    form.kind.addEventListener("change", syncMeal);
+    syncMeal();
     function bump(n) {
       form.duration.value = String(Math.min(1440, Math.max(5, (Number(form.duration.value) || 0) + n)));
     }
@@ -1569,7 +1768,9 @@ export async function openEditor(root, tripId, ctx) {
       form.duration.value = String(a.durationMin);
       form.notes.value = a.notes;
       form.dayId.value = a.dayId;
+      form.meal.value = a.meal ?? "";
       syncTimed();
+      syncMeal();
     };
 
     const showConflict = (theirs, message) => {
@@ -1586,6 +1787,11 @@ export async function openEditor(root, tripId, ctx) {
     };
 
     const dialog = openDialog(h("dialog", { class: "dialog" }, form));
+    if (focus === "start") {
+      timed.checked = true;
+      syncTimed();
+      form.start.focus();
+    }
     S.editing = {
       onSnapshot() {
         if (isNew) return;
@@ -1610,6 +1816,7 @@ export async function openEditor(root, tripId, ctx) {
         startMin: timed.checked ? parseTime(form.start.value) : null,
         durationMin: Number(form.duration.value),
         notes: form.notes.value,
+        meal: form.kind.value === "food" ? form.meal.value || null : null,
       };
       const btn = form.querySelector("[type=submit]");
       btn.disabled = true;
@@ -1726,6 +1933,30 @@ export async function openEditor(root, tripId, ctx) {
         h("label", { class: "field" }, h("span", {}, "To"), h("input", { name: "endDate", type: "date", required: true, value: t.endDate })),
       ),
       h("p", { class: "small muted" }, `Time zone: ${t.timezone}`),
+      // usual meal times for this trip: suggestions when adding somewhere to eat
+      h(
+        "details",
+        { class: "meal-times" },
+        h("summary", {}, "Meal times"),
+        h("p", { class: "small muted" }, "Used to suggest a time when someone adds a place to eat. Times stay editable when adding."),
+        h(
+          "table",
+          { class: "meal-table" },
+          h("thead", {}, h("tr", {}, h("th", {}, ""), h("th", {}, "From"), h("th", {}, "Usual"), h("th", {}, "To"))),
+          h(
+            "tbody",
+            {},
+            Object.entries(MEAL_LABEL).map(([k, label]) =>
+              h(
+                "tr",
+                {},
+                h("th", { scope: "row" }, label),
+                ...["from", "usual", "to"].map((f) => h("td", {}, h("input", { type: "time", step: 300, name: `meal-${k}-${f}`, required: true, "aria-label": `${label} ${f}`, value: hhmm(t.mealTimes[k][f]) }))),
+              ),
+            ),
+          ),
+        ),
+      ),
       error,
       h(
         "div",
@@ -1753,7 +1984,8 @@ export async function openEditor(root, tripId, ctx) {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       try {
-        await act(api(base, { method: "PATCH", body: Object.fromEntries(["title", "destination", "startDate", "endDate"].map((k) => [k, form[k].value])) }), { quiet: true });
+        const mealTimes = Object.fromEntries(Object.keys(MEAL_LABEL).map((k) => [k, Object.fromEntries(["from", "usual", "to"].map((f) => [f, parseTime(form[`meal-${k}-${f}`].value)]))]));
+        await act(api(base, { method: "PATCH", body: { ...Object.fromEntries(["title", "destination", "startDate", "endDate"].map((k) => [k, form[k].value])), mealTimes } }), { quiet: true });
         dialog.close();
       } catch (err) {
         error.textContent = err.message;
@@ -1766,6 +1998,7 @@ export async function openEditor(root, tripId, ctx) {
   if (isPhone() && !S.trip.days.some((d) => d.activities.length)) setTab("map");
 
   return () => {
+    clearInterval(prune);
     events.close();
     map.destroy();
     S.editing = null;

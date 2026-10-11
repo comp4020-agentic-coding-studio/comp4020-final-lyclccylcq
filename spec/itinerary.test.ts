@@ -25,11 +25,12 @@ describe("the itinerary", () => {
     expect(titles(now)).toEqual(["Taronga Zoo"]);
   });
 
-  it("reorders, moves between days and removes, keeping positions tidy", async () => {
+  it("reorders untimed stops, moves between days and removes, keeping positions tidy", async () => {
     const c = await signUp(baseUrl);
     const trip = await newTrip(c);
     const ids: string[] = [];
-    for (const t of ["A", "B", "C"]) ids.push((await addActivity(c, trip, { title: t })).data.activityId);
+    // untimed stops keep the order people give them
+    for (const t of ["A", "B", "C"]) ids.push((await addActivity(c, trip, { title: t, startMin: null })).data.activityId);
 
     let r = await c.send("POST", `/api/trips/${trip.id}/activities/${ids[2]}/move`, { dayId: trip.days[0].id, index: 0 });
     expect(titles(r.data)).toEqual(["C", "A", "B"]);

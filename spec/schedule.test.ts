@@ -106,7 +106,8 @@ describe("transport segments follow the plan", () => {
     const b = add("B", 660);
     store.saveRoute("u1", trip.id, a, b, store.routeRequest("u1", trip.id, a, b).departKey, opts, null);
     add("C", 800);
-    const snap = store.moveActivity("u1", trip.id, b, { index: 2 });
+    // B now comes after C, so A and B are no longer neighbours
+    const snap = store.updateActivity("u1", trip.id, b, { baseVersion: 1, startMin: 900 });
     expect(snap.days[0].segments).toEqual([]);
     expect(() => store.routeRequest("u1", trip.id, a, b)).toThrow(/next to each other/);
   });
