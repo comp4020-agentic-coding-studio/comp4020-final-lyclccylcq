@@ -7,7 +7,11 @@ import { addActivity, logIn, newTrip, signUp, startApp, uniqueName } from "./hel
 const baseUrl = inject("baseUrl");
 const titles = (trip: any, day = 0) => trip.days[day].activities.map((a: any) => a.title);
 const custom = (lat: number, lng: number) => ({ placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat, lng });
-const setStart = (c: any, trip: any, title: string, place: any) => c.send("PUT", `/api/trips/${trip.id}/start`, { clientId: crypto.randomUUID(), title, place });
+// like the editor: send the version of the start as it is now (null: none yet)
+const setStart = async (c: any, trip: any, title: string, place: any) => {
+  const current = (await c.get(`/api/trips/${trip.id}`)).data.days[0].activities.find((a: any) => a.role === "start");
+  return c.send("PUT", `/api/trips/${trip.id}/start`, { clientId: crypto.randomUUID(), title, place, baseVersion: current?.version ?? null });
+};
 
 describe("the starting point", () => {
   it("goes first on day one, ahead of stops already planned, and only once", async () => {
@@ -94,6 +98,17 @@ describe("the starting point with several people", () => {
     expect((await put("Somewhere", null)).status).toBe(409);
     // retrying on the version they were shown replaces it on purpose
     expect((await put("Ferry wharf", loser.data.current.version)).status).toBe(200);
+  });
+
+  it("refuses a change that doesn't say which start it replaces, writing nothing", async () => {
+    const a = await signUp(baseUrl);
+    const trip = await newTrip(a);
+    await setStart(a, trip, "Hotel", custom(-33.87, 151.2));
+    for (const baseVersion of [undefined, "1", 1.5]) {
+      const r = await a.send("PUT", `/api/trips/${trip.id}/start`, { clientId: crypto.randomUUID(), title: "Overwritten", place: custom(1, 1), baseVersion });
+      expect(r.status, String(baseVersion)).toBe(400);
+    }
+    expect(titles((await a.get(`/api/trips/${trip.id}`)).data)).toEqual(["Hotel"]);
   });
 
   it("can't be set or routed on someone else's trip", async () => {

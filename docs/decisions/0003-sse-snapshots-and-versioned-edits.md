@@ -1,9 +1,9 @@
 # 3. Several people on one trip: live snapshots over SSE, versioned edits
 
 Date: 2026-10-09 (proposed) · updated 2026-10-12 · Status: accepted
-(implemented and checked in production, with one gap in the start's version
-check recorded under Limitations; drafted by the agent, accepted at the
-author's request after the Crit 9 checks below)
+(implemented and checked in production; a gap in the start's version check,
+found by the Crit 9 audit, is fixed and explained under History; drafted by
+the agent, accepted at the author's request after the Crit 9 checks below)
 
 ## Context
 
@@ -62,8 +62,9 @@ When two people change the same thing:
   so a reconnect catches up.
 - Content edits carry `baseVersion`. A mismatch is a 409 with the current
   activity; the edit dialog offers "Load their version" or "Save mine over
-  theirs". Changing the starting point carries the start's version too (see
-  Limitations for a gap in how the server enforces it). Adds are idempotent
+  theirs". Changing the starting point carries the start's version too, or
+  `null` when there's none yet; the field is required, and a request without
+  it is a 400 that writes nothing. Adds are idempotent
   by `clientId`, so two people adding at once both keep their stop.
 - Order needs no version because the server owns it: timed stops sit where
   their time puts them, untimed ones in the order people chose.
@@ -106,13 +107,6 @@ reasoning: a collaborator's change shouldn't take over your screen.
 
 ## Limitations
 
-- **The start's version check is optional on the server.** `setStart`
-  compares versions only when the request includes `baseVersion`; a request
-  without it replaces the start unchecked (the audit reproduced this on
-  production with a 200). The editor always sends the field, so the app's
-  own UI is protected, but the guarantee is the client's, not the server's.
-  The fix is to require the field; until then this decision is only
-  partly implemented for the start.
 - The hub is in memory, so this holds only while Fly runs one machine
   (deploys use `--ha=false`). A second machine would need a shared channel,
   such as SQLite polling or a pub/sub service.
@@ -135,5 +129,12 @@ reasoning: a collaborator's change shouldn't take over your screen.
 - 2026-10-12: moves of timed stops within a day were replaced by time-based
   ordering, so order is decided by the server from the times people set.
 - 2026-10-12: an independent production audit at `54c282e` added its
-  measurements and found the start check skipped when `baseVersion` is
-  missing; recorded under Limitations. Status unchanged.
+  measurements and found a gap in the start's version check. `setStart`
+  compared versions only when a request included `baseVersion`, so a request
+  without it replaced the start unchecked; the audit reproduced this on
+  production (200, start overwritten). The editor always sent the field, so
+  the app's own UI was protected, but the guarantee was the client's, not the
+  server's. Fixed the same day: the field is now required (number, or `null`
+  for no start), and anything else is a 400 that writes nothing. A test in
+  `spec/start.test.ts` sends it missing, as a string and as a fraction; run
+  against the old code, it failed with the audit's 200. Status unchanged.

@@ -242,7 +242,7 @@ describe("Google service layer (mocked Google)", () => {
   it("routes a trip leg from a spot picked on the map by its coordinates, and a Google place by its id", async () => {
     const c = await signUp(base);
     const trip = await newTrip(c, { destination: "Paris", timezone: "Europe/Paris" });
-    const start = await c.send("PUT", `/api/trips/${trip.id}/start`, { clientId: crypto.randomUUID(), title: "Gare du Nord", place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: 48.8809, lng: 2.3553 } });
+    const start = await c.send("PUT", `/api/trips/${trip.id}/start`, { clientId: crypto.randomUUID(), title: "Gare du Nord", place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: 48.8809, lng: 2.3553 }, baseVersion: null });
     const stop = await c.send("POST", `/api/trips/${trip.id}/activities`, { clientId: crypto.randomUUID(), dayId: trip.days[0].id, title: "Eiffel Tower", kind: "attraction", startMin: 600, durationMin: 90, place: { placeId: "ChIJ_eiffel_tower_id", source: "google", lat: 48.8584, lng: 2.2945 } });
     const r = await c.send("POST", `/api/trips/${trip.id}/routes`, { fromId: start.data.activityId, toId: stop.data.activityId });
     expect(r.status).toBe(200);
@@ -252,7 +252,7 @@ describe("Google service layer (mocked Google)", () => {
     expect(r.data.days[0].segments).toHaveLength(1);
 
     // changing the start drops only the route that touched it
-    const moved = await c.send("PUT", `/api/trips/${trip.id}/start`, { clientId: crypto.randomUUID(), title: "Gare de Lyon", place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: 48.8443, lng: 2.3744 } });
+    const moved = await c.send("PUT", `/api/trips/${trip.id}/start`, { clientId: crypto.randomUUID(), title: "Gare de Lyon", place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: 48.8443, lng: 2.3744 }, baseVersion: r.data.days[0].activities[0].version });
     expect(moved.data.trip.days[0].segments).toHaveLength(0);
     expect(moved.data.trip.days[0].activities.map((a: any) => a.title)).toEqual(["Gare de Lyon", "Eiffel Tower"]);
   });

@@ -42,7 +42,7 @@ In Virtual Gym, other people were visible but nothing they did touched your sess
 
 ## Which claims are checked
 
-`spec/` enforces the checkable parts: outsiders get nothing; retried adds don't duplicate; stale edits are refused; schedule maths is exact; changes reach another session, and another real browser, within a second; data survives a restart; server keys never reach the browser; no route is invented. One gap is known: the server checks the starting point's version only when a request includes it, so only the app's own editor is protected there (ADR 0003). Whether planning feels direct and calm is judged by people using it.
+`spec/` enforces the checkable parts: outsiders get nothing; retried adds don't duplicate; stale edits are refused; schedule maths is exact; changes reach another session, and another real browser, within a second; data survives a restart; server keys never reach the browser; no route is invented. A production audit found one gap: the server checked the starting point's version only when a request included it. That check is now required, and a test covers it (ADR 0003). Whether planning feels direct and calm is judged by people using it.
 
 ## What it deliberately doesn't do
 

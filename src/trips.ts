@@ -730,8 +730,13 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       if (!place) throw bad("Choose where the trip starts.");
       const existing = q("select id, version from activities where trip_id = ? and role = 'start'").get(tripId);
       // baseVersion: the start's version the client saw (null: it saw none).
-      // A mismatch means someone else changed the start meanwhile.
-      if (input.baseVersion !== undefined && (existing ? Number(existing.version) : null) !== input.baseVersion) {
+      // It's required: a request without it used to replace the start
+      // unchecked (found by the Crit 9 production audit). A mismatch means
+      // someone else changed the start meanwhile.
+      if (input.baseVersion !== null && !Number.isInteger(input.baseVersion)) {
+        throw bad("Say which starting point you're changing: baseVersion is its version, or null if there's none yet.");
+      }
+      if ((existing ? Number(existing.version) : null) !== input.baseVersion) {
         throw new HttpError(409, "Someone else changed the starting point while you were choosing.", { current: existing ? getActivity(tripId, String(existing.id)) : null });
       }
       if (existing) {

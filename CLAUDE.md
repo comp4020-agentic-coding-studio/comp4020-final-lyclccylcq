@@ -167,7 +167,9 @@ contradict the README, stop and ask. Don't quietly change the product.
 - Presence is secondary. It never substitutes for synchronising the plan.
 - Changing the starting point carries `baseVersion` too (the start's version
   when choosing began, `null` if none); a mismatch is a 409 with the current
-  start, never a silent replace.
+  start, never a silent replace. The field is required: a request without it
+  is a 400 that writes nothing. (Leaving it optional let a request without it
+  overwrite the start; the Crit 9 audit reproduced that in production.)
 - Only shared itinerary data is live. A snapshot from the stream updates the
   timeline and markers but never moves someone's map (`keepView`); zoom, open
   panels, search results and exploring stay local to each browser.
