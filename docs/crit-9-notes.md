@@ -1,18 +1,22 @@
-# Crit 9 notes (factual record and evidence pack, written by the agent)
+# Crit 9 notes (factual record and evidence pack)
 
-Raw material for `PROCESS.md` and `reflections/crit-9.md`, which the author
-writes. The course is explicit that both are the author's own account
-("written by you"; "an agent can help you find sources, check citations or
-spot a gap"), so nothing here is a first-person claim or a draft of either.
-Every commit below exists in this repo; links go to GitHub.
+The evidence behind `PROCESS.md`, ADR 0003 and `reflections/crit-9.md`. Every
+statement here says where it comes from, kept in three groups:
+
+- **automated checks** in `spec/`, run by `pnpm check` locally and in CI;
+- **earlier manual measurements**, taken in agent sessions on 2026-10-12 and
+  recorded in [`c8b258c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/c8b258c);
+- **the independent production audit**, run on 2026-10-12 against commit
+  `54c282e` by a separate session. Its results are reported here as the audit
+  reported them. Raw logs from it aren't in the repo; its two screenshots are.
 
 Crit 9 brief ("All at once"): the app is real-time by the brief's definition
 and deployed by the cutoff; one decision about how the app behaves with
-several people is written down with options and costs, and the author can say
-why; the repo shows the process (commits, `PROCESS.md`, `reflections/crit-9.md`);
-the author can account for how they directed, grounded and corrected the work.
-Indicative lengths: `PROCESS.md` grows towards 900–1100 words (rewritten at
-each crit); a reflection is 150–300 words.
+several people is written down with the options and what the choice costs,
+and the author can say why; the repo shows the process (commits, `PROCESS.md`,
+`reflections/crit-9.md`); the author can account for how they directed,
+grounded and corrected the work. Crit group Bada: cutoff Monday 12 October
+2026, 13:30 (Canberra time); session 15:30–17:00.
 
 ## Commits since the pivot
 
@@ -25,20 +29,27 @@ each crit); a reflection is 150–300 words.
 | [`a1a431c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/a1a431c) | Remembered location; licensed Wikimedia photos with credits |
 | [`7799fab`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/7799fab) | Planning from the map: place clicks, nearby exploring, custom spots, a starting point |
 | [`b4bb133`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b4bb133) | Crit 9 gap review: start changes versioned (409 instead of silent replace), remote changes no longer move another person's map, membership checked before configuration; two-browser tests |
-| [`c8b258c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/c8b258c) | Production latency and access checks recorded |
+| [`c8b258c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/c8b258c) | Earlier production latency and access checks recorded |
 | [`19fbd1c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/19fbd1c) | Reading about a place separated from scheduling it; "nothing is shared until Confirm & add" |
 | [`3f27110`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3f27110) | Days ordered by time on the server; map-view presence with edge arrows; meals |
+| [`54c282e`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/54c282e) | My Trips cover photos; ADR 0003 accepted; first version of these notes |
 
-## How the real-time part works (as deployed)
+## How the real-time part works (as deployed at `54c282e`)
 
 - Edits are HTTP requests; each runs in one SQLite transaction that bumps the
   trip's `rev`, then the whole snapshot goes to every member's open SSE
   stream. Clients ignore older revisions; a reconnecting stream starts with a
   fresh snapshot. (`src/trips.ts` `mutate()`, `src/realtime.ts`)
 - Concurrency: per-activity `baseVersion` → 409 with the current activity;
-  the dialog offers "load theirs" or "save mine over theirs". The start is
-  versioned the same way. Adds are idempotent by `clientId`. Order is decided
-  by the server from times, so it needs no version.
+  the dialog offers "Load their version" or "Save mine over theirs". Adds are
+  idempotent by `clientId`. Order is decided by the server from times, so it
+  needs no version.
+- The starting point: the editor always sends the version it saw (a number,
+  or `null` for "no start yet"), and a mismatch is a 409. **The server only
+  checks when the field is present** (`src/trips.ts`, `setStart`: `if
+  (input.baseVersion !== undefined && …)`), so a request that leaves it out
+  replaces the start without a check. The app's own UI never sends such a
+  request; a hand-made API call can. Not fixed at the time of writing.
 - Permissions: owner and collaborators via revocable 256-bit invite links;
   non-members get 404 on the trip, its stream and every edit.
 - Shared vs personal: the itinerary (stops, times, order, start, meals) is
@@ -48,24 +59,103 @@ each crit); a reflection is 150–300 words.
   revision, gone with the tab or after a minute.
 - One Fly machine; the in-memory hub depends on it (ADR 0003, `fly.toml`,
   `--ha=false`).
-- The decision record: `docs/decisions/0003-sse-snapshots-and-versioned-edits.md`
-  (accepted at the author's request on 2026-10-12, after the checks below).
+
+## Evidence
+
+### Automated checks
+
+- `pnpm check` at `54c282e`: type check plus 14 test files, 110 tests, none
+  skipped; the GitHub `check` and `deploy` jobs for that commit succeeded.
+- What they cover, by file: delivery to another open stream within a second,
+  committed-only broadcasts and rising revisions, and a removed member's
+  stream closing (`spec/realtime.test.ts`); two real Chrome sessions seeing
+  each other's adds, removals, retimes, start changes and simultaneous adds
+  (`spec/browser.test.ts`); a start change based on a replaced start refused
+  with 409 (`spec/start.test.ts`); the map-view presence API: relayed,
+  dropped, 404 for outsiders, 400 for bad input, never a revision
+  (`spec/order.test.ts`); data and sessions kept across a restart
+  (`spec/restart.test.ts`, against a local server).
+- Not covered by any check: a start change that omits `baseVersion` (see
+  above); the client keeping its map still when a snapshot arrives; the edge
+  arrows; recovery after a production restart.
+- `pnpm check:evidence` passes when *any* of `crit-8.md`, `crit-9.md` or
+  `crit-10.md` exists, so it doesn't show that the Crit 9 reflection is in
+  place.
+
+### Earlier manual measurements (agent sessions, 2026-10-12, [`c8b258c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/c8b258c))
+
+- Healthy sync, two Chrome sessions, from the sender's request to the
+  receiver's render, n=10 each: local medians 29–31 ms (max 34 ms);
+  production medians 30–42 ms (max 86 ms), Fly `syd`.
+- Reconnect after a *local server restart* with both pages open: the other
+  page reconnected by itself and showed a new change 0.8 s after it was made.
+- Access: a signed-in outsider got 404 for the trip, its stream, a start
+  change and a rename.
+- Map-view presence on production (before `54c282e`): an off-screen
+  collaborator showed as an edge arrow pointing the right way; clicking it
+  moved only the clicker's map; the trip's revision didn't change.
+
+### Independent production audit (2026-10-12, at `54c282e`)
+
+Reported by the audit; not rerun for these notes. Two isolated Chrome
+sessions on the live Fly URL, at 1920×1080 and 390×844. It first confirmed
+that local `HEAD`, GitHub `main` and the deployment matched (key server and
+frontend files hashed equal), and that Fly ran one machine in `syd` with the
+`/data` volume.
+
+Timings run from the sender starting its request to the peer's rendered DOM
+showing the change, including the polling used to detect it. They are small
+samples, not a performance guarantee.
+
+| Healthy sync | Observed |
+|---|---|
+| Add, placed by its time | 29 ms |
+| Retime that changes the order | 28 ms |
+| Untimed reorder | 28 ms |
+| Delete | 29 ms |
+| Starting point | 42 ms |
+| Content edits, n=5 | 44, 41, 43, 44, 45 ms (median 44, max 45) |
+
+| Behaviour | Observed |
+|---|---|
+| Invite link, collaborator joins | Passed |
+| Non-member reads and edits; collaborator trying owner-only actions | Refused |
+| Stale activity edit | 409; both "Load their version" and "Save mine over theirs" worked |
+| Reload | Itinerary preserved |
+| Real network interruption | "Reconnecting" shown; changes made while one side was offline appeared there 2057 ms after its connection came back, without a reload |
+| Collaborator removed | Trip and event-stream requests returned 404 |
+| My Trips | The Sydney cover photo loaded |
+| Start change with a stale `baseVersion` | 409 |
+| **Start change with no `baseVersion`** | **200, start overwritten: the defect above, reproduced in production** |
+
+Not tested by the audit: recovery after a production restart or redeploy
+(the network test is a different thing); the map staying still for one
+person when another edits, and the edge arrows, on a real Google map.
+
+Clean-up: the audit deleted its test trips and signed out. Four empty test
+accounts remain in production, because the app has no way to delete an
+account.
+
+Screenshots, at the end of the audit (the start's title is the audit's own,
+from the missing-version test):
+
+![Production editor at 1920×1080 with two collaborators](crit-9-audit-desktop.png)
+![Production editor at 390×844](crit-9-audit-phone.png)
 
 ## Where direction or a check changed the outcome
 
-Each item is supported by the commit or file named. Whether and how to use
-them is the author's call.
-
 1. **Gaps found by review, not by the first build** ([`b4bb133`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b4bb133)):
-   the start could be silently overwritten by a simultaneous change;
-   a collaborator's change reset everyone's map; a route request reached a
-   configuration check before the membership check. Each has a test.
+   the start could be silently overwritten by a simultaneous change; a
+   collaborator's change reset everyone's map; a route request reached a
+   configuration check before the membership check. Each has a test. The
+   independent audit later found the start check incomplete (see above).
 2. **Questions put to the author and the answers taken**, recorded as rules
    in `CLAUDE.md` in the commits that implemented them:
    - travel times stay on a button rather than recalculating on every edit
      ([`7799fab`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/7799fab));
-   - no view-only links yet; this notes file instead of an agent-written
-     `PROCESS.md` ([`b4bb133`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b4bb133));
+   - no view-only links yet ([`b4bb133`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b4bb133));
+   - reading about a place kept apart from scheduling it, at the author's
+     request ([`19fbd1c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/19fbd1c));
    - time decides order, and moving a timed stop means changing its time,
      chosen over keeping free manual reordering; per-trip meal times;
      "Change place" ([`3f27110`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3f27110)).
@@ -74,81 +164,41 @@ them is the author's call.
 3. **A UI bug traced to its cause and guarded** ([`a32c15b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/a32c15b)):
    the stray "false" came from native DOM calls; the fix covered six call
    sites, and a spec check now fails on the pattern.
-4. **Measured, not assumed** ([`c8b258c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/c8b258c)):
-   end-to-end latency between two browser sessions, locally and in production.
+4. **Measured, not assumed**: the earlier measurements
+   ([`c8b258c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/c8b258c))
+   and the independent audit above.
 
-Not in the history (observed during sessions, reported to the author, not
-committed as evidence): a CI run on [`a32c15b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/a32c15b)
+Not in the history (observed during sessions, not committed): a CI run on
+[`a32c15b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/a32c15b)
 failed because Chrome didn't start within 10 s and passed on a rerun (visible
 in the GitHub Actions log); while building time ordering, new tests showed the
 server answered the person making a change in the old order until the fix in
 [`3f27110`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3f27110).
-Cite these only if you can point a reader to them.
 
-## Results
+## Known limitations at `54c282e`
 
-- `pnpm check` on 2026-10-12: 14 files, 110 tests passing (fresh `DATA_DIR`,
-  no keys). `pnpm check:evidence`: passing.
-- Latency, two Chrome sessions, from the sender's request to the receiver's
-  render, n=10 each: local medians 29–31 ms (max 34 ms); production medians
-  30–42 ms (max 86 ms), Fly `syd`, measured from the author's machine.
-- Reconnect: after a local server restart with both pages open, the other
-  page reconnected by itself and showed a new change 0.8 s after it was made.
-  Not repeated on production.
-- Access: a signed-in outsider got 404 for reading the trip, opening its
-  stream, changing its start and renaming it.
-- Map-view presence on production: an off-screen collaborator showed as an
-  edge arrow pointing the right way; clicking it moved only the clicker's
-  map; the trip's revision didn't change.
-
-## `PROCESS.md` review (gaps, not a rewrite)
-
-- It is the crit 8 version (1449 words against an indicative 900–1100); its
-  first line says it will be rewritten at crit 9.
-- Its body is about Virtual Gym; Wayline appears only in the closing pivot
-  section, written before any Crit 9 work.
-- Statements now out of date: "Real-time presence, and choosing its
-  transport, are crit 9" (now built); "still has to be implemented fully"
-  (the collaboration is implemented; evaluation with real groups is still
-  pending, as `README.md` says).
-- Missing for Crit 9: the concurrency decision and why it beat the
-  alternatives (ADR 0003 holds the facts); shared vs personal state; how the
-  work was checked (the measurements above); where the author's direction
-  changed the outcome (the list above).
-- All 11 commits it currently cites exist.
-
-## Material for `reflections/crit-9.md`
-
-The two prompts: what was the breakthrough that moved the work forward? What
-did this work change about who I want to be as a software developer?
-
-Themes the evidence supports (choose, reject or replace):
-
-- Real-time turned out to be less about speed (30–40 ms was easy) than about
-  deciding what is shared: the map refit fix, presence kept out of saved
-  state, place exploration kept personal until "Confirm & add".
-- Concurrency as a product decision: refusing a stale edit (409 and a choice)
-  instead of last-write-wins, and the starting point that slipped through
-  until a review.
-- Order as a decision: choosing time-based order over free reordering, and
-  what that cost (README and rules changed).
-
-Questions only the author can answer:
-
-- Which of these did you experience as the turning point, and when?
-- Did any result surprise you or change your mind?
-- What would you now check first in a multi-user feature?
-- How did you decide when to accept the agent's proposal and when to ask for
-  a different option?
+- A start change without `baseVersion` overwrites the start (reproduced in
+  production). Only the app's own UI is protected.
+- Recovery after a production restart or redeploy is untested; reconnect was
+  measured after a local restart and after a real network drop.
+- Keeping the map still for one person when another edits, and the edge
+  arrows, were checked by hand before `54c282e` and not independently since.
+- My Trips photos only cover trips copied from a template or near a curated
+  city (within 100 km); other trips keep the colour band.
+- No view-only links; every invitee can edit.
+- One machine only: the hub is in memory.
+- The AI copilot hasn't been run with a real model key; its rule-based checks
+  work without one.
+- No evaluation with real groups yet.
 
 ## Crit 9 readiness
 
 | Requirement | State |
 |---|---|
-| Real-time, deployed: a change reaches other sessions in about a second, no reload | Done and measured on production |
-| One multi-user decision written down with options and costs | ADR 0003, accepted; the author should be able to defend it in the pod |
+| Real-time, deployed: a change reaches other sessions in about a second, no reload | Done; automated checks plus two rounds of production measurement |
+| One multi-user decision written down with options and costs | ADR 0003, accepted, with the start-version defect stated |
 | Commits that grew with the work | Done (table above) |
-| `PROCESS.md` process overview | Needs the author's rewrite for crit 9 |
-| `reflections/crit-9.md` | Missing: the cutoff sweep needs it |
+| `PROCESS.md` rewritten for Crit 9 | Rewritten; personal passages need the author |
+| `reflections/crit-9.md` | Needs the author's answers before it's final |
 | Account of directing, grounding, correcting | Evidence above; the account is the author's |
-| Checks green, site live at the cutoff | Green locally and in CI at the last push; recheck after the final push |
+| Checks green, site live at the cutoff | Green at `54c282e`; recheck after the final push, which should land well before the 13:30 cutoff so CI and the deploy finish before the sweep at 13:45 |

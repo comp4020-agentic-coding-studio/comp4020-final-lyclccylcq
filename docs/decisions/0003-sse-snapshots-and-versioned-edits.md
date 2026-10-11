@@ -1,8 +1,9 @@
 # 3. Several people on one trip: live snapshots over SSE, versioned edits
 
 Date: 2026-10-09 (proposed) · updated 2026-10-12 · Status: accepted
-(implemented and verified in production; drafted by the agent, accepted at
-the author's request after the Crit 9 checks below)
+(implemented and checked in production, with one gap in the start's version
+check recorded under Limitations; drafted by the agent, accepted at the
+author's request after the Crit 9 checks below)
 
 ## Context
 
@@ -60,8 +61,9 @@ When two people change the same thing:
   than the one they have; the first event on any stream is a fresh snapshot,
   so a reconnect catches up.
 - Content edits carry `baseVersion`. A mismatch is a 409 with the current
-  activity; the edit dialog offers "load theirs" or "save mine over theirs".
-  Changing the starting point is versioned the same way. Adds are idempotent
+  activity; the edit dialog offers "Load their version" or "Save mine over
+  theirs". Changing the starting point carries the start's version too (see
+  Limitations for a gap in how the server enforces it). Adds are idempotent
   by `clientId`, so two people adding at once both keep their stop.
 - Order needs no version because the server owns it: timed stops sit where
   their time puts them, untimed ones in the order people chose.
@@ -83,25 +85,44 @@ reasoning: a collaborator's change shouldn't take over your screen.
 
 ## Consequences
 
-- Measured (two Chrome sessions, n=10 each): a change reached the other
-  session in a median of 29–31 ms on a local server and 30–42 ms on
-  production (max 86 ms). After a local server restart with both pages open,
-  the other page reconnected by itself and showed a new change 0.8 s after
-  it was made. A signed-in outsider got 404 for the trip, its stream and its
-  edits. Records: `docs/crit-9-notes.md`; checks in `spec/realtime.test.ts`,
+- Healthy sync is far inside the README's "about a second". Earlier
+  manual measurements (two Chrome sessions, n=10 each) gave medians of
+  29–31 ms locally and 30–42 ms on production (max 86 ms). An independent
+  audit of production at `54c282e` saw 28–45 ms for adds, retimes, reorders,
+  deletes, start changes and content edits. Both are small samples, timed
+  from the sender's request to the other page's rendered change.
+- Reconnect is a separate number. After a local server restart the other page
+  caught up 0.8 s after a new change; after a real network drop on
+  production, changes made meanwhile appeared 2057 ms after the connection
+  came back, without a reload. Reconnect reconciliation needs no event log
+  or replay: the first event is a fresh snapshot.
+- The audit also saw stale activity edits refused with 409 and both
+  resolutions work, the itinerary survive a reload, and a removed
+  collaborator get 404 on the trip and its stream. Records:
+  `docs/crit-9-notes.md`; automated checks in `spec/realtime.test.ts`,
   `spec/browser.test.ts`, `spec/start.test.ts`, `spec/order.test.ts`.
-- Reconnect reconciliation is free: no event log, no replay.
 - Two people editing the same stop's text at once: the second save is refused
   and must choose. There's no automatic merge of text.
 
 ## Limitations
 
+- **The start's version check is optional on the server.** `setStart`
+  compares versions only when the request includes `baseVersion`; a request
+  without it replaces the start unchecked (the audit reproduced this on
+  production with a 200). The editor always sends the field, so the app's
+  own UI is protected, but the guarantee is the client's, not the server's.
+  The fix is to require the field; until then this decision is only
+  partly implemented for the start.
 - The hub is in memory, so this holds only while Fly runs one machine
   (deploys use `--ha=false`). A second machine would need a shared channel,
   such as SQLite polling or a pub/sub service.
 - Snapshot size grows with the trip: fine at tens of stops, worth revisiting
   at hundreds.
-- Reconnect after a restart was measured locally, not on production.
+- Recovery after a production restart or redeploy hasn't been tested; only a
+  local restart and a production network drop have.
+- That a snapshot never moves another person's map, and the edge arrows for
+  where others are looking, are checked by hand only (before `54c282e`), not
+  by `spec/` or the independent audit.
 
 ## History
 
@@ -113,3 +134,6 @@ reasoning: a collaborator's change shouldn't take over your screen.
   transient events.
 - 2026-10-12: moves of timed stops within a day were replaced by time-based
   ordering, so order is decided by the server from the times people set.
+- 2026-10-12: an independent production audit at `54c282e` added its
+  measurements and found the start check skipped when `baseVersion` is
+  missing; recorded under Limitations. Status unchanged.

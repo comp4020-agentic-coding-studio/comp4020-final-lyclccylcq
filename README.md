@@ -34,7 +34,7 @@ In Virtual Gym, other people were visible but nothing they did touched your sess
 
 ## Which claims are checked
 
-`spec/` enforces the checkable parts: outsiders get nothing; retried adds don't duplicate; stale edits are refused; schedule maths is exact; changes reach another session, and another real browser, within a second; data survives a restart; server keys never reach the browser; no route is invented. Whether planning feels direct and calm is judged by people using it.
+`spec/` enforces the checkable parts: outsiders get nothing; retried adds don't duplicate; stale edits are refused; schedule maths is exact; changes reach another session, and another real browser, within a second; data survives a restart; server keys never reach the browser; no route is invented. One gap is known: the server checks the starting point's version only when a request includes it, so only the app's own editor is protected there (ADR 0003). Whether planning feels direct and calm is judged by people using it.
 
 ## What it deliberately doesn't do
 
@@ -42,4 +42,12 @@ No booking, payments, reviews, feeds, chat, AI-generated itineraries or multi-da
 
 ## Sources
 
-_To be written by the author: the reading and products that informed this definition of good._
+Work this definition is argued from, and against:
+
+- Clay Shirky, [*Situated Software*](https://gwern.net/doc/technology/2004-03-30-shirky-situatedsoftware) (2004), and Robin Sloan, [*An app can be a home-cooked meal*](https://www.robinsloan.com/notes/home-cooked-app/) (2020): software for one small group, not everyone. Hence two to six travellers, and no feeds or reviews.
+- Ben Shneiderman, [*Direct Manipulation: A Step Beyond Programming Languages*](https://doi.org/10.1109/MC.1983.1654471), IEEE Computer 16(8), 1983: visible objects, acted on directly, with immediate feedback. Hence the map and timeline over forms.
+- Martin Fowler, [*Optimistic Offline Lock*](https://martinfowler.com/eaaCatalog/optimisticOfflineLock.html): detect a conflicting edit by its version and refuse it. Hence "refused instead of silently overwriting".
+- Evan Wallace, [*How Figma's multiplayer technology works*](https://www.figma.com/blog/how-figmas-multiplayer-technology-works/) (2019): a server-authoritative alternative to operational transforms, but last writer wins per property. Wayline keeps the server's authority and refuses stale edits instead.
+- Kleppmann et al., [*Local-first software*](https://www.inkandswitch.com/local-first/) (Ink & Switch, 2019): the case for offline editing and automatic merging (CRDTs). Wayline gives up offline editing for one copy on the server (ADR 0003).
+- Amershi et al., [*Guidelines for Human-AI Interaction*](https://doi.org/10.1145/3290605.3300233), CHI 2019: make clear what the system can do and why, and make it easy to dismiss or correct. Hence a copilot that explains and proposes, and never applies.
+- Google Maps Platform, [Places API policies](https://developers.google.com/maps/documentation/places/web-service/policies): attribution and limits on storing Google content. Hence route data only from Google, or "unknown".

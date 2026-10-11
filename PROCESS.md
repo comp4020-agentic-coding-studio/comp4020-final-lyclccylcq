@@ -1,56 +1,57 @@
 # Process overview
 
-_Rewritten at crit 8; it will be rewritten again at crits 9 and 10, not appended to._
+_Rewritten at crit 9 to describe Wayline as it stands; it will be rewritten again at crit 10, not appended to._
 
-## Starting point
+## From Virtual Gym to Wayline
 
-The brief asks for a multi-user, real-time site that's good. My idea came from Gather's shared rooms, applied to exercise: not a meeting space, but the feeling of training on your own while other people work nearby, with nobody asking anything of you. Before any code, I wrote the design statement and what the app must not become: Strava, Discord, a feed, a leaderboard, a coach. What I hadn't worked out was how the app should *feel*. My first build turned out more like a tracker than I'd intended.
+Until crit 8 this project was Virtual Gym, a shared pixel-art gym where your real workout moved your character ([`a6f7c78...abe24a5`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/compare/a6f7c78...abe24a5)). Others were visible, but nothing they did touched your session, and I couldn't justify why anyone would use it alongside the fitness apps they already have. Making it live wouldn't have fixed that: it would still have been people side by side, not acting on anything shared. So I pivoted to Wayline, a collaborative trip planner, where one person's change shapes everyone's day ([`6305228`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/6305228), documented in [`0953ec9`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/0953ec9)). The gym's record (its reflection, decision records 0001–0002) stays in the repo.
+
+## Stack, and why
+
+Node 24's own `http` and built-in SQLite, TypeScript by type stripping, and hand-written ES modules with no build step ([decision record 1](docs/decisions/0001-plain-node-and-sqlite.md)). I kept this from the gym because the course machine is one small Fly instance with one volume, and a trip planner's data is small. The cost is hand-written routing and DOM code, and the gain is no runtime dependencies to audit or update. Real-time is server-sent events from an in-process hub ([ADR 0003](docs/decisions/0003-sse-snapshots-and-versioned-edits.md)): edits are ordinary requests, so the stream needs no protocol of its own and reuses cookie authorisation. That holds only while Fly runs one machine. Google Places and Routes are called only on the server and only on intent (a click, a button), because they're billed per request and their terms limit what may be stored.
 
 ## How I work with the agent
 
-Each pass starts from one long prompt I write first: the concept, hard scope limits (no AI, nutrition, rankings, chat, feeds, and "don't begin crit 9"), what to verify, and an instruction to inspect the code and explain any architectural choice before writing it. Then comes a separate review pass that tests the app rather than trusting it. The trade-off is a large diff per pass that I can't read line by line, so: the agent drives a real browser and shows me screenshots, the checks that matter most are broken on purpose to show that they can fail, and every correction goes into `CLAUDE.md` or `spec/` so that it holds in later sessions. When the agent proposed something I hadn't asked for, I decided case by case. I accepted a canvas renderer, a full-room locker rule, and keeping your place on a same-tab refresh, and I record which choices were its rather than mine.
+Each pass starts from a long prompt I write: what to build, what not to touch (keys, Fly secrets, unrelated features), what to verify, and that nothing is pushed or deployed without my approval. Before choices that change the product, the agent stops and asks. My answers become rules in `CLAUDE.md` in the same commit, so they hold in later sessions. Every UI change is checked in a real browser at 1920×1080 and 390×844, and every testable promise goes into `spec/`. For Crit 9 I also had a separate session audit the deployed site without trusting the build session's results.
 
-## How the design changed
+## What good means, and where it lives
 
-**First build and review.** The server and data model landed in [`00a5898`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/00a5898) and the floor in [`0e2b05b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/0e2b05b). The review I ordered found drift that the tests hadn't. Everyone's last weights were on their public name tag, which made it a quiet leaderboard, and the welcome screen showed running totals. Both came out in [`427dad9`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/427dad9). "Numbers are private" became a `CLAUDE.md` rule and a check that the public floor carries no weights or reps ([`9c92d5c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/9c92d5c)).
+`README.md` argues what good means: planning by touching the map and timeline, one shared plan, truthful travel data, an AI that suggests while people decide, and private trips. `CLAUDE.md` turns that into rules, and `spec/` checks the testable parts: outsiders get 404, retried adds don't duplicate, stale edits are refused, changes reach another real browser within a second. Whether planning feels direct is judged, not tested.
 
-**The gym became the interface.** After a second audit, every check passed, and I still decided the direction was wrong. Five dashed zones with dots and a logging panel read as a workout tracker with a gym theme. I redirected the work toward a large pixel-art room where your real workout controls what your character does, and the label alone isn't enough ([`a5608bd`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/a5608bd)).
+> **Pending (author):** my position on the sources now listed in `README.md`: which ones I used, and where I agree or disagree.
 
-**Equipment, not a list.** Next I asked for the workout to start from the machines ([`5c39867`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/5c39867)). `src/equipment.ts` describes kinds of equipment, each with its exercises and the pose each one animates. Several physical machines share a kind, so adding equipment means editing data, not writing new logic. Occupancy moved to the server: the browser had been guessing who was on bench A, and two browsers could disagree. Start, Finish and Cancel became distinct states, and only Finish records a set.
+## The multi-user decision
 
-**The locker.** The obvious places for history were a profile page or reception. I ruled out both: a profile page is the start of a dashboard, and reception is where you get in. History went into your own locker instead ([`e50a865`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/e50a865)), which gave the project its main rule: the floor shows what is happening now, and the locker keeps what you've done. `CLAUDE.md` now forbids a profile dashboard.
+The decision I wrote down is what happens when two people change the same thing ([ADR 0003](docs/decisions/0003-sse-snapshots-and-versioned-edits.md)). The options were last-write-wins, optimistic versions, and automatic merging (CRDTs or operational transformation). Last-write-wins silently overwrites a collaborator, which breaks "one shared plan". Automatic merging is built for shared text, and a trip is short fields. So each edit carries the version it was based on. A stale one is refused with a 409, and the person chooses "Load their version" or "Save mine over theirs". The cost is a visible interruption where a merge might have been silent, and no offline editing.
 
-**Walk first, then set up.** After shipping, I listed usability corrections: start at the entrance, walk to a machine before its setup opens, a closable panel, usable barbells, a stair climber, and sets that "appear not to be adjustable" ([`1ca9a9b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/1ca9a9b)). I asked the agent to reproduce the last one before fixing it. With real clicks and typing, the next set was editable, and `60×8` then `65×6` were saved as separate records. The actual gaps were different:
-- a started set was frozen, so Finish recorded the target;
-- there was no set number;
-- every machine took weight and reps, even assisted pull-ups and cardio.
+Two further choices follow the same reasoning. The server decides order from times, so ordering never conflicts ([`3f27110`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3f27110)). Only the itinerary is shared live: someone else's change never moves your map, and where each person is looking is transient presence that is never saved ([`b4bb133`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b4bb133), [`3f27110`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3f27110)).
 
-Sets are now numbered, Finish records what you actually did, and each exercise uses one of three metrics: load, assistance, or time plus a level. A check goes red if the setup opens before you arrive.
+## Corrections, and where they landed
 
-**A set that silently vanished.** I later found a finished set missing from my locker. The data was fine. The real bug was that, when a set had already stopped on the server, Finish got a 409. The page didn't refresh your own state, so it kept showing "in progress" and nothing was saved. The fix, and a browser check for it, are in [`3bd0313`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3bd0313).
+- **A gap review before the crit** ([`b4bb133`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b4bb133)) found three things the first build missed: a simultaneous start change silently replaced the other, a collaborator's edit reset everyone's map, and a route request reached a configuration check before the membership check. Each fix has a test.
+- **A stray "false" in the UI** came from native DOM calls given a boolean. It was fixed at six call sites, and a spec check now fails on the pattern ([`a32c15b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/a32c15b)).
+- **Reading versus scheduling.** I asked for a place's information to be kept apart from adding it, so nothing is shared until "Confirm & add" ([`19fbd1c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/19fbd1c)).
+- **Order by time.** Asked whether manual order or times should win, I chose times. That changed a README sentence and the product rules, and new tests caught the server answering in the old order ([`3f27110`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3f27110)).
 
-## Stack and state
+## Evidence
 
-Plain Node 24 with built-in SQLite and no runtime dependencies ([decision record 1](docs/decisions/0001-plain-node-and-sqlite.md)): one page and an API on a 256 MB machine don't need a framework, at the cost of hand-written routing. The world is one hand-drawn canvas with HTML text on top ([decision record 2](docs/decisions/0002-canvas-pixel-world.md)), which avoids an engine and asset files at the cost of drawing every sprite in code.
+The checks pass locally and in CI: 110 tests at [`54c282e`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/54c282e). Earlier manual measurements on production put healthy sync at medians of 30–42 ms ([`c8b258c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/c8b258c)). The independent audit of [`54c282e`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/54c282e), with two Chrome sessions on the live site, saw:
 
-The state split is architectural. Users, lockers, visits and sets are kept in one SQLite file on the Fly volume. Presence is the only live table: an unfinished set expires unrecorded, an idle person is gone after 45 minutes, and opening the gym afresh puts you back at the entrance. The browser stores only an opaque gym pass (plus a tab-only flag so a refresh mid-set keeps your place). The server stores meaning; the browser derives position, route and animation from it.
+- 28–45 ms for adds, retimes, deletes, start changes and edits;
+- 409s with both resolutions working;
+- 404 after a collaborator was removed;
+- after a real network drop, recovery 2057 ms after the connection returned.
 
-## Where it stands, and what's deferred
+These are small samples, not guarantees. Details and screenshots are in [`docs/crit-9-notes.md`](docs/crit-9-notes.md).
 
-Other people appear in the same room, on their machines, showing exercise and state. But they appear as of your last page load, your last action, or your return to the tab, not live. Real-time presence, and choosing its transport, are crit 9. Direct interaction, such as a fist bump while someone rests, comes after that, and only as much as presence needs. I deliberately haven't built leaderboards, chat, feeds, coaching, nutrition or analytics: all were within reach, but none makes it feel more like others are training in the same space.
+## Limitations
 
-The first checks were written after the code they test, so they never failed against a missing app. Six later ones were broken on purpose to show they catch their bug: the viewport layout, the returning browser, animation, occupancy, walk-first, and the vanished set. The locker checks weren't. Persistence across a server restart is still verified by hand, because the spec runs against an app it can't restart.
+- The audit found that the server checks the start's version only when a request includes it, so a hand-made request can overwrite the start. The editor always sends it. This is recorded in ADR 0003 and not yet fixed.
+- Recovery after a production restart is untested.
+- Keeping your map still during others' edits, and the edge arrows, were checked by hand only.
+- My Trips photos cover template trips and those near a curated city.
+- There are no view-only links.
+- The AI copilot hasn't been run with a real key.
+- Nobody outside the project has planned a trip with it yet.
 
-## Design Pivot: From Virtual Gym to Collaborative Travel Planning
-
-My original concept was Virtual Gym: a persistent virtual environment in which users' real-world fitness activity decided what their character was doing, so that training alone could feel like training alongside other people. The sections above record how that design developed up to crit 8 ([`abe24a5`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/abe24a5)).
-
-The first implementation did demonstrate online presence: several people shared one gym and appeared on the machines they were using. Real-time interaction, however, remained limited. A browser saw others only as of its last load, action or return to the tab. More importantly, seeing other users online did not significantly change the individual experience. Each person still trained and logged alone, and nothing one person did affected anyone else, so the multi-user part produced little meaningful interaction.
-
-The practical application was also unclear. The concept was visually and technically interesting, but I struggled to justify why someone would need this virtual environment alongside the fitness applications they already use.
-
-Measured against my own definition of a good real-time multi-user application, I concluded that the original concept did not sufficiently support it. This decision came from reflecting on the quality of interaction and on practical usefulness, not from implementation difficulty alone. Making the gym live was within reach, but a live gym would still have been people side by side, not acting on anything shared.
-
-I therefore decided to pivot to Wayline, a collaborative travel planning platform ([`6305228`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/6305228)). Travel planning seems a more natural context for multi-user interaction. Users contribute to the same itinerary and make decisions together, so one person's change, such as moving lunch or adding a stop, directly shapes everyone else's plan. AI-assisted transportation planning is intended to help users connect destinations and identify unrealistic schedules, while the choice of where to go stays with them.
-
-These are design intentions rather than results. Whether collaboration in Wayline turns out to be more meaningful than co-presence in Virtual Gym still has to be implemented fully and evaluated with real users. The Virtual Gym records, including this account, the crit 8 reflection and decision records 0001–0002, remain as the history of how the project reached this point.
+> **Pending (author):** what I would do differently, or what I'll check first next time, in my own words.
