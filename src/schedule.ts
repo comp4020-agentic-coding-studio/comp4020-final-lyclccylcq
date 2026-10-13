@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 // Deterministic schedule checks. Everything here is plain arithmetic on the
 // itinerary and on route durations a provider actually returned: end times,
 // gaps, overlaps, shortfalls, and the exact edits that would fix each one.
@@ -252,6 +254,12 @@ function fixes(issueId: string, prev: DayActivity, next: DayActivity, minutes: n
 
 // Converts a wall-clock time on a date in an IANA time zone to a UTC instant,
 // for route departure times. Iterates once to settle across DST shifts.
+// A short hash of what a day's analysis depends on, so an answer or preview
+// can be tied to the exact plan it saw. Callers pass plain values only.
+export function fingerprint(facts: unknown): string {
+  return createHash("sha256").update(JSON.stringify(facts)).digest("hex").slice(0, 32);
+}
+
 export function zonedTimeToUtc(date: string, minutes: number, timeZone: string): Date {
   const [y, mo, d] = date.split("-").map(Number);
   const guess = Date.UTC(y, mo - 1, d, Math.floor(minutes / 60), minutes % 60);

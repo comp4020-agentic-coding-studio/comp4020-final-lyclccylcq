@@ -8,6 +8,7 @@ import { bad, HttpError, notFound } from "./errors.ts";
 import type { TemplateDetail } from "./itineraries.ts";
 import {
   analyseDay,
+  fingerprint,
   type DayActivity,
   type DayAnalysis,
   type DaySegment,
@@ -66,7 +67,10 @@ export type Segment = {
   stale: boolean;
 };
 
-export type Day = { id: string; date: string; activities: Activity[]; segments: Segment[]; analysis: DayAnalysis };
+// fingerprint: what the day's analysis (and a copilot answer about it)
+// depends on. Proposals are applied only against the fingerprint they were
+// previewed with.
+export type Day = { id: string; date: string; activities: Activity[]; segments: Segment[]; analysis: DayAnalysis; fingerprint: string };
 
 export type TripSnapshot = {
   id: string;
@@ -366,7 +370,11 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         placeId: a.place?.placeId ?? null,
       }));
       const segs: DaySegment[] = segments.map((s) => ({ ...s }));
-      return { id: String(d.id), date, activities, segments, analysis: analyseDay(plain, segs) };
+      const fp = fingerprint({
+        a: activities.map((a) => [a.id, a.title, a.kind, a.startMin, a.durationMin, a.notes, a.meal, a.role, a.place?.placeId ?? null, a.version]),
+        s: segments.map((s) => [s.id, s.fromId, s.toId, s.selectedMode, s.stale, s.departKey, s.computedAt]),
+      });
+      return { id: String(d.id), date, activities, segments, analysis: analyseDay(plain, segs), fingerprint: fp };
     });
 
     const fresh = t.dest_cached_at !== null && now() - Number(t.dest_cached_at) < CACHE_MS;
@@ -842,10 +850,15 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     // is re-derived from the current plan, and every value it changes must
     // still be what the preview showed; otherwise the plan moved on and the
     // user is asked to look again.
-    applyProposal(userId: string, tripId: string, dayId: unknown, proposalId: unknown): TripSnapshot {
+    // basedOn: the day fingerprint the preview was made from (always sent by
+    // the copilot); if the day has changed since, the preview is out of date.
+    applyProposal(userId: string, tripId: string, dayId: unknown, proposalId: unknown, basedOn?: unknown): TripSnapshot {
       requireMember(tripId, userId);
       const day = snapshot(tripId).days.find((d) => d.id === dayId);
       if (!day) throw notFound("That day isn't part of this trip.");
+      if (basedOn !== undefined && basedOn !== null && basedOn !== day.fingerprint) {
+        throw new HttpError(409, "The plan changed since this suggestion was shown. Review the updated day before applying anything.", { code: "stale" });
+      }
       const proposal = day.analysis.proposals.find((p) => p.id === proposalId);
       if (!proposal) throw new HttpError(409, "That suggestion no longer applies. The plan has changed since it was made.");
       return mutate(tripId, userId, () => {

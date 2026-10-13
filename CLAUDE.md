@@ -49,8 +49,11 @@ contradict the README, stop and ask. Don't quietly change the product.
   coordinates and a `custom:<uuid>` id (source `custom`). It's routed by
   coordinates, labelled "Pinned spot", and never given a made-up Google id.
   Its coordinates are the travellers' choice, so they don't expire.
-- **No chat, comments, reviews, social feeds, bookings, payments, expenses,
-  AI-generated trips or multi-day route optimisation** (V1 scope). Ask first.
+- **No text chat, comments, reviews, social feeds, bookings, payments,
+  expenses, AI-generated trips or multi-day route optimisation** (V1 scope).
+  Ask first. The one authorised exception (October 2026) is the two-person,
+  audio-only voice call between members of a trip (see "Voice calls"); it
+  doesn't open the door to text chat, video, group calls or recording.
 
 ## Discovery (homepage)
 
@@ -140,15 +143,57 @@ contradict the README, stop and ask. Don't quietly change the product.
 - Deterministic first: `src/schedule.ts` computes end times, gaps, overlaps,
   shortfalls and every candidate fix with its exact edits. The model never
   does time arithmetic and never proposes an edit of its own.
-- The model gets structured, verified input (`copilotInput`) and answers with
-  ids from it; `validateAnswer` drops anything else. Keep it that way.
-- Nothing is applied without an explicit click. `applyProposal` re-derives the
-  proposal and refuses (409) if any value it changes has moved since the
-  preview.
-- With no provider configured the rule-based check still works and the UI
-  says AI is unavailable. Never show canned text as if a model wrote it.
-- One model call per unchanged day (cached by input hash), per-user rate
-  limited, only on request.
+- It reviews a day ("Review this day") and answers questions about the
+  selected day, with or without issues, in the asker's language (Chinese or
+  English). The day being discussed is always shown.
+- The model gets structured, verified input (`copilotInput`, the selected day
+  only) and answers with issue, proposal and activity ids from it;
+  `validateAnswer` drops anything else. Keep it that way. Titles and notes
+  are untrusted data inside `<day_data>`, never instructions.
+- Every answer carries the day `fingerprint` it analysed; the UI marks it
+  stale when the day changes, and `applyProposal` with an old `basedOn` is a
+  409 that writes nothing. Applying needs a preview and a "Confirm change".
+- Numbers shown come from the snapshot (`dayFacts`, issue messages, proposal
+  previews), never from the model's text; model text is labelled "AI
+  interpretation" and rendered as text nodes.
+- With no provider configured the rule-based check and editing still work
+  and the UI says AI is unavailable. Never show canned text as if a model
+  wrote it. Users never see env var names or raw provider errors
+  (`describeAiError`).
+- Model calls only on request: never on render, map movement or snapshot
+  receipt. Cached by model + day input + question + history + language;
+  identical in-flight requests share one call; per-user per-minute and
+  per-day limits and a global daily ceiling (`WAYLINE_AI_*`); bounded
+  question (500), history (4 turns) and output; a timeout and cancellation.
+- The conversation lives in the asking tab only. `spec/` only mocks the
+  provider; `pnpm check:ai` is the separate live check.
+
+## Voice calls
+
+- Two members of the same trip, audio only, one call per person (across all
+  their tabs). Media is native WebRTC between the browsers or via TURN;
+  audio never touches the server, the AI, a recorder or a transcriber.
+- Signalling (`src/calls.ts`, ADR 0004): authenticated same-origin POSTs
+  under `/api/trips/:id/call`, delivered as targeted `call` events on the
+  trip's SSE stream to the intended person's tab only. Sender identity comes
+  from the session cookie; every action re-checks membership. The tab id
+  must belong to a stream that user has open.
+- Call state is in memory only: never saved, never a revision, never
+  `mutate()`. No SDP, ICE candidate or audio is stored or logged. Messages
+  are size- and rate-limited; invitations expire (30 s); a vanished tab gets
+  a 20 s grace; calls end at 4 h. Single-machine, like the hub (ADR 0003).
+- Hang-up, leaving the editor, sign-out and losing membership all end the
+  call, tell the peer and stop the microphone. A reconnecting stream gets
+  `resume` and never a replay of old offers or candidates.
+- The microphone is requested only after Call or Accept. Denied, missing
+  and busy devices, and blocked autoplay ("Turn on sound"), get plain
+  messages.
+- TURN credentials are short-lived, minted server-side per request
+  (`POST /call/ice`, rate-limited); the TURN API token or shared secret never
+  reaches the browser. Never embed public relay credentials. Don't call
+  calling production-ready from same-machine or same-Wi-Fi tests;
+  `spec/browser-call.test.ts` proves signalling and media on one machine,
+  not NAT traversal.
 
 ## Collaboration and integrity
 
@@ -194,7 +239,8 @@ contradict the README, stop and ask. Don't quietly change the product.
   or revoked by the owner. Never authorise by trip id alone.
 - Sessions are HttpOnly SameSite=Lax cookies (Secure behind Fly's TLS), stored
   hashed. Writes require JSON and a same-origin `Origin`.
-- `GOOGLE_MAPS_SERVER_KEY` and `ANTHROPIC_API_KEY` never leave the server.
+- `GOOGLE_MAPS_SERVER_KEY`, `ANTHROPIC_API_KEY` and the TURN secrets
+  (`CLOUDFLARE_TURN_API_TOKEN`, `WAYLINE_TURN_SECRET`) never leave the server.
   `/api/config` is the only place the browser key is exposed, and its key set
   is pinned by `spec/restart.test.ts`. No keys in the repo, ever. Browser
   and server Maps keys are different keys with different restrictions
@@ -231,10 +277,13 @@ contradict the README, stop and ask. Don't quietly change the product.
 - For UI changes, look at it at 1920×1080 and 390×844 in a real browser.
   `spec/browser.test.ts` checks layout at both, keyboard reordering,
   persistence after reload, and two browsers seeing each other's changes.
+  `spec/browser-call.test.ts` runs calls between two Chrome instances whose
+  fake microphones play different tones, and checks each hears the other's.
 - A testable README promise belongs in `spec/`. When a check is added for a
   bug, break the code once to see it fail.
 - Never claim a Google or AI integration works unless it has been exercised
-  with real credentials; say what was and wasn't verified.
+  with real credentials; say what was and wasn't verified. The same for
+  calls across networks and TURN relay.
 - Don't write first-person process claims, research or reflections for the
   student. Factual notes go in `docs/`.
 - When I correct the same mistake twice, the fix goes here or into `spec/`.

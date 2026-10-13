@@ -1,4 +1,5 @@
 import { createMap } from "/map.js";
+import { createVoice } from "/voice.js";
 import {
   api,
   avatar,
@@ -43,8 +44,10 @@ export async function openEditor(root, tripId, ctx) {
     live: false,
     tab: "plan",
     copilotOpen: false,
-    ai: new Map(), // dayId -> copilot answer
-    aiLoading: false,
+    // copilot conversation, per day, local to this tab: dayId -> { turns: [{ q, lang, res | error, ... }] }
+    ai: new Map(),
+    aiPending: null, // { dayId, question, controller, startedAt }
+    aiDraft: "",
     dismissed: new Set(),
     dragging: null,
     editing: null,
@@ -55,7 +58,9 @@ export async function openEditor(root, tripId, ctx) {
     // choosing the starting point: { step: "choose" | "map" | "search" | "confirm", candidate, message, locating }
     starting: null,
     hint: false, // "explore the map or search to add your next stop", after a start is set
+    confirming: null, // proposal key awaiting "Confirm change"
   };
+  let voice = null;
   const params = new URLSearchParams(location.search);
   if (params.has("new")) history.replaceState(history.state, "", location.pathname);
   const startOf = () => S.trip.days.flatMap((d) => d.activities).find((a) => a.role === "start") ?? null;
@@ -129,6 +134,7 @@ export async function openEditor(root, tripId, ctx) {
   function applySnapshot(snap, { remote = false } = {}) {
     if (!snap || typeof snap.rev !== "number" || snap.rev < S.trip.rev) return;
     S.trip = snap;
+    voice?.membersChanged();
     S.keepView = remote;
     if (!snap.days.some((d) => d.id === S.dayId)) S.dayId = snap.days[0]?.id ?? null;
     if (S.selectedId && !snap.days.some((d) => d.activities.some((a) => a.id === S.selectedId))) S.selectedId = null;
@@ -153,6 +159,17 @@ export async function openEditor(root, tripId, ctx) {
   const session = uid();
   const events = new EventSource(`${base}/events?session=${session}`);
   events.addEventListener("snapshot", (e) => applySnapshot(JSON.parse(e.data), { remote: true }));
+  // voice calls: signalling for this tab only (ADR 0004)
+  voice = createVoice({
+    base,
+    session,
+    me,
+    getMembers: () => S.trip.members,
+    getPresence: () => S.presence,
+    onChange: () => renderBar(),
+    debug: params.has("calldebug"),
+  });
+  events.addEventListener("call", (e) => voice.handle(JSON.parse(e.data)));
   events.addEventListener("presence", (e) => {
     const wasAlone = S.presence.length <= 1;
     S.presence = JSON.parse(e.data);
@@ -203,6 +220,7 @@ export async function openEditor(root, tripId, ctx) {
   events.addEventListener("revoked", (e) => {
     const { reason } = JSON.parse(e.data);
     events.close();
+    voice.destroy();
     toast(reason === "deleted" ? "This trip was deleted." : "You no longer have access to this trip.", { kind: "error" });
     ctx.navigate("/", { replace: true });
   });
@@ -247,6 +265,7 @@ export async function openEditor(root, tripId, ctx) {
         h("span", { class: "presence-label" }, online.length > 1 ? `${online.length} people are planning this trip` : "Just you right now"),
       ),
       h("span", { class: `conn ${S.live ? "conn-live" : "conn-off"}`, role: "status" }, S.live ? "Live" : "Reconnecting…"),
+      voice.render(),
       h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: shareDialog }, icon("share"), h("span", { class: "hide-sm" }, "Share")),
       role() === "owner" && h("button", { class: "icon-btn", type: "button", "aria-label": "Trip settings", onclick: settingsDialog }, icon("settings")),
       h(
@@ -1530,6 +1549,36 @@ export async function openEditor(root, tripId, ctx) {
   }
 
   // --- copilot ---
+  // Rule-based checks come from the server's schedule analysis and are
+  // always shown. AI answers are this tab's own conversation about one day;
+  // each is tied to the day fingerprint it analysed and marked stale when
+  // the day changes. Model text is rendered as text, never HTML.
+
+  const EXAMPLES = ["Is this morning too rushed?", "Why is there a conflict before lunch?", "Which fix gives us more time at the first stop?", "Summarize this day."];
+  // the page is English; a question in Chinese gets a Chinese answer (decided on the server)
+  const pageLang = () => (/^zh/i.test(document.documentElement.lang || "") ? "zh" : "en");
+  const convo = (dayId) => {
+    if (!S.ai.has(dayId)) S.ai.set(dayId, { turns: [] });
+    return S.ai.get(dayId);
+  };
+
+  // Facts shown beside AI text: computed from the server snapshot, not the model.
+  function dayFacts(d) {
+    const timed = d.activities.filter((a) => a.startMin !== null);
+    const first = timed[0];
+    const last = timed.reduce((m, a) => (m && m.startMin + m.durationMin >= a.startMin + a.durationMin ? m : a), null);
+    const { issues, gaps } = d.analysis;
+    const parts = [`${d.activities.length} stop${d.activities.length === 1 ? "" : "s"}`];
+    if (first && last) parts.push(`${hhmm(first.startMin)}–${hhmm(last.startMin + last.durationMin)}`);
+    const conflicts = issues.filter((i) => i.severity === "conflict").length;
+    const warnings = issues.length - conflicts;
+    parts.push(issues.length ? [conflicts && `${conflicts} conflict${conflicts === 1 ? "" : "s"}`, warnings && `${warnings} warning${warnings === 1 ? "" : "s"}`].filter(Boolean).join(", ") : "no timing issues");
+    const unrouted = gaps.filter((g) => g.status === "not_calculated").length;
+    const stale = gaps.filter((g) => g.status === "stale").length;
+    if (unrouted) parts.push(`${unrouted} route${unrouted === 1 ? "" : "s"} not calculated`);
+    if (stale) parts.push(`${stale} route${stale === 1 ? "" : "s"} out of date`);
+    return parts.join(" · ");
+  }
 
   function renderCopilot() {
     const d = day();
@@ -1538,10 +1587,6 @@ export async function openEditor(root, tripId, ctx) {
     const { issues, proposals, gaps } = d.analysis;
     const unrouted = gaps.filter((g) => g.status === "not_calculated").length;
     const stale = gaps.filter((g) => g.status === "stale").length;
-    const ai = S.ai.get(d.id);
-    const aiStale = ai && ai.rev !== S.trip.rev;
-    const recommended = new Map((ai && !aiStale ? ai.answer?.recommendations ?? [] : []).map((r) => [r.proposalId, r.rationale]));
-    const explained = new Map((ai && !aiStale ? ai.answer?.issues ?? [] : []).map((r) => [r.issueId, r.explanation]));
     const visible = issues.filter((x) => !S.dismissed.has(`${x.id}@${S.trip.rev}`) && !S.dismissed.has(x.id));
 
     copilotPane.replaceChildren(
@@ -1551,11 +1596,12 @@ export async function openEditor(root, tripId, ctx) {
         h("h2", {}, icon("spark"), "Copilot"),
         h("button", { class: "icon-btn hide-phone", type: "button", "aria-label": "Close copilot", onclick: () => { S.copilotOpen = false; render(); } }, icon("close")),
       ),
-      h("p", { class: "muted small" }, `Day ${idx + 1} · ${fmtDay(d.date)}`),
+      h("p", { class: "co-day", "data-testid": "copilot-day" }, "Discussing ", h("b", {}, `Day ${idx + 1} · ${fmtDay(d.date)}`)),
       h(
         "section",
         { class: "co-section" },
         h("h3", {}, "Schedule check ", h("span", { class: "tag tag-rule" }, "Rule-based")),
+        h("p", { class: "muted small co-facts" }, dayFacts(d)),
         visible.length === 0 &&
           h(
             "p",
@@ -1569,26 +1615,30 @@ export async function openEditor(root, tripId, ctx) {
             "div",
             { class: `issue issue-${x.severity}` },
             h("p", { class: "issue-msg" }, x.message),
-            explained.has(x.id) && h("p", { class: "ai-text" }, icon("spark"), explained.get(x.id)),
             h(
               "div",
               { class: "proposals" },
-              proposals
-                .filter((p) => p.issueId === x.id)
-                .sort((a, b) => (recommended.has(b.id) ? 1 : 0) - (recommended.has(a.id) ? 1 : 0))
-                .map((p) => proposalCard(d, p, recommended.get(p.id))),
+              proposals.filter((p) => p.issueId === x.id).map((p) => proposalCard(d, p, { basedOn: d.fingerprint })),
               h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.dismissed.add(x.id); renderCopilot(); } }, "Keep the plan as it is"),
             ),
           ),
         ),
       ),
-      aiSection(d, ai, aiStale),
+      aiSection(d),
     );
+    const log = copilotPane.querySelector(".co-log");
+    if (log && S.aiScroll) {
+      log.lastElementChild?.scrollIntoView({ block: "nearest" });
+      S.aiScroll = false;
+    }
   }
 
-  function proposalCard(d, p, rationale) {
+  // basedOn: the day fingerprint this preview was built from; the server
+  // refuses (409) if the day has changed since.
+  function proposalCard(d, p, { rationale = null, basedOn, staleNote = null, keyPrefix = "rule" } = {}) {
     const nameOf = (id) => d.activities.find((a) => a.id === id)?.title ?? "Activity";
     const seg = (id) => d.segments.find((s) => s.id === id);
+    const key = `${keyPrefix}:${basedOn}:${p.id}`;
     const preview = p.changes.map((c) =>
       c.type === "activity"
         ? h(
@@ -1608,78 +1658,191 @@ export async function openEditor(root, tripId, ctx) {
             h("b", {}, MODE_LABEL[c.to]),
           ),
     );
+    const confirming = S.confirming === key;
+    const apply = async (e) => {
+      e.currentTarget.disabled = true;
+      try {
+        await act(api(`${base}/proposals/apply`, { method: "POST", body: { dayId: d.id, proposalId: p.id, basedOn } }), { quiet: true });
+        toast("Change applied.");
+      } catch (err) {
+        toast(err.status === 409 ? "The plan changed since this was shown, so nothing was applied. Check the updated day." : err.message, { kind: "error" });
+      }
+      S.confirming = null;
+      renderCopilot();
+    };
     return h(
       "div",
-      { class: `proposal${rationale ? " proposal-ai" : ""}` },
-      rationale && h("p", { class: "ai-badge" }, icon("spark"), "Recommended by AI"),
+      { class: `proposal${rationale ? " proposal-ai" : ""}`, "data-proposal": p.id },
+      rationale && h("p", { class: "ai-badge" }, icon("spark"), "Suggested by AI"),
       h("p", { class: "proposal-label" }, p.label),
-      h("ul", { class: "preview", "aria-label": "Changes this will make" }, preview),
+      h("ul", { class: "change-preview", "aria-label": "Changes this will make" }, preview),
       rationale && h("p", { class: "ai-text" }, rationale),
+      staleNote
+        ? h("p", { class: "small leg-warn" }, staleNote)
+        : confirming
+          ? h(
+              "div",
+              { class: "row-actions", role: "group", "aria-label": "Confirm change" },
+              h("span", { class: "small" }, "Apply this for everyone on the trip?"),
+              h("button", { class: "btn btn-primary btn-sm", type: "button", "data-confirm": "yes", onclick: apply }, "Confirm change"),
+              h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.confirming = null; renderCopilot(); } }, "Cancel"),
+            )
+          : h("button", { class: "btn btn-primary btn-sm", type: "button", "data-apply": p.id, onclick: () => { S.confirming = key; renderCopilot(); } }, "Apply this change…"),
+    );
+  }
+
+  function aiSection(d) {
+    const cfg = ctx.config.ai;
+    const head = h("h3", {}, "Ask about this day ", h("span", { class: "tag tag-ai" }, cfg.configured ? "AI" : "Unavailable"));
+    if (!cfg.configured) {
+      return h("section", { class: "co-section" }, head, h("p", { class: "muted small" }, "AI answers aren't available on this server. The schedule check above works without it, and so does editing."));
+    }
+    const c = convo(d.id);
+    const pending = S.aiPending?.dayId === d.id ? S.aiPending : null;
+    const busy = Boolean(S.aiPending);
+    const input = h("textarea", {
+      class: "co-input",
+      name: "question",
+      rows: 2,
+      maxlength: 500,
+      placeholder: "Ask about this day, e.g. “Is this morning too rushed?”",
+      "aria-label": `Ask the copilot about Day ${S.trip.days.indexOf(d) + 1}`,
+      disabled: busy,
+    });
+    input.value = S.aiDraft;
+    input.addEventListener("input", () => (S.aiDraft = input.value));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    const form = h(
+      "form",
+      { class: "co-ask" },
+      input,
+      h("div", { class: "co-ask-row" }, h("span", { class: "tiny muted" }, "Only this day’s plan is sent to the AI. It can’t change anything."), h("button", { class: "btn btn-dark btn-sm", type: "submit", disabled: busy }, "Ask")),
+    );
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const q = input.value.trim();
+      if (q) askAi(d, q);
+    });
+
+    return h(
+      "section",
+      { class: "co-section co-ai" },
+      head,
       h(
-        "button",
-        {
-          class: "btn btn-primary btn-sm",
-          type: "button",
-          onclick: async (e) => {
-            e.currentTarget.disabled = true;
-            await act(api(`${base}/proposals/apply`, { method: "POST", body: { dayId: d.id, proposalId: p.id } }))
-              .then(() => toast("Change applied."))
-              .catch(() => {});
-          },
-        },
-        "Apply this change",
+        "div",
+        { class: "row-actions" },
+        h("button", { class: "btn btn-dark btn-sm", type: "button", disabled: busy, "data-ai": "review", onclick: () => askAi(d, "") }, icon("spark"), "Review this day"),
+        c.turns.length > 0 && h("button", { class: "btn btn-ghost btn-sm", type: "button", disabled: busy, onclick: () => { c.turns = []; renderCopilot(); } }, "Clear conversation"),
+      ),
+      c.turns.length === 0 && !pending && h("div", { class: "co-examples" }, EXAMPLES.map((q) => h("button", { class: "chip chip-soft", type: "button", disabled: busy, onclick: () => askAi(d, q) }, q))),
+      h("ol", { class: "co-log", "aria-live": "polite" }, c.turns.map((t) => turnView(d, t, c))),
+      pending &&
+        h(
+          "div",
+          { class: "co-pending", role: "status" },
+          h("span", { class: "spinner", "aria-hidden": "true" }),
+          h("span", {}, pending.question ? "Thinking about your question…" : "Reviewing this day…"),
+          h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-ai": "cancel", onclick: () => pending.controller.abort() }, "Cancel"),
+        ),
+      form,
+    );
+  }
+
+  function turnView(d, t, c) {
+    const q = h("p", { class: "co-q" }, t.question || "Review this day");
+    if (t.error) {
+      return h(
+        "li",
+        { class: "co-turn" },
+        q,
+        h(
+          "div",
+          { class: "co-err", role: "alert" },
+          h("p", { class: "form-error small" }, t.error),
+          t.retry && h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-ai": "retry", disabled: Boolean(S.aiPending), onclick: () => { c.turns.splice(c.turns.indexOf(t), 1); askAi(d, t.question); } }, "Try again"),
+        ),
+      );
+    }
+    const r = t.res;
+    const isStale = r.fingerprint !== d.fingerprint;
+    const byId = (id) => d.activities.find((a) => a.id === id);
+    const issueById = (id) => d.analysis.issues.find((i) => i.id === id);
+    const proposalById = (id) => d.analysis.proposals.find((p) => p.id === id);
+    return h(
+      "li",
+      { class: `co-turn${isStale ? " ai-stale" : ""}`, "data-stale": String(isStale) },
+      q,
+      h(
+        "div",
+        { class: "ai-card" },
+        isStale && h("p", { class: "small leg-warn", role: "status" }, "The plan has changed since this answer. It may be out of date; ask again for a fresh one."),
+        h("p", { class: "ai-label tiny" }, icon("spark"), "AI interpretation"),
+        h("p", { class: "ai-summary", lang: r.lang === "zh" ? "zh" : "en" }, r.answer.summary),
+        r.answer.activities.length > 0 &&
+          h(
+            "ul",
+            { class: "co-refs", "aria-label": "Stops this answer refers to" },
+            r.answer.activities.map((a) => {
+              const act = byId(a.activityId);
+              return h(
+                "li",
+                {},
+                act
+                  ? h("button", { class: "linklike small", type: "button", onclick: () => { select(act.id, { scroll: true }); if (isPhone()) setTab("plan"); } }, act.title, act.startMin !== null ? ` (${hhmm(act.startMin)})` : "")
+                  : h("span", { class: "small muted" }, "A stop that's no longer in the plan"),
+                h("span", { class: "small" }, ` ${a.note}`),
+              );
+            }),
+          ),
+        r.answer.issues.map((i) => {
+          const issue = issueById(i.issueId);
+          return h("div", { class: "co-issue" }, issue && h("p", { class: "small issue-msg" }, issue.message), h("p", { class: "ai-text" }, i.explanation));
+        }),
+        r.answer.recommendations.map((rec) => {
+          const p = proposalById(rec.proposalId);
+          if (!p) return h("p", { class: "small muted" }, "A suggested fix no longer applies to the current plan.");
+          return proposalCard(d, p, { rationale: rec.rationale, basedOn: r.fingerprint, keyPrefix: "ai", staleNote: isStale ? "Ask again before applying: the plan changed after this suggestion." : null });
+        }),
+        r.answer.caveats.length > 0 && h("ul", { class: "small muted" }, r.answer.caveats.map((x) => h("li", {}, x))),
+        h("p", { class: "tiny muted" }, `Schedule facts: ${t.facts}. Interpretation by ${r.model}${r.cached ? " (same plan and question as before, so not asked again)" : ""}. AI can be wrong; check before applying.`),
       ),
     );
   }
 
-  function aiSection(d, ai, aiStale) {
-    const cfg = ctx.config.ai;
-    const head = h("h3", {}, "AI explanation ", h("span", { class: "tag tag-ai" }, cfg.configured ? `AI · ${cfg.model}` : "Not configured"));
-    if (!cfg.configured) {
-      return h(
-        "section",
-        { class: "co-section" },
-        head,
-        h("p", { class: "muted small" }, "AI suggestions aren't available because no AI provider is configured on this server (ANTHROPIC_API_KEY). The schedule check above is rule-based and works without it."),
-      );
-    }
-    const ask = h(
-      "button",
-      { class: "btn btn-dark btn-sm", type: "button", disabled: S.aiLoading || !d.analysis.issues.length, onclick: () => askAi(d) },
-      icon("spark"),
-      S.aiLoading ? "Thinking…" : ai ? "Ask again" : "Explain and recommend",
-    );
-    return h(
-      "section",
-      { class: "co-section" },
-      head,
-      !d.analysis.issues.length && h("p", { class: "muted small" }, "Nothing to explain: the rule-based check found no problems on this day."),
-      d.analysis.issues.length > 0 && !ai && h("p", { class: "muted small" }, "Ask the AI to explain these conflicts and recommend which option fits best. It only sees this day's plan and the routes Google returned, and it can't change anything: you choose what to apply."),
-      ai?.error && h("p", { class: "form-error small" }, ai.error),
-      ai?.note && h("p", { class: "muted small" }, ai.note),
-      ai?.answer &&
-        h(
-          "div",
-          { class: `ai-card${aiStale ? " ai-stale" : ""}` },
-          aiStale && h("p", { class: "small leg-warn" }, "The plan has changed since this was written. Ask again for an up-to-date answer."),
-          h("p", {}, ai.answer.summary),
-          ai.answer.caveats.length > 0 && h("ul", { class: "small muted" }, ai.answer.caveats.map((c) => h("li", {}, c))),
-          h("p", { class: "tiny muted" }, `Generated by ${ai.model}${ai.cached ? " (same plan as last time, so not asked again)" : ""}. AI can be wrong: check before applying.`),
-        ),
-      ask,
-    );
-  }
-
-  async function askAi(d) {
-    S.aiLoading = true;
+  async function askAi(d, question) {
+    if (S.aiPending) return;
+    const c = convo(d.id);
+    const history = c.turns.filter((t) => t.res && t.res.fingerprint === d.fingerprint && t.question).slice(-4).map((t) => ({ q: t.question, a: t.res.answer.summary }));
+    const controller = new AbortController();
+    S.aiPending = { dayId: d.id, question, controller };
+    if (question) S.aiDraft = "";
     renderCopilot();
+    const facts = dayFacts(d);
     try {
-      const res = await api(`${base}/copilot`, { method: "POST", body: { dayId: d.id } });
-      S.ai.set(d.id, res);
-    } catch (err) {
-      S.ai.set(d.id, { rev: S.trip.rev, error: err.message });
+      const res = await fetch(`${base}/copilot`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dayId: d.id, question, history, lang: pageLang() }),
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) return ctx.signOut();
+      if (!res.ok) c.turns.push({ question, error: data.error ?? "The copilot couldn't answer just now.", retry: data.retry !== false });
+      else c.turns.push({ question, res: data, facts });
+    } catch {
+      if (controller.signal.aborted) {
+        if (question) S.aiDraft = question; // give the question back to edit
+      } else c.turns.push({ question, error: "You seem to be offline. Try again when you're connected.", retry: true });
     }
-    S.aiLoading = false;
+    if (c.turns.length > 12) c.turns.splice(0, c.turns.length - 12);
+    S.aiPending = null;
+    S.aiScroll = true;
     renderCopilot();
   }
 
@@ -1999,6 +2162,8 @@ export async function openEditor(root, tripId, ctx) {
 
   return () => {
     clearInterval(prune);
+    S.aiPending?.controller.abort();
+    voice.destroy();
     events.close();
     map.destroy();
     S.editing = null;

@@ -24,9 +24,11 @@ Small groups, roughly two to six people, planning a short trip together, who car
 
 Everyone invited to a trip edits the same itinerary, which lives on the server. When someone adds a stop, moves lunch to one o'clock or changes how long the museum takes, the change is saved and then pushed to every open editor, appearing within about a second. An edit made against an outdated version is refused instead of silently overwriting someone. Trips are private: only the owner and people they invite through a revocable link can see or change them.
 
+Two people on a trip can also talk it through in an audio-only voice call from the editor's top bar, while both keep editing the same plan. The call is between them: browser to browser over WebRTC, never recorded, transcribed or sent to the AI, and never part of the itinerary. One call has two people. Reliable calling across different networks needs a TURN relay configured on the server ([ADR 0004](docs/decisions/0004-webrtc-voice-calls.md)).
+
 ## The planned role of AI
 
-The AI copilot helps; it doesn't decide. Overlaps and too-short gaps are calculated by plain arithmetic, from travel times Google's Routes API actually returned. The AI's job is to explain a conflict and recommend among the exact fixes the app already worked out. It can't change the plan: every fix is previewed, and nothing is applied until someone accepts it. Without a configured AI key, the rule-based checks still work and the app says AI is unavailable.
+The AI copilot helps; it doesn't decide. Overlaps and too-short gaps are calculated by plain arithmetic, from travel times Google's Routes API actually returned. The AI's job is to review a day, answer questions about it ("Is this morning too rushed?", in English or Chinese), explain conflicts and recommend among the exact fixes the app already worked out, pointing at the stops it means. It can't change the plan: every fix is previewed with its exact edits, needs a confirmation, and is refused if anyone has changed that day since the answer. Numbers shown come from the app's own calculation; the AI's words are labelled as interpretation. Each person's conversation stays in their own editor. Without a configured AI key, the rule-based checks still work and the app says AI is unavailable.
 
 ## Why this interaction should be meaningful
 
@@ -46,7 +48,7 @@ In Virtual Gym, other people were visible but nothing they did touched your sess
 
 ## What it deliberately doesn't do
 
-No booking, payments, reviews, feeds, chat, AI-generated itineraries or multi-day route optimisation. Each would move decisions away from the travellers or the focus away from the shared plan.
+No booking, payments, reviews, feeds, text chat or comments, AI-generated itineraries or multi-day route optimisation. Each would move decisions away from the travellers or the focus away from the shared plan. The one exception to "no chat" is the two-person voice call above: talking while both look at the same map and timeline keeps the plan at the centre, where a text channel would compete with it. No video, group calls or call recording.
 
 ## Sources
 

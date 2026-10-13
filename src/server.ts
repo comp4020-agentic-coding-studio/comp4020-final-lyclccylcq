@@ -3,20 +3,25 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join } from "node:path";
 import { aiProvider } from "./ai.ts";
 import { clearCookie, COOKIE, createAuth, readCookie, sessionCookie, type User } from "./auth.ts";
-import { createCopilot } from "./copilot.ts";
+import { createCalls, iceConfigured, iceServersFor } from "./calls.ts";
+import { cleanHistory, createCopilot, describeAiError, detectLang, LIMITS } from "./copilot.ts";
 import { openDb } from "./db.ts";
 import { HttpError } from "./errors.ts";
 import { createDiscovery } from "./discovery.ts";
 import { computeRouteOptions, DEMO_PLACES, googleConfigured, mapsKeyWarnings, placeDetails, searchPlaces } from "./google.ts";
 import { createItineraryStore } from "./itineraries.ts";
 import { renderMarkdown } from "./markdown.ts";
+import { createLimiter } from "./ratelimit.ts";
 import { createHub } from "./realtime.ts";
 import { zonedTimeToUtc } from "./schedule.ts";
 import { createTripStore, type TripSnapshot } from "./trips.ts";
 
 const db = openDb();
 const auth = createAuth(db);
-const hub = createHub();
+const hub = createHub({
+  onJoin: (tripId, userId, session) => calls.joined(tripId, userId, session),
+  onLeave: (tripId, userId, session) => calls.left(tripId, userId, session),
+});
 const trips = createTripStore(db, Date.now, (tripId) => {
   let snap: TripSnapshot | null = null;
   try {
@@ -25,11 +30,40 @@ const trips = createTripStore(db, Date.now, (tripId) => {
     snap = null; // the trip was deleted
   }
   hub.publish(tripId, snap, (userId) => trips.roleOf(tripId, userId) !== null);
+  calls.checkTrip(tripId);
 });
+const isMember = (tripId: string, userId: string): boolean => {
+  try {
+    return trips.roleOf(tripId, userId) !== null;
+  } catch {
+    return false;
+  }
+};
+// Voice-call signalling (ADR 0004): targeted events on the SSE hub, state in memory only.
+const calls = createCalls({
+  send: (tripId, userId, session, data) => hub.sendTo(tripId, userId, session, "call", data),
+  hasSession: hub.hasSession,
+  isOnline: hub.isOnline,
+  isMember,
+  nameOf: (tripId, userId) => {
+    try {
+      return trips.snapshot(tripId).members.find((m) => m.id === userId)?.displayName ?? null;
+    } catch {
+      return null;
+    }
+  },
+});
+const envInt = (name: string, fallback: number) => (Number(process.env[name]) > 0 ? Math.floor(Number(process.env[name])) : fallback);
 const itineraries = createItineraryStore(db);
 itineraries.seed();
 const discovery = createDiscovery({ itineraries, trips });
-const copilot = createCopilot(aiProvider());
+const copilot = createCopilot(aiProvider(), {
+  perUserPerMinute: envInt("WAYLINE_AI_PER_MINUTE", 6),
+  perUserPerDay: envInt("WAYLINE_AI_PER_USER_DAY", 60),
+  globalPerDay: envInt("WAYLINE_AI_DAILY_LIMIT", 500),
+});
+const callLimit = createLimiter(60, 60_000); // invites, answers and hang-ups per person per minute
+const iceLimit = createLimiter(20, 60_000);
 const port = Number(process.env.PORT ?? 8080);
 
 const TYPES: Record<string, string> = {
@@ -135,6 +169,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       places: googleConfigured() ? "google" : "demo",
       routes: googleConfigured(),
       ai: { configured: copilot.configured, model: copilot.model },
+      calls: { enabled: true, relay: iceConfigured().turn !== null },
     });
   }
 
@@ -144,6 +179,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     return json(res, path.endsWith("signup") ? 201 : 200, { user }, { "set-cookie": sessionCookie(token, isSecure(req)) });
   }
   if (method === "POST" && path === "/api/auth/logout") {
+    const leaving = auth.userForToken(readCookie(req.headers.cookie, COOKIE));
+    if (leaving) calls.endFor(leaving.id, "signed-out");
     auth.logout(readCookie(req.headers.cookie, COOKIE));
     return json(res, 200, { ok: true }, { "set-cookie": clearCookie(isSecure(req)) });
   }
@@ -246,30 +283,65 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
 
   if (method === "POST" && rest === "/proposals/apply") {
     const input = await body(req);
-    return json(res, 200, trips.applyProposal(user.id, tripId, input.dayId, input.proposalId));
+    return json(res, 200, trips.applyProposal(user.id, tripId, input.dayId, input.proposalId, input.basedOn));
   }
 
+  // Review a day or answer a question about it. Works whether or not the
+  // day has issues; the deterministic analysis is returned alongside so the
+  // numbers shown come from the server, not the model.
   if (method === "POST" && rest === "/copilot") {
     const input = await body(req);
     const snap = trips.view(user.id, tripId);
     const day = snap.days.find((d) => d.id === input.dayId);
     if (!day) throw new HttpError(404, "That day isn't part of this trip.");
     if (!copilot.configured) {
-      return json(res, 503, {
-        configured: false,
-        error: "AI suggestions need an AI provider key on the server (ANTHROPIC_API_KEY). The schedule checks above are rule-based and work without it.",
-      });
+      return json(res, 503, { configured: false, error: "AI answers aren't available on this server. The schedule check works without it." });
     }
-    if (day.analysis.issues.length === 0) {
-      return json(res, 200, { configured: true, rev: snap.rev, model: copilot.model, answer: null, note: "No scheduling problems to explain on this day." });
-    }
+    if (input.question !== undefined && typeof input.question !== "string") throw new HttpError(400, "Send the question as text.");
+    const question = String(input.question ?? "").trim();
+    if (question.length > LIMITS.question) throw new HttpError(400, `Keep the question under ${LIMITS.question} characters.`);
+    const lang = detectLang(question, input.lang);
+    const ac = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) ac.abort();
+    });
     try {
-      const { answer, cached } = await copilot.ask(user.id, day, snap);
-      return json(res, 200, { configured: true, rev: snap.rev, model: copilot.model, cached, answer });
+      const r = await copilot.ask({ userId: user.id, day, trip: snap, question, history: cleanHistory(input.history), lang, signal: ac.signal });
+      return json(res, 200, { configured: true, rev: snap.rev, dayId: day.id, fingerprint: r.fingerprint, model: copilot.model, cached: r.cached, lang: r.lang, question, answer: r.answer });
     } catch (err) {
-      const status = (err as { status?: number }).status ?? 502;
-      return json(res, status, { configured: true, error: err instanceof Error ? err.message : "The copilot failed." });
+      const status = (err as { status?: number }).status;
+      if (status === 429 || status === 503) return json(res, status, { configured: true, error: (err as Error).message, retry: status === 429 });
+      const d = describeAiError(err);
+      if (d.status !== 499) console.warn("copilot:", err instanceof Error ? err.message : err);
+      return json(res, d.status, { configured: true, error: d.error, retry: d.retry });
     }
+  }
+
+  // --- voice calls (signalling only; see ADR 0004) ---
+
+  if (method === "GET" && rest === "/call") {
+    trips.requireMember(tripId, user.id);
+    return json(res, 200, { call: calls.stateFor(tripId, user.id) });
+  }
+  if (method === "POST" && rest === "/call/ice") {
+    trips.requireMember(tripId, user.id);
+    iceLimit(user.id);
+    return json(res, 200, await iceServersFor(user.id), { "cache-control": "no-store" });
+  }
+  if (method === "POST" && rest === "/call") {
+    trips.requireMember(tripId, user.id);
+    callLimit(user.id);
+    return json(res, 201, calls.invite(tripId, user.id, await body(req)));
+  }
+  r = rest.match(/^\/call\/([0-9a-f-]{36})\/(accept|decline|hangup|signal)$/);
+  if (method === "POST" && r) {
+    trips.requireMember(tripId, user.id);
+    const input = await body(req);
+    if (r[2] !== "signal") callLimit(user.id);
+    if (r[2] === "accept") return json(res, 200, calls.accept(tripId, user.id, r[1], input));
+    if (r[2] === "decline") return json(res, 200, calls.decline(tripId, user.id, r[1]));
+    if (r[2] === "hangup") return json(res, 200, calls.hangup(tripId, user.id, r[1], input));
+    return json(res, 200, calls.signal(tripId, user.id, r[1], input));
   }
 
   json(res, 404, { error: "No such endpoint." });
@@ -362,7 +434,7 @@ server.listen(port, "0.0.0.0", () => {
   // which integrations are on; never the key values
   const on = (v: string | undefined) => (v ? "set" : "missing");
   console.log(
-    `Google Maps: browser key ${on(process.env.GOOGLE_MAPS_BROWSER_KEY)}, server key ${on(process.env.GOOGLE_MAPS_SERVER_KEY)}, map id ${process.env.GOOGLE_MAPS_MAP_ID ? "set" : "DEMO_MAP_ID"}; AI ${on(process.env.ANTHROPIC_API_KEY)}`,
+    `Google Maps: browser key ${on(process.env.GOOGLE_MAPS_BROWSER_KEY)}, server key ${on(process.env.GOOGLE_MAPS_SERVER_KEY)}, map id ${process.env.GOOGLE_MAPS_MAP_ID ? "set" : "DEMO_MAP_ID"}; AI ${on(process.env.ANTHROPIC_API_KEY)}; calls: TURN ${iceConfigured().turn ?? "missing"}, STUN ${iceConfigured().stun ? "set" : "missing"}`,
   );
   for (const w of mapsKeyWarnings()) console.warn(`Warning: ${w}`);
 });
@@ -370,6 +442,7 @@ server.listen(port, "0.0.0.0", () => {
 // Fly stops the machine when nobody's around; close streams and the database cleanly.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    calls.closeAll();
     hub.closeAll();
     server.close();
     db.close();

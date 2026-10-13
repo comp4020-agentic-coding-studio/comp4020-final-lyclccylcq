@@ -29,9 +29,40 @@ export type Page = {
   screenshot(path: string): Promise<void>;
   // the browser's location permission for this page's origin
   geolocation(origin: string, at: { lat: number; lng: number } | "denied"): Promise<void>;
+  // the browser's microphone permission for this page's origin
+  microphone(origin: string, setting: "granted" | "denied"): Promise<void>;
 };
 
-export async function launch() {
+// A mono 16-bit WAV of a sine tone, for Chrome's fake microphone: each
+// browser in a call test "says" a different frequency, so the other can
+// check it received that exact tone, not just any sound.
+// Long enough for a whole test file: Chrome 154 on macOS plays the fake
+// capture file only with %noloop (looping it gives silence), so it must not
+// run out.
+export function toneWav(hz: number, seconds = 180, rate = 48_000): string {
+  const n = seconds * rate;
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write("RIFF", 0);
+  buf.writeUInt32LE(36 + n * 2, 4);
+  buf.write("WAVEfmt ", 8);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36);
+  buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * hz * i) / rate) * 0.6 * 32767), 44 + i * 2);
+  const path = join(mkdtempSync(join(tmpdir(), "wayline-tone-")), `tone-${hz}.wav`);
+  writeFileSync(path, buf);
+  return path;
+}
+
+// media: start Chrome with a fake microphone playing this WAV (and the
+// permission prompt answered "allow"), or "deny" to answer it "block".
+export async function launch(opts: { media?: { wav: string } | "deny" } = {}) {
   if (!chromePath) return null;
   const port = await new Promise<number>((resolve) => {
     const srv = createNetServer();
@@ -42,7 +73,17 @@ export async function launch() {
   });
   const chrome: ChildProcess = spawn(
     chromePath,
-    ["--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", `--remote-debugging-port=${port}`, `--user-data-dir=${mkdtempSync(join(tmpdir(), "wayline-chrome-"))}`, "about:blank"],
+    [
+      "--headless=new",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--no-first-run",
+      ...(opts.media ? ["--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"] : []),
+      ...(opts.media && opts.media !== "deny" ? ["--use-fake-ui-for-media-stream", `--use-file-for-fake-audio-capture=${opts.media.wav}%noloop`] : []),
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${mkdtempSync(join(tmpdir(), "wayline-chrome-"))}`,
+      "about:blank",
+    ],
     { stdio: "ignore" },
   );
   let wsUrl = "";
@@ -106,6 +147,9 @@ export async function launch() {
       async geolocation(origin, at) {
         await send("Browser.setPermission", { permission: { name: "geolocation" }, setting: at === "denied" ? "denied" : "granted", origin, browserContextId });
         if (at !== "denied") await s("Emulation.setGeolocationOverride", { latitude: at.lat, longitude: at.lng, accuracy: 50 });
+      },
+      async microphone(origin, setting) {
+        await send("Browser.setPermission", { permission: { name: "microphone" }, setting, origin, browserContextId });
       },
       async screenshot(path) {
         const { data } = await s("Page.captureScreenshot", { format: "png" });

@@ -18,7 +18,14 @@ type Conn = { userId: string; displayName: string; session: string | null; view:
 const VIEW_TTL_MS = 60_000;
 const VIEW_MIN_GAP_MS = 150;
 
-export function createHub() {
+// Voice-call signalling rides on these streams as targeted `call` events
+// (src/calls.ts): sent to one person's tabs, never to the room, never saved.
+export type HubHooks = {
+  onJoin?: (tripId: string, userId: string, session: string | null) => void;
+  onLeave?: (tripId: string, userId: string, session: string | null) => void;
+};
+
+export function createHub(hooks: HubHooks = {}) {
   const rooms = new Map<string, Set<Conn>>();
 
   const write = (c: Conn, event: string, data: unknown) => {
@@ -72,12 +79,14 @@ export function createHub() {
       // where the others are looking right now, so a (re)joining tab sees them at once
       for (const o of rooms.get(tripId) ?? []) if (o !== conn && o.view && Date.now() - o.view.at < VIEW_TTL_MS) write(conn, "view", viewEvent(o));
       announcePresence(tripId);
+      hooks.onJoin?.(tripId, user.id, session);
       res.on("close", () => {
         const room = rooms.get(tripId);
-        room?.delete(conn);
+        if (!room?.delete(conn)) return; // already removed by publish()
         if (conn.view) toOthers(tripId, conn, "view-gone", { session: conn.session });
-        if (room && room.size === 0) rooms.delete(tripId);
+        if (room.size === 0) rooms.delete(tripId);
         else announcePresence(tripId);
+        hooks.onLeave?.(tripId, conn.userId, conn.session);
       });
     },
 
@@ -90,8 +99,9 @@ export function createHub() {
       for (const c of [...room]) {
         if (snapshot === null || !isMember(c.userId)) {
           write(c, "revoked", { reason: snapshot === null ? "deleted" : "removed" });
-          c.res.end();
           room.delete(c);
+          c.res.end();
+          hooks.onLeave?.(tripId, c.userId, c.session);
         } else {
           c.res.write(`event: snapshot\ndata: ${payload}\n\n`);
         }
@@ -100,6 +110,26 @@ export function createHub() {
     },
 
     presence,
+
+    // Sends an event to one person's open tabs on a trip (one tab when
+    // session is given). Returns how many streams it reached.
+    sendTo(tripId: string, userId: string, session: string | null, event: string, data: unknown): number {
+      let n = 0;
+      for (const c of rooms.get(tripId) ?? []) {
+        if (c.userId !== userId || (session !== null && c.session !== session)) continue;
+        write(c, event, data);
+        n++;
+      }
+      return n;
+    },
+
+    hasSession(tripId: string, userId: string, session: string): boolean {
+      return [...(rooms.get(tripId) ?? [])].some((c) => c.userId === userId && c.session === session);
+    },
+
+    isOnline(tripId: string, userId: string): boolean {
+      return [...(rooms.get(tripId) ?? [])].some((c) => c.userId === userId && c.session !== null);
+    },
 
     // A tab's map moved: remember it on that tab's stream and tell the others.
     // Updates closer together than VIEW_MIN_GAP_MS are dropped (the browser

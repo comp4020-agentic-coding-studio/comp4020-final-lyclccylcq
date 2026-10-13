@@ -411,13 +411,48 @@ textarea { resize: vertical; }
 .proposal { width: 100%; background: var(--surface); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; box-shadow: var(--shadow); }
 .proposal-ai { outline: 2px solid var(--violet); }
 .proposal-label { font-weight: 700; font-size: 14px; }
-.preview { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
-.preview s { color: var(--muted); }
+.change-preview { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
+.change-preview s { color: var(--muted); }
 .ai-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 800; color: var(--violet); }
 .ai-text { display: flex; gap: 6px; font-size: 13px; color: #3e2d99; background: #f3efff; border-radius: 8px; padding: 6px 8px; }
 .ai-text svg { margin-top: 2px; color: var(--violet); }
 .ai-card { background: #f6f3ff; border: 1px solid #ddd3ff; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .ai-stale { opacity: .75; }
+.co-day { font-size: 13px; color: var(--ink-2); background: var(--paper-2); border-radius: 8px; padding: 6px 10px; margin-top: 6px; }
+.co-facts { font-variant-numeric: tabular-nums; }
+.co-examples { display: flex; flex-wrap: wrap; gap: 6px; }
+.co-examples .chip { border: 0; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; padding: 4px 10px; }
+.co-examples .chip:disabled { opacity: .5; cursor: default; }
+.co-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.co-turn { display: flex; flex-direction: column; gap: 6px; }
+.co-q { align-self: flex-end; max-width: 90%; background: var(--ink); color: #fff; border-radius: 12px 12px 2px 12px; padding: 6px 10px; font-size: 13px; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-label { display: inline-flex; align-items: center; gap: 4px; font-weight: 800; color: var(--violet); text-transform: uppercase; letter-spacing: .04em; }
+.ai-summary { font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.co-refs { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.co-issue { display: flex; flex-direction: column; gap: 4px; }
+.co-err { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; background: var(--danger-bg); border-radius: 10px; padding: 8px 10px; }
+.co-pending { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.co-ask { display: flex; flex-direction: column; gap: 6px; background: var(--surface); padding: 8px 0 4px; border-top: 1px solid var(--line); }
+.co-input { width: 100%; resize: vertical; min-height: 52px; border: 1px solid var(--line-2); border-radius: 10px; padding: 8px 10px; font-size: 14px; background: var(--surface); }
+.co-ask-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--violet); animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* --- voice call control (trip bar) --- */
+.call { display: flex; align-items: center; gap: 6px; min-width: 0; flex: none; }
+.call-status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--ink-2); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.call-error { color: var(--danger); white-space: normal; max-width: 280px; }
+.call-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex: none; }
+.call-connected .call-dot { background: var(--leaf); box-shadow: 0 0 0 3px #e3f1e9; }
+.call-reconnecting .call-dot { background: var(--warn); animation: call-pulse 1s ease-in-out infinite; }
+.call-incoming { background: #e3f1e9; border-radius: 999px; padding: 3px 4px 3px 8px; }
+.call-ico { font-size: 15px; line-height: 1; }
+.btn-hang { background: var(--danger); color: #fff; }
+.btn-hang:hover:not(:disabled) { background: #a32b24; }
+.call-pick { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+.call-pick .btn { justify-content: flex-start; gap: 10px; }
+.call-audio { display: none; }
+@keyframes call-pulse { 50% { opacity: .35; } }
 
 .mobile-tabs { display: none; }
 
@@ -484,6 +519,14 @@ textarea { resize: vertical; }
   .dash { padding-top: 28px; }
   .row-2 { grid-template-columns: 1fr; }
   .add-form .row-2 { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 899px) {
+  /* on phones the call control drops under the bar so the map and timeline keep their space */
+  .trip-bar { flex-wrap: wrap; height: auto; min-height: var(--bar-h); row-gap: 0; }
+  .trip-bar .call:not(:empty) { order: 10; flex-basis: 100%; justify-content: flex-end; padding: 0 0 6px; }
+  .trip-bar .call[data-phase=idle], .trip-bar .call[data-phase=ended]:not(:has(.call-status)) { order: 0; flex-basis: auto; padding: 0; }
+  .call-status { max-width: 100%; }
+  .workspace[data-tab=copilot] .pane-copilot { overflow: auto; }
 }
 @media (max-width: 420px) {
   .conn { font-size: 0; gap: 0; }

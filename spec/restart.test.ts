@@ -39,7 +39,7 @@ describe("persistence and configuration", () => {
       expect(all).not.toContain("server-side-maps-secret-value");
       expect(all).not.toContain("server-side-ai-secret-value");
       const config = JSON.parse(pages[0]);
-      expect(Object.keys(config).sort()).toEqual(["ai", "mapId", "mapsBrowserKey", "places", "routes"]);
+      expect(Object.keys(config).sort()).toEqual(["ai", "calls", "mapId", "mapsBrowserKey", "places", "routes"]);
       expect(config).toMatchObject({ mapsBrowserKey: "browser-key-meant-to-be-public", places: "google", routes: true, ai: { configured: true } });
     } finally {
       await app.stop();

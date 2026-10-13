@@ -131,6 +131,18 @@ function renderPrivacy() {
         {},
         "While someone else has the same trip open, the people on that trip can see roughly where your trip map is looking (its centre and zoom), shown as your initials on their map. This is the map view only, never your device's location. It goes only to people on that trip, isn't stored, and disappears when you close the trip or stop moving the map for a minute.",
       ),
+      h("h2", {}, "The AI copilot"),
+      h(
+        "p",
+        {},
+        "Only when you press “Review this day” or ask a question, Wayline sends that one day of the trip to its AI provider (Anthropic): the trip's destination and that day's date, each stop's title, type, times and notes, the travel times and transit lines Google returned between stops, and the schedule problems and fixes Wayline calculated. Your question and up to four of your earlier questions and answers about the same day go with it. Your name, account, other days, the trip's title and members, your location and your map view are not sent. Nothing is sent when the map moves, the plan updates or the page opens. Answers are kept in the server's memory for a while so the same question about the same plan isn't asked twice, and your conversation stays in your browser tab only; Wayline doesn't save it. Notes you write are shared with the AI provider when you ask, so don't put anything in a note you wouldn't want sent.",
+      ),
+      h("h2", {}, "Voice calls"),
+      h(
+        "p",
+        {},
+        "You can make an audio-only call to someone else on the same trip. Your browser asks for the microphone only when you press Call or Accept. The audio goes directly between the two browsers, or through a relay server when a direct connection isn't possible; it is encrypted by the browser (WebRTC), and it never passes through Wayline's server, is never recorded or transcribed, and is never sent to the AI. To connect the call, Wayline's server passes short technical messages between the two browsers (connection details including network addresses); these are kept in memory only while the call is being set up or is running, and are never saved. If a relay is used, your network address and the encrypted audio pass through the relay provider (Cloudflare) while the call lasts.",
+      ),
       h("h2", {}, "Google Maps Platform"),
       h(
         "p",
