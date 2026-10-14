@@ -54,11 +54,17 @@ in memory there.
 1. *Cloudflare Realtime TURN (proposed).* Managed, anycast, UDP/TCP/TLS on
    443. The server keeps a TURN key id and API token and asks Cloudflare for
    short-lived credentials per call; the browser only ever gets those.
-   Billed at $0.05 per GB relayed out to clients (no charge for STUN or
-   direct calls); TURN is free only alongside the SFU, which Wayline doesn't
-   use. Opus voice is roughly 40–60 kbit/s each way, so a relayed hour is
-   about 20–30 MB per direction: on the order of $0.003 per relayed
-   call-hour. Most calls connect directly and cost nothing.
+   Billed at $0.05 per GB sent from Cloudflare to clients, after a free
+   allowance of 1,000 GB a month shared with the Realtime SFU (Cloudflare
+   Realtime pricing page, last updated 2026-09-22, checked 2026-10-14);
+   STUN and direct calls cost nothing. Opus voice is roughly 40–60 kbit/s
+   each way, so a relayed call-hour is about 20–30 MB per direction, far
+   inside the free allowance at this app's scale; past it, about $0.003 per
+   relayed call-hour. Cloudflare documents no spending cap for TURN, so the
+   controls are on Wayline's side: credentials only for signed-in trip
+   members, `POST /call/ice` rate-limited per user, two participants per
+   call, a 4 h call limit and a 5 h credential TTL, so credentials outlast
+   any call (Cloudflare allows up to 48 h).
 2. *Self-hosted coturn on a separate small VM (supported).* Same short-lived
    credentials via the `use-auth-secret` HMAC scheme (`WAYLINE_TURN_URLS`,
    `WAYLINE_TURN_SECRET`). Needs a public IP, UDP and TLS ports, a
@@ -90,8 +96,8 @@ in memory there.
   stream comes back with the same tab id it gets a `resume` event (never a
   replay of old offers or candidates), and the caller restarts ICE. If media
   doesn't recover within 15 s, the call ends with "Call again".
-- ICE servers come from `POST /call/ice`: Cloudflare credentials (TTL 3 h),
-  coturn HMAC credentials, optional STUN-only URLs, or nothing (direct
+- ICE servers come from `POST /call/ice`: Cloudflare credentials (TTL 5 h),
+  coturn HMAC credentials (TTL 5 h), optional STUN-only URLs, or nothing (direct
   connections only).
 
 ## Rationale
@@ -141,3 +147,8 @@ that can't connect directly.
 
 - 2026-10-13: proposed and implemented locally; TURN service not yet
   approved or provisioned; not deployed.
+- 2026-10-13: deployed in commit 61fe60b (Fly release v25) without TURN or
+  an AI key configured; production calls are limited to direct connections.
+- 2026-10-14: TURN cost corrected against Cloudflare's current pricing page
+  (an earlier draft said TURN was free only alongside the SFU; it now has a
+  1,000 GB/month free allowance).

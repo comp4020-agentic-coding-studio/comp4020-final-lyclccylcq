@@ -452,6 +452,7 @@ textarea { resize: vertical; }
 .call-pick { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
 .call-pick .btn { justify-content: flex-start; gap: 10px; }
 .call-audio { display: none; }
+.call-diag { font-family: ui-monospace, monospace; color: var(--muted); white-space: nowrap; }
 @keyframes call-pulse { 50% { opacity: .35; } }
 
 .mobile-tabs { display: none; }

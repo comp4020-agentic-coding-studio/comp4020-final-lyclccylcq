@@ -263,7 +263,7 @@ describe("ICE servers", () => {
     const cfg = await iceServersFor("user-1", { WAYLINE_TURN_URLS: "turn:turn.example.org:3478?transport=udp,turns:turn.example.org:5349", WAYLINE_TURN_SECRET: "long-lived-shared-secret" }, 1_700_000_000_000);
     expect(cfg.relay).toBe(true);
     const t = cfg.iceServers[0];
-    expect(t.username).toBe(`${1_700_000_000 + 3 * 3600}:user-1`);
+    expect(t.username).toBe(`${1_700_000_000 + 5 * 3600}:user-1`);
     expect(t.credential).toMatch(/^[A-Za-z0-9+/]+=*$/);
     expect(JSON.stringify(cfg)).not.toContain("long-lived-shared-secret");
   });

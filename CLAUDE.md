@@ -274,6 +274,19 @@ contradict the README, stop and ask. Don't quietly change the product.
 
 - Start the app on a fresh `DATA_DIR` (`pnpm start`) and run `pnpm check`;
   both must be green. `pnpm check:evidence` too before a crit.
+- `pnpm check` assumes the optional-key-off path: several specs
+  (`spec/order.test.ts`, `spec/browser.test.ts`, the "forced relay without
+  TURN" cases in `spec/browser-call.test.ts`) test what the app does with
+  `GOOGLE_MAPS_BROWSER_KEY`/`GOOGLE_MAPS_SERVER_KEY`/`CLOUDFLARE_TURN_KEY_ID`/
+  `CLOUDFLARE_TURN_API_TOKEN` unset — demo places, the schematic map, "no TURN
+  relay is configured" — which is still a real README promise ("without a
+  key the matching feature switches off and the app says so"), not a
+  leftover from before Google Maps was wired up. A real `.env` with those
+  keys set makes the app actually call Google/Cloudflare, which breaks those
+  assertions. Run `pnpm check` with them cleared, e.g.
+  `GOOGLE_MAPS_BROWSER_KEY= GOOGLE_MAPS_SERVER_KEY= CLOUDFLARE_TURN_KEY_ID= CLOUDFLARE_TURN_API_TOKEN= pnpm start`
+  in one shell and `pnpm check` in another; keep the keys in `.env` for your
+  own manual testing of the real integrations.
 - For UI changes, look at it at 1920×1080 and 390×844 in a real browser.
   `spec/browser.test.ts` checks layout at both, keyboard reordering,
   persistence after reload, and two browsers seeing each other's changes.

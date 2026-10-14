@@ -273,3 +273,37 @@ describe.skipIf(!chromePath)("call recovery and tabs in real browsers", () => {
     await b2.waitFor(`!/another tab/.test(${callText})`, 5000);
   });
 });
+
+describe.skipIf(!chromePath)("forced relay without TURN", () => {
+  it("says no relay is configured instead of connecting directly or hanging", async () => {
+    const a = await alice!.newPage();
+    const b = await bob!.newPage();
+    await signUpIn(a, baseUrl, uniqueName("na"));
+    await signUpIn(b, baseUrl, uniqueName("nb"));
+    const trip = await sharedTrip(a, b);
+    await a.viewport(1920, 1080);
+    await a.goto(new URL(`/trips/${trip.id}?calldebug&relay=1`, baseUrl).href);
+    await a.waitFor(`document.querySelector('.conn-live')`, 10_000);
+    await open(b, trip.id);
+    await a.click("[data-call=start]");
+    await b.waitFor(`document.querySelector('[data-call=accept]')`, 8000);
+    await b.click("[data-call=accept]");
+    await a.waitFor(`/no TURN relay is configured/.test(${callText})`, 10_000);
+    await b.waitFor(`${phase} === 'ended'`, 5000);
+    expect(await a.eval<boolean>(`!document.querySelector('audio.call-audio')`)).toBe(true);
+  });
+
+  it("shows the selected route and media counters in debug mode", async () => {
+    const a = await alice!.newPage();
+    const b = await bob!.newPage();
+    await signUpIn(a, baseUrl, uniqueName("ga"));
+    await signUpIn(b, baseUrl, uniqueName("gb"));
+    const trip = await sharedTrip(a, b);
+    await open(a, trip.id);
+    await open(b, trip.id);
+    await connect(a, b);
+    await a.waitFor(`/host↔host · in [1-9]\\d* KB/.test(document.querySelector('[data-call=diag]')?.textContent ?? '')`, 8000);
+    expect(await a.eval<string>(`document.querySelector('[data-call=diag]').textContent`)).toMatch(/no TURN/);
+    await a.click("[data-call=hangup]");
+  });
+});

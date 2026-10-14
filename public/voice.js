@@ -101,12 +101,14 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
     peerStarting = false;
     if (!stream || destroyed || V.phase === "ended" || V.elsewhere) return;
     const forceRelay = debug && new URLSearchParams(location.search).get("relay") === "1";
+    if (forceRelay && !iceServers.some((s) => s.username)) return void hangup("no-relay");
     pc = new RTCPeerConnection({ iceServers, ...(forceRelay ? { iceTransportPolicy: "relay" } : {}) });
     for (const t of stream.getAudioTracks()) pc.addTrack(t, stream);
     pc.onicecandidate = ({ candidate }) => send({ kind: "candidate", candidate: candidate ? candidate.toJSON() : null });
     pc.ontrack = ({ streams, track }) => {
       if (!audio) {
-        audio = h("audio", { autoplay: true, class: "call-audio" });
+        audio = h("audio", { autoplay: true, playsinline: true, class: "call-audio" });
+        audio.setAttribute("playsinline", "");
         audio.dataset.testid = "remote-audio";
         document.body.append(audio);
       }
@@ -305,7 +307,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
   async function hangup(reason = "hangup") {
     const callId = V.callId;
     if (!callId || V.elsewhere) return;
-    finish(reason === "failed" ? "failed" : "left");
+    finish(reason === "failed" || reason === "no-relay" ? reason : "left");
     await post(url(callId, "hangup")).catch(() => {});
   }
 
@@ -344,6 +346,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
     "time-limit": "The call reached its time limit.",
     "server-restart": "The call ended because the server restarted.",
     error: "The call couldn't start.",
+    "no-relay": "Relay test: no TURN relay is configured on this server.",
     ended: "The call ended.",
   };
 
@@ -380,6 +383,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
         V.needsSound && h("button", { class: "btn btn-dark btn-sm", type: "button", "data-call": "sound", onclick: play }, "Turn on sound"),
         stream && h("button", { class: `btn btn-sm ${V.muted ? "btn-dark" : "btn-ghost"}`, type: "button", "aria-pressed": String(V.muted), "data-call": "mute", onclick: toggleMute }, V.muted ? "Unmute" : "Mute"),
         h("button", { class: "btn btn-sm btn-hang", type: "button", "data-call": "hangup", onclick: () => hangup() }, V.phase === "outgoing" ? "Cancel" : "Leave"),
+        debug && V.diag && h("span", { class: "call-diag tiny", "data-call": "diag" }, V.diag),
       );
       return box;
     }
@@ -489,6 +493,15 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
     _breakMedia: () => { for (const t of pc?.getTransceivers() ?? []) t.stop(); pc && (pc.onconnectionstatechange = null); recover(); },
     _debug: () => ({ tracks: stream?.getTracks().map((t) => ({ enabled: t.enabled, state: t.readyState })) ?? null, senders: pc?.getSenders().map((s) => ({ enabled: s.track?.enabled ?? null, same: stream?.getTracks().includes(s.track) })) ?? null }),
   };
-  if (debug) window.__wlVoice = api_;
+  if (debug) {
+    window.__wlVoice = api_;
+    // ?calldebug: the selected route and media counters, readable on a phone
+    const diagTimer = setInterval(async () => {
+      if (destroyed) return clearInterval(diagTimer);
+      const st = pc ? await api_.stats().catch(() => null) : null;
+      const diag = st ? `${st.localType ?? "?"}↔${st.remoteType ?? "?"} · in ${Math.round(st.bytesReceived / 1024)} KB · out ${Math.round(st.bytesSent / 1024)} KB${V.relay === false ? " · no TURN" : ""}` : null;
+      if (diag !== V.diag) set({ diag });
+    }, 1000);
+  }
   return api_;
 }

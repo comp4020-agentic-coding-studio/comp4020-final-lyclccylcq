@@ -276,7 +276,7 @@ export function iceConfigured(env: NodeJS.ProcessEnv = process.env): { stun: boo
 const list = (v: string | undefined) => (v ?? "").split(",").map((s) => s.trim()).filter((s) => /^(stun|turn|turns):/.test(s));
 
 export async function iceServersFor(userId: string, env: NodeJS.ProcessEnv = process.env, now = Date.now()): Promise<IceConfig> {
-  const ttl = 3 * 3600; // longer than the call time limit's practical use; renewed per call
+  const ttl = 5 * 3600; // outlasts the 4 h call limit; Cloudflare allows up to 48 h
   const stun = list(env.WAYLINE_STUN_URLS);
   const base: IceConfig["iceServers"] = stun.length ? [{ urls: stun }] : [];
   const mode = iceConfigured(env).turn;
