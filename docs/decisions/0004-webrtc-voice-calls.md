@@ -99,6 +99,15 @@ in memory there.
 - ICE servers come from `POST /call/ice`: Cloudflare credentials (TTL 5 h),
   coturn HMAC credentials (TTL 5 h), optional STUN-only URLs, or nothing (direct
   connections only).
+- Only the caller sends offers. The callee's track goes out in its answer,
+  and signals that reach a tab before its peer connection exists (it is
+  still fetching ICE servers) are held and applied once it does.
+- The call lives in a floating window that `public/voice.js` mounts once on
+  `<body>`, with one persistent `<audio>` element, so the editor's
+  re-renders can't touch the media. The remote stream is built from the
+  received track (`event.streams` may be empty); every start goes through
+  `play()`, a refusal shows "Turn on sound" (whose click calls `play()`
+  directly), and playback is confirmed by the element's clock advancing.
 
 ## Rationale
 
@@ -122,9 +131,14 @@ that can't connect directly.
   multiple tabs, removal, sign-out, expiry, grace, rate limits and resume
   without replay. `spec/browser-call.test.ts` runs two Chrome instances
   with different fake-microphone tones and checks each side receives the
-  other's frequency, mute silences it, playback-blocked and mic-denied
-  paths, ICE-restart recovery and give-up, phone layout, and that editing
-  continues during a call.
+  other's frequency in the stream the call window plays, and separately
+  that the `<audio>` element is playing it (unpaused, unmuted, clock
+  advancing). Chrome runs with its normal autoplay rules. It also covers
+  mute, a late callee's offer, simulated blocked playback recovered by a
+  real click, mic-denied, ICE-restart recovery and give-up, edits, panels,
+  minimize and the phone layout during a call, and that hang-up stops the
+  microphone and empties the element. Headless Chrome can't measure what
+  reaches a speaker, so whether a person hears speech is a manual check.
 
 ## Limitations
 
@@ -152,3 +166,13 @@ that can't connect directly.
 - 2026-10-14: TURN cost corrected against Cloudflare's current pricing page
   (an earlier draft said TURN was free only alongside the SFU; it now has a
   1,000 GB/month free allowance).
+- 2026-10-15: a report of calls that connect but are silent. Not reproduced
+  on one machine; three defects that lead to a connected-looking call with
+  no sound or a stuck one were found and fixed: an offer that beat the
+  callee's peer connection was dropped (stuck at "Connecting"); the callee
+  could offer at the same time as the caller (stuck); and a refused
+  `play()` was hidden by the element's `autoplay` attribute, and a stream
+  that gained its track after assignment could sit "playing" at
+  readyState 0, both silent with no message. The controls moved from the
+  trip bar into a floating call window. Production then had no TURN
+  secrets set (`/api/config` reported `relay: false`).

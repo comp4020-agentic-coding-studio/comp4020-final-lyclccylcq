@@ -227,6 +227,7 @@ textarea { resize: vertical; }
 .copy-row { display: flex; gap: 8px; }
 .members { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .members li { display: flex; align-items: center; gap: 12px; }
+
 .toasts { position: fixed; z-index: 50; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; width: min(440px, calc(100vw - 32px)); pointer-events: none; }
 .toast { pointer-events: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--ink); color: #fff; padding: 12px 16px; border-radius: 12px; box-shadow: var(--shadow-lg); font-weight: 600; animation: toast-in .2s ease-out; transition: opacity .4s, transform .4s; }
 .toast-error { background: var(--danger); }
@@ -438,22 +439,83 @@ textarea { resize: vertical; }
 .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--violet); animation: spin .8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* --- voice call control (trip bar) --- */
+/* --- voice calls: a "Call" button in the trip bar, and a floating call window --- */
 .call { display: flex; align-items: center; gap: 6px; min-width: 0; flex: none; }
 .call-status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--ink-2); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
-.call-error { color: var(--danger); white-space: normal; max-width: 280px; }
-.call-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex: none; }
+.call-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); flex: none; }
 .call-connected .call-dot { background: var(--leaf); box-shadow: 0 0 0 3px #e3f1e9; }
-.call-reconnecting .call-dot { background: var(--warn); animation: call-pulse 1s ease-in-out infinite; }
-.call-incoming { background: #e3f1e9; border-radius: 999px; padding: 3px 4px 3px 8px; }
-.call-ico { font-size: 15px; line-height: 1; }
-.btn-hang { background: var(--danger); color: #fff; }
-.btn-hang:hover:not(:disabled) { background: #a32b24; }
+.call-incoming .call-dot, .call-outgoing .call-dot, .call-connecting .call-dot, .call-reconnecting .call-dot { animation: call-pulse 1s ease-in-out infinite; }
+.call-ended .call-dot { background: var(--muted); }
+.call-pill { background: #e3f1e9; color: var(--leaf); border-color: #bfdcc9; }
+.call-pill-incoming, .call-pill-outgoing, .call-pill-connecting, .call-pill-reconnecting { background: var(--warn-bg); color: var(--warn); border-color: #f0dca4; }
 .call-pick { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
 .call-pick .btn { justify-content: flex-start; gap: 10px; }
 .call-audio { display: none; }
-.call-diag { font-family: ui-monospace, monospace; color: var(--muted); white-space: nowrap; }
+.btn svg { width: 16px; height: 16px; flex: none; }
 @keyframes call-pulse { 50% { opacity: .35; } }
+
+.call-card {
+  position: fixed; z-index: 40; right: 24px; bottom: 24px; width: 352px; max-width: calc(100vw - 32px);
+  display: flex; flex-direction: column; gap: 14px; padding: 0 18px 18px;
+  background: var(--ink); color: #fff; border-radius: 20px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 30px 70px -20px rgba(10, 14, 20, .65), 0 10px 24px -10px rgba(10, 14, 20, .5);
+}
+.call-card[hidden] { display: none; }
+.call-card :focus-visible { outline: 3px solid #8fd3dd; outline-offset: 2px; }
+.call-head { display: flex; align-items: center; gap: 8px; margin: 0 -18px; padding: 12px 12px 0 18px; cursor: grab; user-select: none; touch-action: none; }
+.call-head-label { flex: 1; display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #b9c2cf; }
+.call-icon-btn { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 10px; background: rgba(255,255,255,.08); color: #fff; font-size: 22px; line-height: 1; cursor: pointer; }
+.call-icon-btn:hover { background: rgba(255,255,255,.16); }
+.call-icon-btn svg { width: 20px; height: 20px; }
+.call-body { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.call-face { position: relative; flex: none; border-radius: 50%; }
+.call-face .avatar-lg { width: 60px; height: 60px; font-size: 21px; border-color: var(--ink); }
+.call-face::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 3px solid transparent; transition: border-color .12s; }
+.call-face.speaking::after { border-color: #5fd39a; }
+.call-who { display: flex; flex-direction: column; min-width: 0; }
+.call-name { font-size: 19px; font-weight: 800; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.call-state { font-size: 14px; font-weight: 600; color: #cfd6df; }
+.call-timer { font-variant-numeric: tabular-nums; color: #fff; }
+.call-meters { display: grid; gap: 6px; }
+.call-level { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 10px; font-size: 12px; color: #b9c2cf; }
+.call-level-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.call-level-bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
+.call-level-fill { display: block; height: 100%; width: 0; border-radius: inherit; background: #6b7686; transition: width .1s linear; }
+.call-level.speaking .call-level-fill { background: #5fd39a; }
+.call-note { margin: 0; padding: 9px 12px; border-radius: 12px; font-size: 13.5px; font-weight: 600; line-height: 1.4; background: rgba(255,255,255,.08); color: #e7ebf0; }
+.call-note-warn, .call-note-blocked { background: #4a3a10; color: #ffe7a3; }
+.call-note-error { background: #5a1f1c; color: #ffd2cd; }
+.call-fine { margin: 0; font-size: 12.5px; color: #b9c2cf; }
+.call-actions { display: flex; gap: 10px; }
+.call-btn {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 50px; padding: 10px 14px;
+  border: 0; border-radius: 14px; font: 800 15px var(--sans); cursor: pointer; background: rgba(255,255,255,.12); color: #fff;
+}
+.call-btn svg { width: 21px; height: 21px; flex: none; }
+.call-btn:hover { filter: brightness(1.12); }
+.call-btn:active { transform: translateY(1px); }
+.call-mute.on { background: #fff; color: var(--ink); }
+.call-hang, .call-decline { background: #d93a30; }
+.call-hang svg, .call-decline svg { width: 24px; height: 24px; }
+.call-accept { background: #2f9a64; }
+.call-sound { background: var(--sun); color: var(--ink); flex-basis: 100%; }
+.call-actions:has(.call-sound) { flex-wrap: wrap; }
+.call-debug { font-size: 12px; color: #b9c2cf; }
+.call-debug summary { cursor: pointer; }
+.call-diag { display: block; margin-top: 4px; font-family: ui-monospace, monospace; color: #cfd6df; word-break: break-all; }
+
+/* minimized: a compact bar that keeps mute and hang up */
+.call-card.is-mini { width: auto; max-width: calc(100vw - 32px); padding: 8px; gap: 0; border-radius: 999px; }
+.call-mini { display: flex; align-items: center; gap: 6px; }
+.call-mini-open { display: inline-flex; align-items: center; gap: 9px; min-height: 44px; padding: 0 12px 0 14px; border: 0; border-radius: 999px; background: transparent; color: #fff; font: 600 14px var(--sans); cursor: pointer; min-width: 0; }
+.call-mini-open:hover { background: rgba(255,255,255,.08); }
+.call-mini-open svg { width: 18px; height: 18px; flex: none; }
+.call-mini-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+.call-mini-state { color: #cfd6df; font-variant-numeric: tabular-nums; }
+.call-mini .call-btn { flex: none; min-height: 44px; width: 44px; padding: 0; border-radius: 50%; }
+.call-mini .call-btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.call-mini .call-sound { width: auto; padding: 0 14px; border-radius: 999px; }
+.call-mini .call-sound span { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
 
 .mobile-tabs { display: none; }
 
@@ -522,10 +584,18 @@ textarea { resize: vertical; }
   .add-form .row-2 { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 899px) {
-  /* on phones the call control drops under the bar so the map and timeline keep their space */
-  .trip-bar { flex-wrap: wrap; height: auto; min-height: var(--bar-h); row-gap: 0; }
-  .trip-bar .call:not(:empty) { order: 10; flex-basis: 100%; justify-content: flex-end; padding: 0 0 6px; }
-  .trip-bar .call[data-phase=idle], .trip-bar .call[data-phase=ended]:not(:has(.call-status)) { order: 0; flex-basis: auto; padding: 0; }
+  /* phones: the call window is a panel along the bottom, above the Map/Plan/Copilot tabs */
+  .call-card, .call-card.is-moved {
+    left: 8px !important; right: 8px !important; top: auto !important; bottom: calc(66px + env(safe-area-inset-bottom)) !important;
+    width: auto; max-width: none; padding: 0 14px 14px; gap: 12px; border-radius: 18px;
+  }
+  .call-head { cursor: default; padding: 10px 8px 0 14px; margin: 0 -14px; }
+  .call-face .avatar-lg { width: 48px; height: 48px; font-size: 17px; }
+  .call-name { font-size: 17px; }
+  .call-btn { min-height: 52px; }
+  .call-card.is-mini { padding: 6px; border-radius: 999px; }
+  .call-mini-open { flex: 1; }
+  .call-mini-text { max-width: none; }
   .call-status { max-width: 100%; }
   .workspace[data-tab=copilot] .pane-copilot { overflow: auto; }
 }

@@ -188,6 +188,23 @@ contradict the README, stop and ask. Don't quietly change the product.
 - The microphone is requested only after Call or Accept. Denied, missing
   and busy devices, and blocked autoplay ("Turn on sound"), get plain
   messages.
+- The call happens in a floating call window (`public/voice.js` owns it, on
+  `<body>`, with one persistent `<audio>`); the trip bar keeps only the Call
+  button and a pointer to the window. Editor renders, snapshots, tab
+  switches and minimizing never recreate the element, reset `srcObject` or
+  stop a track; only the call ending does. It opens itself for an outgoing
+  or incoming call, blocked sound and failures, and never takes focus.
+- "Connected" isn't "audible". Every start goes through `play()` (no
+  `autoplay` attribute) and its refusal shows "Turn on sound"; playback is
+  then checked by the element's clock advancing. Speaking indicators and
+  meters show measured levels only. Only the caller sends offers; the
+  callee's track goes in its answer, and signals that arrive before its
+  peer connection are held, not dropped.
+- `spec/browser.ts` runs Chrome with its normal autoplay rules (no
+  `--autoplay-policy` flag) and `tap()` for real clicks. Call tests check
+  the other side's tone in the stream the window plays *and* that the
+  element is playing; receiving, playing and a person hearing speech are
+  three separate claims, and only the first two are automated.
 - TURN credentials are short-lived, minted server-side per request
   (`POST /call/ice`, rate-limited); the TURN API token or shared secret never
   reaches the browser. Never embed public relay credentials. Don't call

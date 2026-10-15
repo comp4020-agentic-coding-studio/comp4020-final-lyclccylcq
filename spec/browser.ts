@@ -26,6 +26,9 @@ export type Page = {
   eval<T = unknown>(expression: string): Promise<T>;
   waitFor(expression: string, timeoutMs?: number): Promise<number>;
   click(selector: string): Promise<void>;
+  // a real (trusted) mouse click at the element's centre, which counts as a
+  // user gesture for the browser's autoplay rules; click() doesn't always
+  tap(selector: string): Promise<void>;
   screenshot(path: string): Promise<void>;
   // the browser's location permission for this page's origin
   geolocation(origin: string, at: { lat: number; lng: number } | "denied"): Promise<void>;
@@ -62,6 +65,8 @@ export function toneWav(hz: number, seconds = 180, rate = 48_000): string {
 
 // media: start Chrome with a fake microphone playing this WAV (and the
 // permission prompt answered "allow"), or "deny" to answer it "block".
+// Chrome's normal autoplay rules stay on: a flag that lifts them would hide
+// a call whose sound never starts.
 export async function launch(opts: { media?: { wav: string } | "deny" } = {}) {
   if (!chromePath) return null;
   const port = await new Promise<number>((resolve) => {
@@ -78,7 +83,7 @@ export async function launch(opts: { media?: { wav: string } | "deny" } = {}) {
       "--no-sandbox",
       "--disable-gpu",
       "--no-first-run",
-      ...(opts.media ? ["--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"] : []),
+      ...(opts.media ? ["--use-fake-device-for-media-stream"] : []),
       ...(opts.media && opts.media !== "deny" ? ["--use-fake-ui-for-media-stream", `--use-file-for-fake-audio-capture=${opts.media.wav}%noloop`] : []),
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${mkdtempSync(join(tmpdir(), "wayline-chrome-"))}`,
@@ -139,6 +144,13 @@ export async function launch(opts: { media?: { wav: string } | "deny" } = {}) {
           if (Date.now() - start > timeoutMs) throw new Error(`timed out waiting for: ${expression}`);
           await sleep(25);
         }
+      },
+      async tap(selector) {
+        const at = await page.eval<{ x: number; y: number } | null>(
+          `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView({ block: 'nearest' }); const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+        );
+        if (!at) throw new Error(`nothing to tap at ${selector}`);
+        for (const type of ["mousePressed", "mouseReleased"]) await s("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
       },
       async click(selector) {
         const ok = await page.eval<boolean>(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.click(); return true; })()`);
