@@ -93,13 +93,20 @@ export async function launch(opts: { media?: { wav: string } | "deny" } = {}) {
     ],
     { stdio: "ignore" },
   );
+  // Several test files start Chrome at once; on a two-core CI runner one can
+  // take well over 10 s to open its DevTools port.
   let wsUrl = "";
-  for (let i = 0; i < 100 && !wsUrl; i++) {
+  const until = Date.now() + 30_000;
+  while (!wsUrl && Date.now() < until) {
     try {
       wsUrl = ((await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()) as { webSocketDebuggerUrl: string }).webSocketDebuggerUrl;
     } catch {
       await sleep(100);
     }
+  }
+  if (!wsUrl) {
+    chrome.kill();
+    throw new Error(`Chrome at ${chromePath} didn't open its DevTools port within 30 s`);
   }
   const ws = new WebSocket(wsUrl);
   await new Promise((r) => (ws.onopen = r));

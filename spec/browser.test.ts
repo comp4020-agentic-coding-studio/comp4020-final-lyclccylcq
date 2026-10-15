@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import { chromePath, inPage, launch, type Page, signUpIn, sleep } from "./browser.ts";
 import { uniqueName } from "./helpers.ts";
 
@@ -8,6 +8,8 @@ import { uniqueName } from "./helpers.ts";
 // other's changes without refreshing.
 const baseUrl = inject("baseUrl");
 let browser: Awaited<ReturnType<typeof launch>>;
+// starting Chrome alongside the other browser test files can take a while on CI
+vi.setConfig({ hookTimeout: 45_000 });
 
 beforeAll(async () => {
   browser = await launch();

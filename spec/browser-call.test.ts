@@ -14,7 +14,7 @@ import { uniqueName } from "./helpers.ts";
 // proves signalling, negotiation, media and playback, not NAT traversal,
 // TURN, or that a person heard speech (see ADR 0004).
 const baseUrl = inject("baseUrl");
-vi.setConfig({ testTimeout: 60_000, hookTimeout: 30_000 });
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 45_000 });
 let alice: Awaited<ReturnType<typeof launch>>;
 let bob: Awaited<ReturnType<typeof launch>>;
 let denied: Awaited<ReturnType<typeof launch>>;
