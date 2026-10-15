@@ -340,6 +340,74 @@ describe.skipIf(!chromePath)("call recovery and tabs in real browsers", () => {
     expect(await a.eval<unknown>(mic)).toBeNull();
   });
 
+  // On one machine media never really breaks, so the caller's connection is
+  // made to read as failed until an ICE restart is actually re-negotiated
+  // (an answer to a new offer); recovery must come from that, not luck.
+  const brokenUntilRestart = `(() => {
+    const pc = window.__wlVoice._pc(); window.__fixed = false; window.__offers = 0;
+    const conn = Object.getOwnPropertyDescriptor(RTCPeerConnection.prototype, 'connectionState');
+    const ice = Object.getOwnPropertyDescriptor(RTCPeerConnection.prototype, 'iceConnectionState');
+    // fixed only by an answer that arrives while the page is online again
+    pc.addEventListener('signalingstatechange', () => { if (pc.signalingState === 'have-local-offer') window.__offers++; if (pc.signalingState === 'stable' && pc.remoteDescription?.type === 'answer' && window.__offers > 0 && window.__back) window.__fixed = true; });
+    Object.defineProperty(pc, 'connectionState', { configurable: true, get: () => window.__fixed ? conn.get.call(pc) : 'failed' });
+    Object.defineProperty(pc, 'iceConnectionState', { configurable: true, get: () => window.__fixed ? ice.get.call(pc) : 'failed' });
+  })()`;
+
+  for (const who of ["caller", "callee"] as const) {
+    it(`keeps retrying through a network outage on the ${who}'s side and reconnects when it's back`, async () => {
+      const a = await alice!.newPage();
+      const b = await bob!.newPage();
+      await signUpIn(a, baseUrl, uniqueName("oa"));
+      await signUpIn(b, baseUrl, uniqueName("ob"));
+      const trip = await sharedTrip(a, b);
+      await open(a, trip.id);
+      await open(b, trip.id);
+      await connect(a, b);
+      const victim = who === "caller" ? a : b;
+      await a.eval(brokenUntilRestart);
+      await victim.offline(true); // its signalling and event stream are gone; every offer or request sent now is lost
+      await a.eval(`window.__wlVoice._simulateDrop()`);
+      await sleep(8000); // longer than the old single-attempt window, and well past the first retries
+      expect(await a.eval<string>(phase)).toBe("reconnecting");
+      expect(await b.eval<string>(phase)).not.toBe("ended");
+      if (who === "caller") expect(await a.eval<number>(`window.__offers`)).toBeGreaterThan(1); // retried, not one attempt
+      await victim.offline(false);
+      await a.eval(`window.__back = true`);
+      await a.waitFor(`window.__fixed && ${phase} === 'connected'`, 8000);
+      await b.waitFor(`${phase} === 'connected'`, 8000);
+      await expectTone(b, 440);
+      await expectTone(a, 660);
+      await a.tap("[data-call=hangup]");
+    });
+  }
+
+  it("rides out a short blip without saying Reconnecting", async () => {
+    const a = await alice!.newPage();
+    const b = await bob!.newPage();
+    await signUpIn(a, baseUrl, uniqueName("ba"));
+    await signUpIn(b, baseUrl, uniqueName("bb"));
+    const trip = await sharedTrip(a, b);
+    await open(a, trip.id);
+    await open(b, trip.id);
+    await connect(a, b);
+    // "disconnected" for a second, then back: ICE often repairs this itself
+    await a.eval(`(() => {
+      const pc = window.__wlVoice._pc();
+      const conn = Object.getOwnPropertyDescriptor(RTCPeerConnection.prototype, 'connectionState');
+      let blip = true;
+      Object.defineProperty(pc, 'connectionState', { configurable: true, get: () => blip ? 'disconnected' : conn.get.call(pc) });
+      pc.onconnectionstatechange();
+      setTimeout(() => { blip = false; pc.onconnectionstatechange(); }, 1000);
+    })()`);
+    const seen = new Set<string>();
+    for (let i = 0; i < 20; i++) {
+      seen.add(await a.eval<string>(phase));
+      await sleep(100);
+    }
+    expect([...seen]).toEqual(["connected"]);
+    await a.tap("[data-call=hangup]");
+  });
+
   it("one account in two tabs: both ring, one answers, the other shows the call elsewhere with no second microphone", async () => {
     const a = await alice!.newPage();
     const b1 = await bob!.newPage();

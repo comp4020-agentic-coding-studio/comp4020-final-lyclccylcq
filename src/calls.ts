@@ -184,6 +184,9 @@ export function createCalls(deps: CallDeps) {
           (k && typeof k === "object" && typeof k.candidate === "string" && k.candidate.length <= L.candidateBytes && (k.sdpMid === undefined || k.sdpMid === null || (typeof k.sdpMid === "string" && k.sdpMid.length <= 32)) && (k.sdpMLineIndex === undefined || k.sdpMLineIndex === null || (Number.isInteger(k.sdpMLineIndex) && (k.sdpMLineIndex as number) >= 0 && (k.sdpMLineIndex as number) < 16)));
         if (!ok) throw new HttpError(400, "Invalid ICE candidate.");
         emit(c, peer, peer.session, { type: "signal", kind, candidate: k ? { candidate: k.candidate, sdpMid: k.sdpMid ?? null, sdpMLineIndex: k.sdpMLineIndex ?? null } : null });
+      } else if (kind === "restart") {
+        // the callee's connection dropped: ask the caller, who drives ICE restarts, for one
+        emit(c, peer, peer.session, { type: "signal", kind });
       } else if (kind === "mute") {
         if (typeof input.muted !== "boolean") throw new HttpError(400, "Invalid mute state.");
         me.muted = input.muted;

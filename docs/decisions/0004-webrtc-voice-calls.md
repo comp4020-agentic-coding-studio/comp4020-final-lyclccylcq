@@ -94,8 +94,14 @@ in memory there.
   or an unanswered invitation (30 s) ends the call and tells the peer.
 - A tab whose stream drops keeps the call for a 20 s grace period. When its
   stream comes back with the same tab id it gets a `resume` event (never a
-  replay of old offers or candidates), and the caller restarts ICE. If media
-  doesn't recover within 15 s, the call ends with "Call again".
+  replay of old offers or candidates), and the caller restarts ICE.
+- Recovery: a `disconnected` connection gets 3 s to repair itself before
+  anything is shown; then (or at once on `failed`) the caller restarts ICE
+  and retries after 1.5 s, 3 s, 5 s and every 5 s, and immediately on
+  `resume` or the browser's `online` event. Each attempt makes and sends its
+  own restart offer, rolling back one whose answer never came. The callee,
+  which never offers, sends a `restart` signal asking the caller for one.
+  If media doesn't recover within 30 s, the call ends with "Call again".
 - ICE servers come from `POST /call/ice`: Cloudflare credentials (TTL 5 h),
   coturn HMAC credentials (TTL 5 h), optional STUN-only URLs, or nothing (direct
   connections only).
@@ -176,3 +182,13 @@ that can't connect directly.
   readyState 0, both silent with no message. The controls moved from the
   trip bar into a floating call window. Production then had no TURN
   secrets set (`/api/config` reported `relay: false`).
+- 2026-10-15: TURN secrets set on Fly (release v28); the server's
+  `/call/ice` returned Cloudflare relay credentials, and two local browsers
+  forced to relay connected and heard each other's tone.
+- 2026-10-15: calls across networks reconnected repeatedly and then ended.
+  Reproduced with a few seconds of lost signalling: the one ICE restart
+  offer, sent while the network was down, was lost and never retried, so the
+  call gave up at 15 s although the network was back. Restarts are now
+  retried (with an immediate retry on reconnect), the callee can ask for
+  one, brief `disconnected` blips don't trigger anything, and the limit is
+  30 s.

@@ -15,8 +15,15 @@ import { api, avatar, fill, h, svg } from "/ui.js";
 // floating call window mounted once on <body>, with one persistent <audio>
 // element. Editor re-renders, snapshots and tab switches never touch them.
 
-const RECOVER_MS = 15_000;
+// How long a dropped call keeps trying before it ends with "Call again".
+// A phone moving between Wi-Fi and mobile data can take well over 15 s.
+const RECOVER_MS = 30_000;
 const recoverMs = () => Number(new URLSearchParams(location.search).get("recoverms")) || RECOVER_MS;
+// "disconnected" often heals by itself within a few seconds; only after
+// this long (or on "failed") does the call restart ICE and say Reconnecting.
+const GRACE_MS = 3_000;
+// ICE restarts are retried until connected: after these delays, then every 5 s
+const RETRY_MS = [1_500, 3_000, 5_000];
 // below this measured level, a track counts as silent (RMS of -50 dBFS)
 const SPEAKING = 0.003;
 
@@ -85,7 +92,9 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
 
   function stopMedia() {
     clearTimeout(recoverTimer);
-    recoverTimer = null;
+    clearTimeout(retryTimer);
+    clearTimeout(graceTimer);
+    recoverTimer = retryTimer = graceTimer = null;
     clearInterval(tickTimer);
     tickTimer = null;
     clearTimeout(verifyTimer);
@@ -202,12 +211,12 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
     pc.onconnectionstatechange = () => {
       if (!pc) return;
       const s = pc.connectionState;
-      if (s === "connected") {
-        clearTimeout(recoverTimer);
-        recoverTimer = null;
-        set({ phase: "connected", error: null, connectedAt: V.connectedAt ?? Date.now() });
-      } else if (s === "disconnected" || s === "failed") {
-        recover();
+      if (s === "connected") recovered();
+      else if (s === "failed") recover();
+      else if (s === "disconnected") {
+        // often a short blip that ICE repairs itself; restart only if it doesn't
+        clearTimeout(graceTimer);
+        graceTimer = setTimeout(() => pc && pc.connectionState !== "connected" && recover(), GRACE_MS);
       }
     };
     startTicking();
@@ -352,34 +361,88 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
     return null;
   }
 
-  // A dropped connection: restart ICE (the impolite side drives it) and give
-  // up after RECOVER_MS with a clear way to call again.
+  // A dropped connection. The caller drives ICE restarts and retries them
+  // (a restart offer sent while the network was down is simply lost); the
+  // callee asks the caller for one. Both give up after RECOVER_MS with a
+  // clear way to call again. Network and stream recovery trigger an
+  // immediate retry (see `resume` and the browser's `online` event).
+  let recoverStarted = 0;
+  let retryTimer = null;
+  let retries = 0;
+  let graceTimer = null;
   function recover() {
     if (!pc || V.phase === "ended") return;
-    if (V.phase !== "reconnecting") set({ phase: "reconnecting" });
-    if (!polite) pc.restartIce();
+    clearTimeout(graceTimer);
+    if (V.phase !== "reconnecting") {
+      recoverStarted = Date.now();
+      retries = 0;
+      set({ phase: "reconnecting" });
+    }
     if (!recoverTimer) {
-      const started = Date.now();
       const limit = debug ? recoverMs() : RECOVER_MS;
-      // the connection may come back without a state change event (the
-      // restart succeeded on a path that never fully dropped), so check
       const check = () => {
         recoverTimer = null;
-        if (!pc || V.phase === "ended") return;
-        if (pc.connectionState === "connected" && pc.iceConnectionState !== "disconnected" && pc.signalingState === "stable" && Date.now() - started > 500) return set({ phase: "connected", error: null });
-        if (Date.now() - started >= limit) return void hangup("failed");
+        if (!pc || V.phase !== "reconnecting") return;
+        if (pc.connectionState === "connected" && pc.iceConnectionState !== "disconnected" && pc.iceConnectionState !== "checking") return recovered();
+        if (Date.now() - recoverStarted >= limit) return void hangup("failed");
         recoverTimer = setTimeout(check, 500);
       };
       recoverTimer = setTimeout(check, 500);
     }
+    restartNow();
   }
 
-  async function send(msg) {
+  // One ICE restart attempt, then the next one scheduled.
+  async function restartNow() {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+    if (!pc || V.phase !== "reconnecting") return;
+    if (polite) {
+      send({ kind: "restart" });
+    } else {
+      // Each attempt makes and sends its own restart offer: after a failed
+      // attempt, a repeated restartIce() doesn't fire negotiationneeded again.
+      try {
+        // an offer whose answer never came (lost while offline) would block
+        // the next one: roll it back first
+        if (pc.signalingState === "have-local-offer") await pc.setLocalDescription({ type: "rollback" });
+        if (pc.signalingState === "stable" && !makingOffer) {
+          makingOffer = true;
+          try {
+            await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }));
+            await send({ kind: "description", description: pc.localDescription }, { throwOnFail: true });
+          } finally {
+            makingOffer = false;
+          }
+        }
+      } catch {
+        // offline or a collision: the next retry tries again
+      }
+    }
+    const delay = RETRY_MS[Math.min(retries, RETRY_MS.length - 1)];
+    retries++;
+    retryTimer = setTimeout(restartNow, delay);
+  }
+
+  function recovered() {
+    clearTimeout(recoverTimer);
+    clearTimeout(retryTimer);
+    clearTimeout(graceTimer);
+    recoverTimer = retryTimer = graceTimer = null;
+    set({ phase: "connected", error: null, connectedAt: V.connectedAt ?? Date.now() });
+  }
+
+  // the network came back: don't wait for the next scheduled retry
+  const onOnline = () => V.phase === "reconnecting" && restartNow();
+  addEventListener("online", onOnline);
+
+  async function send(msg, { throwOnFail = false } = {}) {
     if (!V.callId) return;
     try {
       await post(url(V.callId, "signal"), msg);
     } catch (err) {
       if (err.status === 404) finish("ended");
+      else if (throwOnFail) throw err;
     }
   }
 
@@ -406,6 +469,11 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
 
   async function onSignal(ev) {
     if (!pc) return;
+    if (ev.kind === "restart") {
+      // the callee lost its connection; this side may still think it's fine
+      if (!polite) recover();
+      return;
+    }
     try {
       if (ev.kind === "description") await onDescription(ev.description);
       else if (ev.kind === "candidate" && ev.candidate) await onCandidate(ev.candidate);
@@ -449,8 +517,11 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
         // the caller makes the offer, via negotiationneeded
         return startPeer(ev.role === "callee");
       case "resume":
-        // this tab's stream reconnected and still holds the call
-        if (mine && pc && pc.connectionState !== "connected") recover();
+        // this tab's stream reconnected and still holds the call: anything
+        // sent while it was down is lost, so retry now
+        if (!mine || !pc) return;
+        if (V.phase === "reconnecting") restartNow();
+        else if (pc.connectionState !== "connected") recover();
         return;
       case "signal":
         if (!mine) return;
@@ -865,6 +936,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
       if (destroyed) return;
       removeEventListener("pagehide", leaveNow);
       removeEventListener("resize", keepInside);
+      removeEventListener("online", onOnline);
       clearTimeout(ringTimer);
       clearInterval(clockTimer);
       leaveNow();
@@ -908,6 +980,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
     },
     // test-only peek, never used by the app
     _simulateDrop: () => recover(),
+    _pc: () => pc,
     // closes the media path for real, so ICE can't recover
     _breakMedia: () => { for (const t of pc?.getTransceivers() ?? []) t.stop(); pc && (pc.onconnectionstatechange = null); recover(); },
     _debug: () => ({

@@ -200,6 +200,11 @@ contradict the README, stop and ask. Don't quietly change the product.
   meters show measured levels only. Only the caller sends offers; the
   callee's track goes in its answer, and signals that arrive before its
   peer connection are held, not dropped.
+- A dropped call keeps trying: ICE restarts are retried until connected or
+  30 s, with an immediate retry when the stream or the network comes back,
+  because a restart offer sent while offline is simply lost. The callee asks
+  for a restart (`restart` signal). A short `disconnected` (under 3 s) shows
+  nothing. Never go back to a single restart attempt.
 - `spec/browser.ts` runs Chrome with its normal autoplay rules (no
   `--autoplay-policy` flag) and `tap()` for real clicks. Call tests check
   the other side's tone in the stream the window plays *and* that the

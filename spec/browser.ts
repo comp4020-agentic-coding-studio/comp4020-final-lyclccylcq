@@ -34,6 +34,8 @@ export type Page = {
   geolocation(origin: string, at: { lat: number; lng: number } | "denied"): Promise<void>;
   // the browser's microphone permission for this page's origin
   microphone(origin: string, setting: "granted" | "denied"): Promise<void>;
+  // cuts the page's HTTP and event streams (not WebRTC on this machine), like losing the network
+  offline(on: boolean): Promise<void>;
 };
 
 // A mono 16-bit WAV of a sine tone, for Chrome's fake microphone: each
@@ -159,6 +161,10 @@ export async function launch(opts: { media?: { wav: string } | "deny" } = {}) {
       async geolocation(origin, at) {
         await send("Browser.setPermission", { permission: { name: "geolocation" }, setting: at === "denied" ? "denied" : "granted", origin, browserContextId });
         if (at !== "denied") await s("Emulation.setGeolocationOverride", { latitude: at.lat, longitude: at.lng, accuracy: 50 });
+      },
+      async offline(on) {
+        await s("Network.enable");
+        await s("Network.emulateNetworkConditions", { offline: on, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
       },
       async microphone(origin, setting) {
         await send("Browser.setPermission", { permission: { name: "microphone" }, setting, origin, browserContextId });
