@@ -254,6 +254,28 @@ contradict the README, stop and ask. Don't quietly change the product.
   people; collaborators edit the itinerary and can leave.
 - Invite links are 256-bit random tokens, stored hashed, shown once, replaced
   or revoked by the owner. Never authorise by trip id alone.
+- Usernames and display names are each unique. Usernames keep their ASCII
+  rule and compare case-insensitively (`usernameKey`, the NOCASE column).
+  Display names are stored as typed (trimmed) with a separate
+  `display_name_key` (`displayNameKey` in `src/db.ts`: NFKC, trim, inner
+  whitespace collapsed, Unicode lower case), never SQLite's NOCASE. Both are
+  enforced by unique indexes inside the sign-up transaction, and a conflict
+  is a 409 naming the field ("That username/display name is already
+  taken."), with no account or session left behind. The availability
+  endpoint is advice only. Existing collisions are never renamed, merged or
+  deleted: the index waits and `scripts/display-names.ts` reports them
+  (`docs/unique-names.md`).
+- Inviting by username: the owner searches (`/invitees`, owner-only,
+  parameterised, literal characters, at most 8, exact first) and presses
+  Invite; searching or choosing sends nothing. An invitation is a
+  `trip_invitations` row addressed to a user id, one pending per person per
+  trip (partial unique index). It grants nothing until the invitee accepts
+  it in My Trips; accepting checks recipient, `pending` and the trip, then
+  adds the member and consumes the invitation in one `mutate()`. Accepted,
+  declined and cancelled invitations never let anyone in again. Link and
+  named invitations are independent: neither revokes the other.
+- A signed-in person's own stream (`/api/me/events`) carries only a count of
+  pending invitations, never trip content; trip streams stay members-only.
 - Sessions are HttpOnly SameSite=Lax cookies (Secure behind Fly's TLS), stored
   hashed. Writes require JSON and a same-origin `Origin`.
 - `GOOGLE_MAPS_SERVER_KEY`, `ANTHROPIC_API_KEY` and the TURN secrets

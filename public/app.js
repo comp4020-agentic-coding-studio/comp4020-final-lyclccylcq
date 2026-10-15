@@ -2,7 +2,7 @@ import { openEditor } from "/editor.js";
 import { renderHome } from "/home.js";
 import { coverImg, PHOTOS, photoFor } from "/photos.js";
 import { renderPreview } from "/preview.js";
-import { api, ApiError, avatar, fmtRange, h, icon, openDialog, relTime, toast } from "/ui.js";
+import { api, ApiError, avatar, fill, fmtRange, h, icon, openDialog, relTime, toast } from "/ui.js";
 
 const app = document.getElementById("app");
 const state = { me: null, config: null };
@@ -52,7 +52,7 @@ async function route() {
     return;
   }
   if (path === "/trips") {
-    await renderDashboard();
+    cleanup = (await renderDashboard()) ?? null;
     if (new URLSearchParams(location.search).get("new") === "1") newTripDialog();
     return;
   }
@@ -67,6 +67,13 @@ function createTrip() {
 }
 
 function topbar(active = "") {
+  const tripsLink = h("a", { href: "/trips", "data-link": true, class: active === "trips" ? "on" : "" }, "My Trips");
+  // pending invitations, counted once per page; My Trips shows them live
+  if (state.me && active !== "trips") {
+    api("/api/invitations")
+      .then(({ invitations }) => invitations.length && tripsLink.append(" ", h("span", { class: "badge badge-danger", "aria-label": `${invitations.length} pending invitation${invitations.length === 1 ? "" : "s"}` }, String(invitations.length))))
+      .catch(() => {});
+  }
   return h(
     "header",
     { class: "topbar" },
@@ -75,7 +82,7 @@ function topbar(active = "") {
       "nav",
       { class: "topbar-nav", "aria-label": "Main" },
       h("a", { href: "/#explore", "data-link": true, class: active === "home" ? "on" : "" }, "Explore"),
-      h("a", { href: "/trips", "data-link": true, class: active === "trips" ? "on" : "" }, "My Trips"),
+      tripsLink,
       h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: createTrip }, icon("plus"), h("span", { class: "hide-xs" }, "Create Trip")),
       state.me
         ? h(
@@ -119,6 +126,12 @@ function renderPrivacy() {
       h("p", { class: "callout" }, "Draft for the V1 prototype; to be reviewed by the project author before public use."),
       h("h2", {}, "What Wayline stores"),
       h("p", {}, "Your account (username, display name and a hashed password), the trips you create or join, and what you add to them. Everyone on a trip can see that trip."),
+      h("h2", {}, "Finding people and invitations"),
+      h(
+        "p",
+        {},
+        "Usernames and display names are unique, so someone planning a trip can find you by your username. Only a trip's owner can search, and only while inviting people to that trip; a search shows the matching usernames and display names and nothing else about your account. When an owner invites you, Wayline stores who invited you to which trip and whether you accepted, declined, or the owner cancelled it. You see the trip's title, destination and dates before deciding, and you join only if you accept.",
+      ),
       h("h2", {}, "Your location"),
       h(
         "p",
@@ -190,45 +203,90 @@ async function signOut() {
 function renderAuth(next) {
   let mode = "signup";
   const error = h("p", { class: "form-error", role: "alert", hidden: true });
-  const nameField = h("label", { class: "field" }, h("span", {}, "Your name"), h("input", { name: "displayName", autocomplete: "nickname", maxlength: 40, placeholder: "How collaborators will see you" }));
+  // one message slot per field, tied to its input for screen readers
+  const field = (name, label, attrs, hint) => {
+    const msg = h("small", { class: "field-msg", id: `msg-${name}`, "aria-live": "polite" }, hint ?? "");
+    const input = h("input", { name, "aria-describedby": `msg-${name}`, ...attrs });
+    return { el: h("label", { class: "field" }, h("span", {}, label), input, msg), input, msg, hint: hint ?? "" };
+  };
+  const display = field("displayName", "Your name", { autocomplete: "nickname", maxlength: 40, placeholder: "How collaborators will see you" }, "Shown to people on your trips. Must be unique.");
+  const user = field("username", "Username", { autocomplete: "username", required: true, minlength: 3, maxlength: 32, spellcheck: "false", autocapitalize: "none" });
+  const pass = field("password", "Password", { type: "password", autocomplete: "new-password", required: true, minlength: 8 });
+  const fields = { displayName: display, username: user, password: pass };
+  const setMsg = (f, text, bad) => {
+    f.msg.textContent = text ?? f.hint;
+    f.msg.classList.toggle("is-error", Boolean(bad));
+    f.msg.classList.toggle("is-ok", bad === false);
+    if (bad) f.input.setAttribute("aria-invalid", "true");
+    else f.input.removeAttribute("aria-invalid");
+  };
+  const clearMsgs = () => Object.values(fields).forEach((f) => setMsg(f, null));
   const submit = h("button", { class: "btn btn-primary btn-block", type: "submit" }, "Create account");
   const tabs = h("div", { class: "seg", role: "tablist" });
-  const form = h(
-    "form",
-    { class: "auth-form", novalidate: true },
-    tabs,
-    nameField,
-    h("label", { class: "field" }, h("span", {}, "Username"), h("input", { name: "username", autocomplete: "username", required: true, minlength: 3, maxlength: 32 })),
-    h("label", { class: "field" }, h("span", {}, "Password"), h("input", { name: "password", type: "password", autocomplete: "new-password", required: true, minlength: 8 })),
-    error,
-    submit,
-  );
+  const form = h("form", { class: "auth-form", novalidate: true }, tabs, display.el, user.el, pass.el, error, submit);
+
+  // An early hint while typing (debounced); the account is only safe once
+  // the server accepts it, and its answer replaces any hint.
+  let checkTimer = null;
+  let checkSeq = 0;
+  const check = (name) => {
+    if (mode !== "signup") return;
+    clearTimeout(checkTimer);
+    const f = fields[name];
+    const value = f.input.value.trim();
+    if (!value || (name === "username" && value.length < 3)) return setMsg(f, null);
+    checkTimer = setTimeout(async () => {
+      const seq = ++checkSeq;
+      try {
+        const r = await api(`/api/auth/available?${new URLSearchParams({ [name]: value })}`);
+        if (seq !== checkSeq || f.input.value.trim() !== value) return; // a newer check or edit won
+        if (r[name] === false) setMsg(f, name === "username" ? "That username is already taken." : "That display name is already taken.", true);
+        else setMsg(f, name === "username" ? "Available." : "Available.", false);
+      } catch {
+        if (seq === checkSeq) setMsg(f, null);
+      }
+    }, 350);
+  };
+  display.input.addEventListener("input", () => check("displayName"));
+  user.input.addEventListener("input", () => check("username"));
+
   const setMode = (m) => {
     mode = m;
-    nameField.hidden = m !== "signup";
+    display.el.hidden = m !== "signup";
     submit.textContent = m === "signup" ? "Create account" : "Sign in";
-    form.password.autocomplete = m === "signup" ? "new-password" : "current-password";
+    pass.input.autocomplete = m === "signup" ? "new-password" : "current-password";
     tabs.replaceChildren(
       ...[["signup", "New here"], ["login", "I have an account"]].map(([k, label]) =>
         h("button", { type: "button", role: "tab", "aria-selected": String(k === m), class: k === m ? "on" : "", onclick: () => setMode(k) }, label),
       ),
     );
     error.hidden = true;
+    clearMsgs();
   };
   setMode("signup");
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     error.hidden = true;
+    clearTimeout(checkTimer);
+    checkSeq++;
+    clearMsgs();
     submit.disabled = true;
     try {
-      const body = { username: form.username.value, password: form.password.value };
-      if (mode === "signup") body.displayName = form.displayName.value || form.username.value;
-      const { user } = await api(`/api/auth/${mode}`, { method: "POST", body });
-      state.me = user;
+      const body = { username: user.input.value, password: pass.input.value };
+      if (mode === "signup") body.displayName = display.input.value.trim() || user.input.value;
+      const { user: me } = await api(`/api/auth/${mode}`, { method: "POST", body });
+      state.me = me;
       navigate(next && next !== "/login" ? next : "/", { replace: true });
     } catch (err) {
-      error.textContent = err.message;
-      error.hidden = false;
+      // the field that needs fixing says so, and keeps what was typed
+      const f = mode === "signup" && fields[err.data?.field];
+      if (f) {
+        setMsg(f, err.message, true);
+        f.input.focus();
+      } else {
+        error.textContent = err.message;
+        error.hidden = false;
+      }
     } finally {
       submit.disabled = false;
     }
@@ -281,8 +339,9 @@ function heroArt() {
 async function renderDashboard() {
   app.replaceChildren(topbar("trips"), h("main", { class: "dash" }, h("div", { class: "boot" }, "Loading your trips…")));
   let data;
+  let invites;
   try {
-    data = await api("/api/trips");
+    [data, invites] = await Promise.all([api("/api/trips"), api("/api/invitations")]);
   } catch (err) {
     if (err.status === 401) return signOut();
     return app.querySelector(".dash").replaceChildren(h("p", { class: "form-error" }, err.message));
@@ -313,6 +372,95 @@ async function renderDashboard() {
   const section = (title, list, empty) =>
     h("section", { class: "dash-section" }, h("h2", {}, title), list.length ? h("div", { class: "trip-grid" }, list.map(card)) : empty);
 
+  // Invitations addressed to this account. They stay until answered, and a
+  // new one appears while this page is open (the account's own stream says
+  // the list changed; the list itself comes with this session).
+  const invitesBox = h("section", { class: "dash-section invites", "aria-label": "Invitations", hidden: true });
+  const renderInvites = () => {
+    invitesBox.hidden = invites.invitations.length === 0;
+    fill(
+      invitesBox,
+      h("h2", {}, "Invitations", h("span", { class: "badge badge-danger" }, String(invites.invitations.length))),
+      h("ul", { class: "invite-list" }, invites.invitations.map(inviteRow)),
+    );
+  };
+  const inviteRow = (inv) => {
+    const status = h("span", { class: "small muted", role: "status" });
+    const actions = h("div", { class: "row-actions" });
+    const act = async (what) => {
+      for (const b of actions.querySelectorAll("button")) b.disabled = true;
+      try {
+        const r = await api(`/api/invitations/${inv.id}/${what}`, { method: "POST", body: {} });
+        if (what === "accept") {
+          toast(`You joined ${inv.trip.title}.`);
+          return navigate(`/trips/${r.tripId}`);
+        }
+        actions.replaceChildren();
+        status.textContent = "Declined.";
+        setTimeout(refresh, 1200);
+      } catch (err) {
+        status.textContent = err.message;
+        for (const b of actions.querySelectorAll("button")) b.disabled = false;
+        if (err.status === 404 || err.status === 409) setTimeout(refresh, 1500);
+      }
+    };
+    actions.append(
+      h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-invite": "decline", onclick: () => act("decline") }, "Decline"),
+      h("button", { class: "btn btn-primary btn-sm", type: "button", "data-invite": "accept", onclick: () => act("accept") }, "Accept"),
+    );
+    return h(
+      "li",
+      { class: "invite-row", "data-invitation": inv.id, style: `--hue:${hue(inv.trip.destination)}` },
+      avatar(inv.inviter, "md"),
+      h(
+        "div",
+        { class: "grow" },
+        h("p", { class: "small muted" }, h("strong", {}, inv.inviter.displayName), ` @${inv.inviter.username} invited you to plan`),
+        h("h3", {}, inv.trip.title),
+        h("p", { class: "small" }, `${inv.trip.destination} · ${fmtRange(inv.trip.startDate, inv.trip.endDate)} · ${inv.trip.people} ${inv.trip.people === 1 ? "traveller" : "travellers"}`),
+        status,
+      ),
+      actions,
+    );
+  };
+  let refreshing = null;
+  const refresh = async () => {
+    refreshing ??= api("/api/invitations")
+      .then((r) => {
+        invites = r;
+        renderInvites();
+      })
+      .catch(() => {})
+      .finally(() => (refreshing = null));
+    return refreshing;
+  };
+  const events = new EventSource("/api/me/events");
+  events.addEventListener("invitations", (e) => {
+    if (JSON.parse(e.data).pending !== invites.invitations.length || invites.invitations.length) refresh();
+  });
+  const onTrips = () => api("/api/trips").then((d) => {
+    data = d;
+    renderLists();
+  }).catch(() => {});
+  const lists = h("div", {});
+  const renderLists = () =>
+    fill(
+      lists,
+      section(
+        "Planned by you",
+        data.owned,
+        h(
+          "div",
+          { class: "empty" },
+          h("h3", {}, "No trips yet"),
+          h("p", {}, "Create a trip, pick your dates, then start adding the places you want to see."),
+          h("button", { class: "btn btn-primary", type: "button", onclick: newTripDialog }, "Plan your first trip"),
+        ),
+      ),
+      section("Shared with you", data.shared, h("p", { class: "muted" }, "When someone invites you to their trip and you accept, it shows up here.")),
+    );
+  events.addEventListener("open", onTrips);
+
   app.querySelector(".dash").replaceChildren(
     h(
       "div",
@@ -320,19 +468,12 @@ async function renderDashboard() {
       h("div", {}, h("p", { class: "eyebrow" }, "Your trips"), h("h1", {}, `Where to next, ${state.me.displayName}?`)),
       h("button", { class: "btn btn-primary", type: "button", onclick: newTripDialog }, icon("plus"), "New trip"),
     ),
-    section(
-      "Planned by you",
-      data.owned,
-      h(
-        "div",
-        { class: "empty" },
-        h("h3", {}, "No trips yet"),
-        h("p", {}, "Create a trip, pick your dates, then start adding the places you want to see."),
-        h("button", { class: "btn btn-primary", type: "button", onclick: newTripDialog }, "Plan your first trip"),
-      ),
-    ),
-    section("Shared with you", data.shared, h("p", { class: "muted" }, "When someone invites you to their trip, it shows up here.")),
+    invitesBox,
+    lists,
   );
+  renderInvites();
+  renderLists();
+  return () => events.close();
 }
 
 const hue = (s) => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);

@@ -22,7 +22,7 @@ Small groups, roughly two to six people, planning a short trip together, who car
 
 ## How collaboration works
 
-Everyone invited to a trip edits the same itinerary, which lives on the server. When someone adds a stop, moves lunch to one o'clock or changes how long the museum takes, the change is saved and then pushed to every open editor, appearing within about a second. An edit made against an outdated version is refused instead of silently overwriting someone. Trips are private: only the owner and people they invite through a revocable link can see or change them.
+Everyone invited to a trip edits the same itinerary, which lives on the server. When someone adds a stop, moves lunch to one o'clock or changes how long the museum takes, the change is saved and then pushed to every open editor, appearing within about a second. An edit made against an outdated version is refused instead of silently overwriting someone. Trips are private: only the owner and the people they invite can see or change them. The owner invites in one of two ways: a revocable link, or by searching for someone's username and sending them an invitation, which waits in their My Trips until they accept or decline it. Each account has a unique username and a unique display name, so the person you find is the person you meant.
 
 Two people on a trip can also talk it through in an audio-only voice call from the editor's top bar, while both keep editing the same plan. The call is between them: browser to browser over WebRTC, never recorded, transcribed or sent to the AI, and never part of the itinerary. One call has two people. Reliable calling across different networks needs a TURN relay configured on the server ([ADR 0004](docs/decisions/0004-webrtc-voice-calls.md)).
 

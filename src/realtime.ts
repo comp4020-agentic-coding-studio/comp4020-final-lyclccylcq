@@ -27,6 +27,7 @@ export type HubHooks = {
 
 export function createHub(hooks: HubHooks = {}) {
   const rooms = new Map<string, Set<Conn>>();
+  const users = new Map<string, Set<ServerResponse>>(); // userId -> their own streams
 
   const write = (c: Conn, event: string, data: unknown) => {
     c.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -60,6 +61,7 @@ export function createHub(hooks: HubHooks = {}) {
         }
       }
     }
+    for (const set of users.values()) for (const res of set) res.write(": keep-alive\n\n");
   }, 20_000);
   heartbeat.unref();
 
@@ -144,10 +146,40 @@ export function createHub(hooks: HubHooks = {}) {
       return true;
     },
 
+    // A signed-in person's own stream (not a trip's): it carries only
+    // "something about your invitations changed", never trip content, so
+    // nobody sees a trip before they've joined it.
+    joinUser(userId: string, res: ServerResponse, initial: unknown): void {
+      res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", connection: "keep-alive", "x-accel-buffering": "no" });
+      res.write("retry: 4000\n\n");
+      if (!users.has(userId)) users.set(userId, new Set());
+      users.get(userId)?.add(res);
+      res.write(`event: invitations\ndata: ${JSON.stringify(initial)}\n\n`);
+      res.on("close", () => {
+        const set = users.get(userId);
+        set?.delete(res);
+        if (set?.size === 0) users.delete(userId);
+      });
+    },
+
+    toUser(userId: string, event: string, data: unknown): number {
+      const set = users.get(userId);
+      for (const res of set ?? []) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      return set?.size ?? 0;
+    },
+
+    // signing out closes that person's own streams
+    closeUser(userId: string): void {
+      for (const res of users.get(userId) ?? []) res.end();
+      users.delete(userId);
+    },
+
     closeAll(): void {
       clearInterval(heartbeat);
       for (const room of rooms.values()) for (const c of room) c.res.end();
       rooms.clear();
+      for (const set of users.values()) for (const res of set) res.end();
+      users.clear();
     },
   };
 }

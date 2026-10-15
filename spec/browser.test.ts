@@ -570,3 +570,69 @@ describe.skipIf(!chromePath)("My Trips", () => {
     }
   });
 });
+
+// Unique names and the two ways to invite, in two separate browsers (two
+// accounts): the owner finds someone by username and invites them; the
+// invitation appears live in the other person's My Trips, survives a
+// reload, and accepting it opens the trip.
+describe.skipIf(!chromePath)("unique names and inviting by username", () => {
+  for (const vp of VIEWPORTS) {
+    it(`flags a taken display name inline, then invites by username end to end (${vp.name})`, async () => {
+      const owner = await browser!.newPage();
+      const guest = await browser!.newPage();
+      for (const p of [owner, guest]) await p.viewport(vp.width, vp.height, vp.mobile);
+      const ownerName = uniqueName("own");
+      const guestUser = uniqueName("guest_");
+      const fill = (p: Page, display: string, user: string) =>
+        p.eval(`(() => { const f = document.querySelector('.auth-form'); f.displayName.value = ${JSON.stringify(display)}; f.username.value = ${JSON.stringify(user)}; f.password.value = 'correct horse battery'; f.requestSubmit(); })()`);
+      await owner.goto(new URL("/login", baseUrl).href);
+      await fill(owner, `Owner ${ownerName}`, ownerName);
+      await owner.waitFor(`location.pathname === '/'`, 5000);
+
+      // the same display name in other case and spacing: refused at the field, and nothing typed is lost
+      await guest.goto(new URL("/login", baseUrl).href);
+      await fill(guest, `  owner ${ownerName.toUpperCase()} `, guestUser);
+      await guest.waitFor(`document.querySelector('#msg-displayName')?.textContent === 'That display name is already taken.'`, 5000);
+      expect(await guest.eval(`document.querySelector('[name=displayName]').getAttribute('aria-invalid')`)).toBe("true");
+      expect(await guest.eval(`document.querySelector('[name=username]').value`)).toBe(guestUser);
+      expect(await guest.eval(`location.pathname`)).toBe("/login");
+      await fill(guest, `旅人 ${guestUser}`, guestUser);
+      await guest.waitFor(`location.pathname === '/'`, 5000);
+
+      // the guest waits on My Trips
+      await guest.goto(new URL("/trips", baseUrl).href);
+      await guest.waitFor(`document.querySelector('.dash-section')`, 5000);
+      expect(await guest.eval(`document.querySelector('.invites').hidden`)).toBe(true);
+
+      const trip = await inPage(owner, "POST", "/api/trips", { title: "Named invite", destination: "Kyoto", startDate: "2026-11-20", endDate: "2026-11-22", timezone: "Asia/Tokyo" });
+      await owner.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+      await owner.waitFor(`document.querySelector('.conn-live')`, 8000);
+      await owner.eval(`[...document.querySelectorAll('.trip-bar button')].find(b => b.textContent.includes('Share')).click()`);
+      await owner.waitFor(`document.querySelector('#share-by-name') && document.querySelector('#share-by-link')`, 3000); // both methods
+      await owner.eval(`(() => { const i = document.querySelector('.invitee-input'); i.value = ${JSON.stringify(guestUser.toUpperCase())}; i.dispatchEvent(new Event('input')); })()`);
+      await owner.waitFor(`document.querySelector('.invitee')`, 4000);
+      expect(await owner.eval<string>(`document.querySelector('.invitee').innerText`)).toContain(`@${guestUser}`);
+      expect(await owner.eval(`document.querySelector('[data-share=invite]').disabled`)).toBe(true); // nothing until chosen
+      await owner.tap(".invitee");
+      await sleep(500);
+      expect((await inPage(guest, "GET", "/api/invitations")).invitations).toEqual([]); // choosing sends nothing
+      await owner.tap("[data-share=invite]");
+      await owner.waitFor(`/Invitation sent/.test(document.querySelector('.share-method [role=status]').textContent) && document.querySelector('.invitations [data-status=pending]')`, 4000);
+      expect(await owner.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+
+      // appears live, and again after a reload
+      await guest.waitFor(`document.querySelector('.invite-row h3')?.textContent === 'Named invite'`, 5000);
+      expect(await guest.eval<string>(`document.querySelector('.invite-row').innerText`)).toContain(`Owner ${ownerName}`);
+      await guest.goto(new URL("/trips", baseUrl).href);
+      await guest.waitFor(`document.querySelector('.invite-row')`, 5000);
+      expect(await guest.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+      await guest.tap("[data-invite=accept]");
+      await guest.waitFor(`location.pathname === '/trips/${trip.id}' && document.querySelector('.conn-live')`, 8000);
+      // the owner's open dialog follows: Accepted, and a new member
+      await owner.waitFor(`document.querySelector('.invitations [data-status=accepted]') && document.querySelectorAll('.members li').length === 2`, 5000);
+      await guest.goto(new URL("/trips", baseUrl).href);
+      await guest.waitFor(`document.querySelector('.dash-section')`, 5000);
+      expect(await guest.eval(`[...document.querySelectorAll('.dash-section')].find(s => s.textContent.includes('Shared with you')).querySelector('h3')?.textContent`)).toBe("Named invite");
+    });
+  }
+});

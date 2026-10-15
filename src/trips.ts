@@ -190,7 +190,9 @@ function placeInput(v: unknown): { placeId: string; source: string; lat: number;
 
 // --- the store ---------------------------------------------------------------
 
-export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChange: (tripId: string) => void = () => {}) {
+// onInvitation(userId): that person's pending invitations changed; tell their
+// open pages. It carries no trip data, so it grants nothing.
+export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChange: (tripId: string) => void = () => {}, onInvitation: (userId: string) => void = () => {}) {
   const q = (sql: string) => db.prepare(sql);
 
   function roleOf(tripId: string, userId: string): Role | null {
@@ -556,8 +558,10 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
 
     remove(userId: string, tripId: string): void {
       requireOwner(tripId, userId);
+      const invited = q("select invitee_id from trip_invitations where trip_id = ? and status = 'pending'").all(tripId).map((r) => String(r.invitee_id));
       q("delete from trips where id = ?").run(tripId);
       onChange(tripId);
+      for (const id of invited) onInvitation(id);
     },
 
     // --- sharing ---
@@ -601,6 +605,122 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         );
       }
       return preview.tripId;
+    },
+
+    // --- inviting an existing account by username ---
+
+    // Owner-only search for someone to invite: accounts whose username
+    // starts with or contains the query (taken literally, so _ . - aren't
+    // wildcards), exact match first, at most 8. Each says whether it's you,
+    // already on the trip, or already invited. Only what choosing needs.
+    searchInvitees(userId: string, tripId: string, query: unknown) {
+      requireOwner(tripId, userId);
+      const raw = typeof query === "string" ? query.trim().replace(/^@/, "").toLowerCase() : "";
+      if (raw.length < 2) throw bad("Type at least 2 characters of a username.");
+      if (raw.length > 32 || !/^[a-z0-9_.-]+$/.test(raw)) return { query: raw, results: [] };
+      const rows = q(
+        `select u.id, u.username, u.display_name,
+                (select role from trip_members m where m.trip_id = ? and m.user_id = u.id) as role,
+                (select 1 from trip_invitations i where i.trip_id = ? and i.invitee_id = u.id and i.status = 'pending') as pending
+           from users u
+          where instr(lower(u.username), ?) > 0
+          order by lower(u.username) = ? desc, instr(lower(u.username), ?) = 1 desc, length(u.username), lower(u.username)
+          limit 8`,
+      ).all(tripId, tripId, raw, raw, raw);
+      return {
+        query: raw,
+        results: rows.map((r) => ({
+          id: String(r.id),
+          username: String(r.username),
+          displayName: String(r.display_name),
+          status: String(r.id) === userId ? "you" : r.role ? "member" : r.pending ? "invited" : "available",
+        })),
+      };
+    },
+
+    // An invitation addressed to one account. It adds nobody: the invitee
+    // accepts it from My Trips. One pending per person per trip (the partial
+    // unique index decides under concurrent requests).
+    inviteUser(userId: string, tripId: string, input: Row) {
+      requireOwner(tripId, userId);
+      const inviteeId = input.userId;
+      if (typeof inviteeId !== "string" || !q("select 1 from users where id = ?").get(inviteeId)) throw notFound("That account doesn't exist.");
+      if (inviteeId === userId) throw bad("You're already on this trip.");
+      if (roleOf(tripId, inviteeId)) throw new HttpError(409, "They're already on this trip.", { code: "member" });
+      const id = randomUUID();
+      try {
+        q("insert into trip_invitations (id, trip_id, inviter_id, invitee_id, status, created_at) values (?, ?, ?, ?, 'pending', ?)").run(id, tripId, userId, inviteeId, now());
+      } catch (err) {
+        if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) throw new HttpError(409, "They've already been invited.", { code: "invited" });
+        throw err;
+      }
+      onInvitation(inviteeId);
+      return { invitation: store.invitationsFor(userId, tripId).find((i) => i.id === id) };
+    },
+
+    // The owner's view of named invitations: pending ones, then the latest
+    // outcome for anyone else they invited.
+    invitationsFor(userId: string, tripId: string) {
+      requireOwner(tripId, userId);
+      return q(
+        `select i.id, i.status, i.created_at, i.resolved_at, u.id as user_id, u.username, u.display_name
+           from trip_invitations i join users u on u.id = i.invitee_id
+          where i.trip_id = ? order by i.status = 'pending' desc, coalesce(i.resolved_at, i.created_at) desc limit 30`,
+      ).all(tripId).map((r) => ({
+        id: String(r.id),
+        status: String(r.status),
+        createdAt: Number(r.created_at),
+        resolvedAt: r.resolved_at === null ? null : Number(r.resolved_at),
+        user: { id: String(r.user_id), username: String(r.username), displayName: String(r.display_name) },
+      }));
+    },
+
+    cancelInvitation(userId: string, tripId: string, invitationId: string): void {
+      requireOwner(tripId, userId);
+      const r = q("update trip_invitations set status = 'cancelled', resolved_at = ? where id = ? and trip_id = ? and status = 'pending' returning invitee_id").get(now(), invitationId, tripId);
+      if (!r) throw notFound("That invitation isn't pending any more.");
+      onInvitation(String(r.invitee_id));
+    },
+
+    // What the signed-in person has been invited to and hasn't answered.
+    pendingFor(userId: string) {
+      return q(
+        `select i.id, i.created_at, t.id as trip_id, t.title, t.destination, t.start_date, t.end_date,
+                u.display_name as inviter_name, u.username as inviter_username, u.id as inviter_id,
+                (select count(*) from trip_members x where x.trip_id = t.id) as people
+           from trip_invitations i join trips t on t.id = i.trip_id join users u on u.id = i.inviter_id
+          where i.invitee_id = ? and i.status = 'pending' order by i.created_at desc`,
+      ).all(userId).map((r) => ({
+        id: String(r.id),
+        createdAt: Number(r.created_at),
+        inviter: { id: String(r.inviter_id), username: String(r.inviter_username), displayName: String(r.inviter_name) },
+        trip: { id: String(r.trip_id), title: String(r.title), destination: String(r.destination), startDate: String(r.start_date), endDate: String(r.end_date), people: Number(r.people) },
+      }));
+    },
+
+    // Accepting: only the invitee, only while pending and the trip exists;
+    // membership and the invitation's end happen in one mutate(), so the
+    // trip's live editors get the new member. Accepting twice is harmless.
+    acceptInvitation(userId: string, invitationId: string): string {
+      const inv = q("select * from trip_invitations where id = ?").get(invitationId);
+      if (!inv || String(inv.invitee_id) !== userId) throw notFound("That invitation doesn't exist.");
+      const tripId = String(inv.trip_id);
+      if (inv.status === "accepted" && roleOf(tripId, userId)) return tripId;
+      if (inv.status !== "pending") throw new HttpError(409, inv.status === "cancelled" ? "The owner cancelled this invitation." : "This invitation has already been answered.");
+      mutate(tripId, userId, () => {
+        // checked again inside the transaction: a concurrent accept or cancel may have won
+        const r = q("update trip_invitations set status = 'accepted', resolved_at = ? where id = ? and status = 'pending'").run(now(), invitationId);
+        if (Number(r.changes) !== 1) throw new HttpError(409, "This invitation has already been answered.");
+        q("insert into trip_members (trip_id, user_id, role, joined_at) values (?, ?, 'collaborator', ?) on conflict do nothing").run(tripId, userId, now());
+      });
+      onInvitation(userId);
+      return tripId;
+    },
+
+    declineInvitation(userId: string, invitationId: string): void {
+      const r = q("update trip_invitations set status = 'declined', resolved_at = ? where id = ? and invitee_id = ? and status = 'pending'").run(now(), invitationId, userId);
+      if (Number(r.changes) !== 1) throw notFound("That invitation isn't pending any more.");
+      onInvitation(userId);
     },
 
     // The owner can remove a collaborator; a collaborator can remove themself.

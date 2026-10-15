@@ -11,7 +11,7 @@ import { createDiscovery } from "./discovery.ts";
 import { computeRouteOptions, DEMO_PLACES, googleConfigured, mapsKeyWarnings, placeDetails, searchPlaces } from "./google.ts";
 import { createItineraryStore } from "./itineraries.ts";
 import { renderMarkdown } from "./markdown.ts";
-import { createLimiter } from "./ratelimit.ts";
+import { clientIp, createLimiter } from "./ratelimit.ts";
 import { createHub } from "./realtime.ts";
 import { zonedTimeToUtc } from "./schedule.ts";
 import { createTripStore, type TripSnapshot } from "./trips.ts";
@@ -22,16 +22,23 @@ const hub = createHub({
   onJoin: (tripId, userId, session) => calls.joined(tripId, userId, session),
   onLeave: (tripId, userId, session) => calls.left(tripId, userId, session),
 });
-const trips = createTripStore(db, Date.now, (tripId) => {
-  let snap: TripSnapshot | null = null;
-  try {
-    snap = trips.snapshot(tripId);
-  } catch {
-    snap = null; // the trip was deleted
-  }
-  hub.publish(tripId, snap, (userId) => trips.roleOf(tripId, userId) !== null);
-  calls.checkTrip(tripId);
-});
+const trips = createTripStore(
+  db,
+  Date.now,
+  (tripId) => {
+    let snap: TripSnapshot | null = null;
+    try {
+      snap = trips.snapshot(tripId);
+    } catch {
+      snap = null; // the trip was deleted
+    }
+    hub.publish(tripId, snap, (userId) => trips.roleOf(tripId, userId) !== null);
+    calls.checkTrip(tripId);
+  },
+  // only a count goes down the person's own stream; the page then asks for
+  // the list with its own session
+  (userId) => hub.toUser(userId, "invitations", { pending: trips.pendingFor(userId).length }),
+);
 const isMember = (tripId: string, userId: string): boolean => {
   try {
     return trips.roleOf(tripId, userId) !== null;
@@ -64,6 +71,9 @@ const copilot = createCopilot(aiProvider(), {
 });
 const callLimit = createLimiter(60, 60_000); // invites, answers and hang-ups per person per minute
 const iceLimit = createLimiter(20, 60_000);
+const searchLimit = createLimiter(60, 60_000); // username searches per owner per minute
+const inviteLimit = createLimiter(30, 60_000);
+const availabilityLimit = createLimiter(60, 60_000); // per IP, before an account exists
 const port = Number(process.env.PORT ?? 8080);
 
 const TYPES: Record<string, string> = {
@@ -178,9 +188,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     const { user, token } = path.endsWith("signup") ? await auth.signup(input) : await auth.login(input);
     return json(res, path.endsWith("signup") ? 201 : 200, { user }, { "set-cookie": sessionCookie(token, isSecure(req)) });
   }
+  // sign-up form feedback; the insert still has the final say
+  if (method === "GET" && path === "/api/auth/available") {
+    availabilityLimit(clientIp(req));
+    return json(res, 200, auth.availability({ username: url.searchParams.get("username") ?? undefined, displayName: url.searchParams.get("displayName") ?? undefined }));
+  }
   if (method === "POST" && path === "/api/auth/logout") {
     const leaving = auth.userForToken(readCookie(req.headers.cookie, COOKIE));
     if (leaving) calls.endFor(leaving.id, "signed-out");
+    if (leaving) hub.closeUser(leaving.id);
     auth.logout(readCookie(req.headers.cookie, COOKIE));
     return json(res, 200, { ok: true }, { "set-cookie": clearCookie(isSecure(req)) });
   }
@@ -203,7 +219,17 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     }
   }
 
-  let m = path.match(/^\/api\/invites\/([A-Za-z0-9_-]+)(\/accept)?$/);
+  // invitations addressed to me (by username, from a trip's owner)
+  if (method === "GET" && path === "/api/me/events") return hub.joinUser(user.id, res, { pending: trips.pendingFor(user.id).length });
+  if (method === "GET" && path === "/api/invitations") return json(res, 200, { invitations: trips.pendingFor(user.id) });
+  let m = path.match(/^\/api\/invitations\/([0-9a-f-]{36})\/(accept|decline)$/);
+  if (method === "POST" && m) {
+    if (m[2] === "accept") return json(res, 200, { tripId: trips.acceptInvitation(user.id, m[1]) });
+    trips.declineInvitation(user.id, m[1]);
+    return json(res, 200, { ok: true });
+  }
+
+  m = path.match(/^\/api\/invites\/([A-Za-z0-9_-]+)(\/accept)?$/);
   if (m) {
     if (method === "GET" && !m[2]) return json(res, 200, trips.previewInvite(user.id, m[1]));
     if (method === "POST" && m[2]) return json(res, 200, { tripId: trips.acceptInvite(user.id, m[1]) });
@@ -256,7 +282,25 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     }
   }
 
-  let r = rest.match(/^\/members\/([0-9a-f-]{36})$/);
+  // inviting an existing account by username: owner only (checked in the store)
+  if (method === "GET" && rest === "/invitees") {
+    searchLimit(user.id);
+    return json(res, 200, trips.searchInvitees(user.id, tripId, url.searchParams.get("q")));
+  }
+  if (rest === "/invitations") {
+    if (method === "GET") return json(res, 200, { invitations: trips.invitationsFor(user.id, tripId) });
+    if (method === "POST") {
+      inviteLimit(user.id);
+      return json(res, 201, trips.inviteUser(user.id, tripId, await body(req)));
+    }
+  }
+  let r = rest.match(/^\/invitations\/([0-9a-f-]{36})$/);
+  if (method === "DELETE" && r) {
+    trips.cancelInvitation(user.id, tripId, r[1]);
+    return json(res, 200, { ok: true });
+  }
+
+  r = rest.match(/^\/members\/([0-9a-f-]{36})$/);
   if (method === "DELETE" && r) {
     trips.removeMember(user.id, tripId, r[1]);
     return json(res, 200, { ok: true });

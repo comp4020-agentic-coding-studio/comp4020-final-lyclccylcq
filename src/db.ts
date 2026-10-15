@@ -169,7 +169,64 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
   // the trip's usual meal times as JSON; null means the defaults in trips.ts
   const tripCols = db.prepare("pragma table_info(trips)").all().map((c) => String(c.name));
   if (!tripCols.includes("meal_times")) db.exec("alter table trips add column meal_times text");
+  migrateDisplayNames(db);
+
+  // An invitation from a trip's owner to one existing account, by user id.
+  // It grants nothing until the invitee accepts. Only one can be pending per
+  // person per trip; accepted, declined and cancelled ones are kept as a
+  // record but never let anyone in again.
+  db.exec(`
+    create table if not exists trip_invitations (
+      id          text primary key,
+      trip_id     text not null references trips(id) on delete cascade,
+      inviter_id  text not null references users(id) on delete cascade,
+      invitee_id  text not null references users(id) on delete cascade,
+      status      text not null check (status in ('pending', 'accepted', 'declined', 'cancelled')),
+      created_at  integer not null,
+      resolved_at integer
+    );
+    create unique index if not exists trip_invitations_one_pending on trip_invitations(trip_id, invitee_id) where status = 'pending';
+    create index if not exists trip_invitations_by_invitee on trip_invitations(invitee_id, status);
+  `);
   return db;
+}
+
+// The comparison key for a display name: Unicode-normalised (NFKC, so
+// full-width and compatibility forms match their plain ones), trimmed, inner
+// whitespace collapsed, and lower-cased by Unicode rules. Computed here, not
+// by SQLite, whose NOCASE folds only ASCII. Chinese and other scripts without
+// case keep their characters as typed.
+export const displayNameKey = (s: string): string => s.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("und");
+
+// Display names became unique in October 2026. Existing accounts get their
+// comparison key filled in; the unique index is created only if no two keys
+// already collide. Nobody is renamed, merged or deleted here: on a collision
+// the index waits, the colliding accounts keep a null key, and the server
+// still refuses new duplicates in code (auth.ts) until someone resolves them.
+export function migrateDisplayNames(db: DatabaseSync): { collisions: number } {
+  const cols = db.prepare("pragma table_info(users)").all().map((c) => String(c.name));
+  if (!cols.includes("display_name_key")) db.exec("alter table users add column display_name_key text");
+  const hasIndex = db.prepare("select 1 from sqlite_master where type = 'index' and name = 'users_display_name_key'").get();
+  if (hasIndex) return { collisions: 0 };
+  const rows = db.prepare("select id, display_name from users").all();
+  const byKey = new Map<string, string[]>();
+  for (const r of rows) {
+    const k = displayNameKey(String(r.display_name));
+    byKey.set(k, [...(byKey.get(k) ?? []), String(r.id)]);
+  }
+  const colliding = [...byKey.values()].filter((ids) => ids.length > 1);
+  const blocked = new Set(colliding.flat());
+  transaction(db, () => {
+    const set = db.prepare("update users set display_name_key = ? where id = ?");
+    for (const [k, ids] of byKey) for (const id of ids) set.run(blocked.has(id) ? null : k, id);
+  });
+  if (colliding.length === 0) {
+    db.exec("create unique index users_display_name_key on users(display_name_key)");
+  } else {
+    // counts only: names are personal data and stay out of the log
+    console.warn(`display names: ${colliding.length} group(s) covering ${blocked.size} accounts already share a name; the unique index is waiting until they're resolved (see docs/unique-names.md).`);
+  }
+  return { collisions: colliding.length };
 }
 
 // Runs fn inside one write transaction: either every statement lands or none do.

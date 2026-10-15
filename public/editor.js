@@ -2063,17 +2063,157 @@ export async function openEditor(root, tripId, ctx) {
       );
     renderMembers();
     renderLink(null);
+
+    // --- invite by username: search, choose, then an explicit Invite ---
+    const STATUS = { you: "You", member: "Already a member", invited: "Invited", available: null };
+    const nameInput = h("input", { type: "search", class: "invitee-input", placeholder: "Search by username", "aria-label": "Search by username", autocomplete: "off", spellcheck: "false", autocapitalize: "none", maxlength: 33 });
+    const results = h("ul", { class: "invitee-results", role: "listbox", "aria-label": "Matching accounts" });
+    const searchNote = h("p", { class: "small muted", role: "status", "aria-live": "polite" }, "Type at least 2 characters of their username.");
+    const sent = h("ul", { class: "invitations" });
+    let chosen = null;
+    let seq = 0;
+    let timer = null;
+    const inviteBtn = h("button", { class: "btn btn-primary btn-sm", type: "button", "data-share": "invite", disabled: true }, "Invite");
+    const choose = (r) => {
+      chosen = r;
+      for (const li of results.children) li.setAttribute("aria-selected", String(li.dataset.user === r?.id));
+      inviteBtn.disabled = !r || r.status !== "available";
+      inviteBtn.textContent = r ? (r.status === "available" ? `Invite @${r.username}` : STATUS[r.status]) : "Invite";
+    };
+    const resultRow = (r) =>
+      h(
+        "li",
+        {
+          class: "invitee",
+          role: "option",
+          tabindex: 0,
+          "aria-selected": "false",
+          "data-user": r.id,
+          "aria-disabled": String(r.status !== "available"),
+          onclick: () => choose(r),
+          onkeydown: (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), choose(r)),
+        },
+        avatar(r, "sm"),
+        h("span", { class: "grow" }, h("strong", {}, r.displayName), h("br"), h("small", { class: "muted" }, `@${r.username}`)),
+        STATUS[r.status] && h("span", { class: `chip ${r.status === "invited" ? "chip-soft" : ""}` }, STATUS[r.status]),
+      );
+    const search = () => {
+      clearTimeout(timer);
+      choose(null);
+      const q = nameInput.value.trim().replace(/^@/, "");
+      if (q.length < 2) {
+        seq++;
+        results.replaceChildren();
+        searchNote.textContent = "Type at least 2 characters of their username.";
+        return;
+      }
+      searchNote.textContent = "Searching…";
+      timer = setTimeout(async () => {
+        const mine = ++seq;
+        try {
+          const r = await api(`${base}/invitees?${new URLSearchParams({ q })}`);
+          if (mine !== seq) return; // a newer search is on its way
+          results.replaceChildren(...r.results.map(resultRow));
+          searchNote.textContent = r.results.length ? "Choose an account, then press Invite." : `No account matches “${q}”.`;
+        } catch (err) {
+          if (mine !== seq) return;
+          results.replaceChildren();
+          searchNote.textContent = err.message;
+        }
+      }, 300);
+    };
+    nameInput.addEventListener("input", search);
+    const LABEL = { pending: "Invited", accepted: "Accepted", declined: "Declined", cancelled: "Cancelled" };
+    const loadSent = async () => {
+      try {
+        const { invitations } = await api(`${base}/invitations`);
+        sent.replaceChildren(
+          ...invitations.map((i) =>
+            h(
+              "li",
+              { "data-invitation": i.id },
+              avatar(i.user, "sm"),
+              h("span", { class: "grow" }, h("strong", {}, i.user.displayName), h("br"), h("small", { class: "muted" }, `@${i.user.username}`)),
+              h("span", { class: `chip ${i.status === "accepted" ? "chip-live" : "chip-soft"}`, "data-status": i.status }, LABEL[i.status]),
+              i.status === "pending" &&
+                h(
+                  "button",
+                  {
+                    class: "btn btn-ghost btn-sm",
+                    type: "button",
+                    "data-share": "cancel",
+                    "aria-label": `Cancel the invitation to @${i.user.username}`,
+                    onclick: async (e) => {
+                      e.target.disabled = true;
+                      await api(`${base}/invitations/${i.id}`, { method: "DELETE" }).catch((err) => toast(err.message, { kind: "error" }));
+                      loadSent();
+                      if (nameInput.value.trim().length >= 2) search();
+                    },
+                  },
+                  "Cancel",
+                ),
+            ),
+          ),
+        );
+      } catch {
+        // the list is a convenience; the invitations themselves are safe
+      }
+    };
+    inviteBtn.addEventListener("click", async () => {
+      if (!chosen || chosen.status !== "available") return;
+      const who = chosen;
+      inviteBtn.disabled = true;
+      try {
+        await api(`${base}/invitations`, { method: "POST", body: { userId: who.id } });
+        // the search is done with; the sent list below keeps the "Invited" state
+        seq++;
+        nameInput.value = "";
+        results.replaceChildren();
+        choose(null);
+        searchNote.textContent = `Invitation sent to ${who.displayName} (@${who.username}). They'll see it in My Trips.`;
+        await loadSent();
+      } catch (err) {
+        searchNote.textContent = err.message;
+        if (err.status === 409) search();
+        else inviteBtn.disabled = false;
+      }
+    });
+    const byName = isOwner && h(
+      "section",
+      { class: "share-method", "aria-labelledby": "share-by-name" },
+      h("h3", { id: "share-by-name" }, "Invite by username"),
+      h("p", { class: "small muted" }, "Send an invitation to someone who already has a Wayline account. They join when they accept it in My Trips."),
+      h("div", { class: "invitee-search" }, nameInput, inviteBtn),
+      searchNote,
+      results,
+      sent,
+    );
+    const byLink = isOwner && h(
+      "section",
+      { class: "share-method", "aria-labelledby": "share-by-link" },
+      h("h3", { id: "share-by-link" }, "Invite by link"),
+      linkBox,
+    );
+    if (isOwner) loadSent();
+    // someone accepted while this was open: their status and the member list follow
+    const onSnap = () => {
+      if (!dialog.open) return events.removeEventListener("snapshot", onSnap);
+      renderMembers();
+      if (isOwner) loadSent();
+    };
+    events.addEventListener("snapshot", () => setTimeout(onSnap, 0));
+
     const dialog = openDialog(
       h(
         "dialog",
-        { class: "dialog" },
+        { class: "dialog dialog-share" },
         h(
           "div",
           { class: "stack" },
           h("h2", {}, "People on this trip"),
           list,
-          isOwner ? h("h3", {}, "Invite someone") : h("p", { class: "small muted" }, "Only the owner can invite people."),
-          linkBox,
+          isOwner ? byName : h("p", { class: "small muted" }, "Only the owner can invite people."),
+          byLink,
           h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-primary", type: "button", onclick: () => dialog.close() }, "Done")),
         ),
       ),
