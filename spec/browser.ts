@@ -29,6 +29,8 @@ export type Page = {
   // a real (trusted) mouse click at the element's centre, which counts as a
   // user gesture for the browser's autoplay rules; click() doesn't always
   tap(selector: string): Promise<void>;
+  // a real click at viewport coordinates (a spot on a map, say)
+  tapAt(x: number, y: number): Promise<void>;
   screenshot(path: string): Promise<void>;
   // the browser's location permission for this page's origin
   geolocation(origin: string, at: { lat: number; lng: number } | "denied"): Promise<void>;
@@ -160,6 +162,9 @@ export async function launch(opts: { media?: { wav: string } | "deny" } = {}) {
         );
         if (!at) throw new Error(`nothing to tap at ${selector}`);
         for (const type of ["mousePressed", "mouseReleased"]) await s("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+      },
+      async tapAt(x, y) {
+        for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await s("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
       },
       async click(selector) {
         const ok = await page.eval<boolean>(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.click(); return true; })()`);

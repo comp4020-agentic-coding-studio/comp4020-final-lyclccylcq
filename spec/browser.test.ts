@@ -638,3 +638,33 @@ describe.skipIf(!chromePath)("unique names and inviting by username", () => {
     });
   }
 });
+
+// "My spot" and the collaboration notice. pnpm check runs without a Google
+// key, so this checks the honest schematic and the removed banner; the full
+// journey on the real Google map is scripts/live-map-check.ts.
+describe.skipIf(!chromePath)("my spot and view sharing", () => {
+  it("shows no banner over the map, explains view sharing in the share dialog, and offers no fake 'my spot' on the schematic", async () => {
+    const a = await browser!.newPage();
+    const b = await browser!.newPage();
+    for (const p of [a, b]) await p.viewport(1920, 1080);
+    await signUpIn(a, baseUrl, uniqueName("ms"));
+    await signUpIn(b, baseUrl, uniqueName("mt"));
+    const trip = await tripWithStops(a);
+    const { token } = await inPage(a, "POST", `/api/trips/${trip.id}/invite`, {});
+    await inPage(b, "POST", `/api/invites/${token}/accept`, {});
+    await a.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await b.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    for (const p of [a, b]) await p.waitFor(`document.querySelector('.conn-live') && /2 people/.test(document.querySelector('.presence-label')?.textContent ?? '')`, 8000);
+    expect(await a.eval(`document.querySelector('.schematic') !== null`)).toBe(true);
+    // no notice over the map, even with someone else here
+    expect(await a.eval(`Boolean(document.querySelector('.view-note')) || /can see where your map is looking/.test(document.querySelector('.pane-map').textContent)`)).toBe(false);
+    // the schematic isn't a map: no personal marker, no way to "return" to a place
+    expect(await a.eval(`Boolean(document.querySelector('.my-spot, [data-map=return]'))`)).toBe(false);
+    await a.eval(`document.querySelector('.schematic-svg').dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 600, clientY: 500 }))`);
+    expect(await a.eval(`Object.keys(sessionStorage).some(k => k.startsWith('wayline.mySpot'))`)).toBe(false);
+    // the explanation is in the collaboration dialog instead
+    await a.eval(`[...document.querySelectorAll('.trip-bar button')].find(b => b.textContent.includes('Share')).click()`);
+    await a.waitFor(`document.querySelector('[data-share=view-note]')`, 3000);
+    expect(await a.eval<string>(`document.querySelector('[data-share=view-note]').textContent`)).toMatch(/where your map is looking.*never your location/);
+  });
+});

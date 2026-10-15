@@ -978,11 +978,37 @@ textarea { resize: vertical; }
 .peer-arrow { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--pc); color: #fff; font-size: 13px; line-height: 1; transition: transform .15s; }
 .peer-tag { overflow: hidden; text-overflow: ellipsis; }
 .peer-edge:hover, .peer-marker:hover .peer-name { background: #fff; }
-.view-note { position: absolute; z-index: 2; left: 12px; bottom: 30px; max-width: min(380px, calc(100% - 24px)); font-size: 12px; color: var(--ink-2); background: rgba(255,255,255,.92); padding: 4px 10px; border-radius: 999px; box-shadow: var(--shadow); }
-.view-note[hidden] { display: none; }
 @media (max-width: 899px) {
-  .view-note { bottom: auto; top: 64px; }
   .peer-edge { max-width: 160px; font-size: 11px; }
+}
+
+/* --- "My spot": the last place you picked, and the way back to it --- */
+/* A target, not a pin: a dark ring with a sea-green centre and a small tab
+   label, unlike the numbered tear-drop stops and the round initials of
+   others' views. The label sits beside it, translucent and small, so an
+   overlapping view marker stays readable. */
+.my-spot { position: relative; display: grid; place-items: center; width: 30px; height: 30px; pointer-events: none; }
+.my-spot-dot { width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle, var(--sea) 0 5px, #fff 6px 8px, var(--ink) 9px 13px); box-shadow: 0 0 0 2px #fff, 0 3px 10px rgba(0,0,0,.35); }
+.my-spot-label { position: absolute; left: calc(100% + 4px); top: 50%; transform: translateY(-50%); font: 800 10.5px var(--sans); letter-spacing: .02em; color: #fff; background: rgba(28,36,48,.82); padding: 1px 6px; border-radius: 6px; white-space: nowrap; }
+.my-spot.is-pulsing .my-spot-dot { animation: my-spot-pulse 1.4s ease-out 2; }
+@keyframes my-spot-pulse { 0% { box-shadow: 0 0 0 2px #fff, 0 0 0 0 rgba(15,124,140,.65); } 100% { box-shadow: 0 0 0 2px #fff, 0 0 0 22px rgba(15,124,140,0); } }
+@media (prefers-reduced-motion: reduce) {
+  .my-spot.is-pulsing .my-spot-dot { animation: none; outline: 3px solid var(--sea); outline-offset: 3px; }
+}
+.map-control-box { margin: 10px; }
+.map-control {
+  display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px 0 10px; border: 0; border-radius: 999px;
+  background: #fff; color: var(--ink); font: 700 13.5px var(--sans); box-shadow: 0 1px 4px rgba(0,0,0,.3); cursor: pointer;
+}
+.map-control:hover:not(:disabled) { background: var(--paper); }
+.map-control:disabled { color: var(--muted); cursor: default; opacity: .8; }
+.map-control:focus-visible { outline: 3px solid var(--sea); outline-offset: 2px; }
+.my-spot-icon { width: 18px; height: 18px; border-radius: 50%; flex: none; background: radial-gradient(circle, var(--sea) 0 3px, transparent 4px 5px, currentColor 6px 8px, transparent 9px); }
+.map-control:not(:disabled) .my-spot-icon { color: var(--ink); }
+@media (max-width: 520px) {
+  /* phones: the icon alone, with its accessible name kept */
+  .map-control { width: 40px; padding: 0; justify-content: center; }
+  .my-spot-return-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 
 /* --- meals --- */

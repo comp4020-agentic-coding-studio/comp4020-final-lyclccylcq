@@ -91,8 +91,6 @@ export async function openEditor(root, tripId, ctx) {
   const searchForm = h("form", { class: "search", role: "search" }, icon("search"), searchInput, h("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Search"));
   const searchPanel = h("div", { class: "search-panel", hidden: true });
   const mapHost = h("div", { class: "map-host" });
-  // said whenever someone else is here, since their map shows where yours looks
-  const viewNote = h("p", { class: "view-note", hidden: true }, "Others on this trip can see where your map is looking (not your location).");
   const dayTabs = h("nav", { class: "day-tabs", role: "tablist", "aria-label": "Trip days" });
   const dayHead = h("div", { class: "day-head" });
   const timeline = h("ol", { class: "timeline", "aria-label": "Itinerary for the selected day" });
@@ -106,7 +104,7 @@ export async function openEditor(root, tripId, ctx) {
   const workspace = h(
     "main",
     { class: "workspace" },
-    h("section", { class: "pane pane-map", "aria-label": "Map and place search" }, searchForm, searchPanel, mapHost, viewNote),
+    h("section", { class: "pane pane-map", "aria-label": "Map and place search" }, searchForm, searchPanel, mapHost),
     h("section", { class: "pane pane-plan", "aria-label": "Itinerary" }, dayTabs, dayHead, timeline, planFoot),
     copilotPane,
   );
@@ -126,6 +124,31 @@ export async function openEditor(root, tripId, ctx) {
   });
 
   const isPhone = () => matchMedia("(max-width: 899px)").matches;
+
+  // "My spot": the latest place this person deliberately picked on the map
+  // (a click on the map or on a Google place), with the zoom it was picked
+  // at. Not the camera (S.myView follows every pan), a collaborator's view,
+  // the starting point, a search result or the device's location. Kept in
+  // this tab only (sessionStorage) and never sent to anyone.
+  const SPOT_KEY = `wayline.mySpot.${tripId}`;
+  const readSpot = () => {
+    try {
+      const v = JSON.parse(sessionStorage.getItem(SPOT_KEY) ?? "null");
+      return v && Number.isFinite(v.lat) && Number.isFinite(v.lng) && Math.abs(v.lat) <= 90 && Math.abs(v.lng) <= 180 ? v : null;
+    } catch {
+      return null;
+    }
+  };
+  function setMySpot(at) {
+    const spot = { lat: at.lat, lng: at.lng, zoom: Math.max(map.zoom?.() ?? 15, 14) };
+    try {
+      sessionStorage.setItem(SPOT_KEY, JSON.stringify(spot));
+    } catch {
+      // private mode: it still works until the page closes
+    }
+    map.setMySpot(spot);
+  }
+  if (map.kind === "google") map.setMySpot(readSpot());
 
   // --- server state ---
 
@@ -206,7 +229,6 @@ export async function openEditor(root, tripId, ctx) {
         return { displayName: name, initials: initials(v.displayName), colour: personColour(v.userId), lat: v.lat, lng: v.lng, zoom: v.zoom };
       });
     map.setPeers(list);
-    viewNote.hidden = !(S.presence.length > 1 && map.kind === "google");
   }
 
   // sent only while someone else has the trip open; nobody to tell otherwise
@@ -764,6 +786,7 @@ export async function openEditor(root, tripId, ctx) {
   function placeClicked(placeId, at) {
     const p = { placeId, name: "Loading place…", lat: at.lat, lng: at.lng, source: "google", types: [], pending: true };
     if (S.starting) return considerStartPlace(p);
+    setMySpot(at);
     pickPlace(p);
   }
 
@@ -771,6 +794,7 @@ export async function openEditor(root, tripId, ctx) {
   // make that spot the candidate.
   function mapClicked(at) {
     if (S.starting) return considerStartSpot(at);
+    setMySpot(at);
     exploreAt(at);
   }
 
@@ -2212,6 +2236,7 @@ export async function openEditor(root, tripId, ctx) {
           { class: "stack" },
           h("h2", {}, "People on this trip"),
           list,
+          h("p", { class: "small muted", "data-share": "view-note" }, "While others have this trip open, they see roughly where your map is looking (its centre and zoom, never your location), and you see theirs. Your “My spot” stays on your screen only."),
           isOwner ? byName : h("p", { class: "small muted" }, "Only the owner can invite people."),
           byLink,
           h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-primary", type: "button", onclick: () => dialog.close() }, "Done")),

@@ -99,6 +99,7 @@ async function googleMap(el, config, handlers) {
   overlay.setMap(map);
   // keep clear of the search bar (top), Google's attribution (bottom) and the
   // zoom buttons (right)
+  // and the "Return to my spot" control (top right)
   const EDGE = { top: 86, right: 64, bottom: 42, left: 18 };
 
   function layoutPeers() {
@@ -151,6 +152,43 @@ async function googleMap(el, config, handlers) {
   }
   map.addListener("bounds_changed", layoutPeers);
 
+  // --- "My spot": the last place this person deliberately picked ---
+  // Its own marker, outside update()'s rebuilt list and never part of a
+  // fitBounds, so later renders can't move or drop it. Local to this tab.
+  let mySpot = null;
+  const spotPin = h("span", { class: "my-spot", "aria-hidden": "true" }, h("span", { class: "my-spot-dot" }), h("span", { class: "my-spot-label" }, "My spot"));
+  const spotMarker = new AdvancedMarkerElement({ content: spotPin, title: "My spot: the last place you picked on the map", zIndex: 150 });
+  // "Return to my spot", a Google map control
+  const returnBtn = h(
+    "button",
+    { class: "map-control my-spot-return", type: "button", disabled: true, "data-map": "return", "aria-label": "Return to my spot", title: "Pick a spot on the map first" },
+    h("span", { class: "my-spot-icon", "aria-hidden": "true" }),
+    h("span", { class: "my-spot-return-text" }, "Return to my spot"),
+  );
+  // a control's events must never reach the map as a click on the map
+  for (const type of ["click", "dblclick", "pointerdown", "mousedown", "touchstart", "contextmenu"]) returnBtn.addEventListener(type, (e) => e.stopPropagation());
+  returnBtn.addEventListener("click", () => api.returnToMySpot());
+  const controlBox = h("div", { class: "map-control-box" }, returnBtn);
+  // Wide maps: top right, clear of the search bar (top left), the zoom
+  // buttons and attribution (bottom right) and the call window (bottom).
+  // Narrow maps (phones): the search bar spans the top, so it goes bottom
+  // right, above Google's camera control, where the phone call panel isn't.
+  let slot = null;
+  const placeControl = () => {
+    const want = canvas.clientWidth > 600 ? google.maps.ControlPosition.RIGHT_TOP : google.maps.ControlPosition.RIGHT_BOTTOM;
+    if (want === slot) return;
+    if (slot !== null) {
+      const arr = map.controls[slot];
+      const i = arr.getArray().indexOf(controlBox);
+      if (i >= 0) arr.removeAt(i);
+    }
+    map.controls[want].push(controlBox);
+    slot = want;
+  };
+  placeControl();
+  const controlResize = new ResizeObserver(placeControl);
+  controlResize.observe(canvas);
+
   // report this map's view, throttled: at most every 400 ms while moving, and
   // once more when it settles
   let lastSent = 0;
@@ -180,6 +218,9 @@ async function googleMap(el, config, handlers) {
       api.update = s.update;
       api.focus = s.focus;
       api.setPeers = s.setPeers;
+      api.setMySpot = s.setMySpot;
+      api.returnToMySpot = s.returnToMySpot;
+      spotMarker.map = null;
       peerLayer.remove();
       s.update(api.last);
     });
@@ -263,11 +304,37 @@ async function googleMap(el, config, handlers) {
       peers = list;
       layoutPeers();
     },
+    zoom: () => map.getZoom() ?? null,
+    // { lat, lng, zoom } or null. Only marks it: never moves the camera.
+    setMySpot(spot) {
+      mySpot = spot;
+      spotMarker.position = spot ? { lat: spot.lat, lng: spot.lng } : null;
+      spotMarker.map = spot ? map : null;
+      returnBtn.disabled = !spot;
+      returnBtn.title = spot ? "Return to my spot" : "Pick a spot on the map first";
+    },
+    // Moves the camera only: no stops, routes or nearby-place requests.
+    returnToMySpot() {
+      if (!mySpot) return false;
+      // one camera move, centre and zoom together: a panTo + setZoom pair can
+      // land on a mix of targets if another animation (a jump to someone's
+      // view) is still running
+      map.moveCamera({ center: { lat: mySpot.lat, lng: mySpot.lng }, zoom: Math.max(3, Math.round(mySpot.zoom ?? 15)) });
+      spotPin.classList.remove("is-pulsing");
+      void spotPin.offsetWidth; // restart the highlight
+      spotPin.classList.add("is-pulsing");
+      return true;
+    },
     destroy() {
       window.removeEventListener("wayline:maps-auth-failed", onAuthFail);
       clearTimeout(pendingView);
       overlay.setMap(null);
       for (const m of markers) m.map = null;
+      spotMarker.map = null;
+      controlResize.disconnect();
+      const arr = slot === null ? null : map.controls[slot];
+      const i = arr ? arr.getArray().indexOf(controlBox) : -1;
+      if (i >= 0) arr.removeAt(i);
     },
   };
   return api;
@@ -365,6 +432,9 @@ async function schematic(el, handlers, problem) {
     },
     focus() {},
     setPeers() {}, // not a map: there's nowhere true to show someone's view
+    // not a map either: a spot has nowhere true to be shown or returned to
+    setMySpot() {},
+    returnToMySpot: () => false,
     destroy() {
       resize.disconnect();
     },

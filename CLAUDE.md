@@ -244,9 +244,20 @@ contradict the README, stop and ask. Don't quietly change the product.
   location) is shared live with the others on the trip: `POST /view` with the
   tab's session id, relayed by the hub as `view` / `view-gone` events, kept
   in memory with the stream, never saved, never a revision, dropped after a
-  minute without updates. It's sent only while someone else is on the trip,
-  throttled to 400 ms, and the map says it's shared. Others' views show as a
-  coloured marker or an edge arrow; jumping to one is a click, never automatic.
+  minute without updates. It's sent only while someone else is on the trip
+  and throttled to 400 ms. It's explained in the share dialog and on
+  /privacy; no banner over the map, which used to hide others' markers.
+  Others' views show as a coloured marker or an edge arrow; jumping to one is
+  a click, never automatic.
+- "My spot" is the latest place this person deliberately picked on the map (a
+  map or Google place click, not while choosing the start), with the zoom it
+  was picked at. It is not the camera (`S.myView` follows every pan), a
+  collaborator's view, the start, a search result or the device's location
+  (no GPS for it). Kept in this tab's sessionStorage, never sent or saved.
+  Its marker lives outside `map.update()` and every `fitBounds`, so renders,
+  snapshots, panels and jumps never move or drop it. "Return to my spot"
+  only moves the camera (one `moveCamera`): no stops, routes or nearby
+  lookups. The schematic has neither, since it has no real geography.
 - Meals: a food stop can carry a meal (breakfast, brunch, lunch, afternoon
   tea, dinner). Each trip has usual meal times (`mealTimes`, owner-edited in
   Trip settings); picking a meal suggests its usual time, or the nearest free
