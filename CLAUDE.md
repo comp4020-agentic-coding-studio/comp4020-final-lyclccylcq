@@ -50,8 +50,10 @@ contradict the README, stop and ask. Don't quietly change the product.
   coordinates, labelled "Pinned spot", and never given a made-up Google id.
   Its coordinates are the travellers' choice, so they don't expire.
 - **No text chat, comments, social feeds, bookings, payments, expenses,
-  AI-generated trips or multi-day route optimisation** (V1 scope). Reviews
-  (1–5 stars, optional text) exist only on published trips (November 2026,
+  whole AI-generated trips or multi-day route optimisation** (V1 scope). The
+  AI may draft one day's plan from the stops people chose plus a few Google
+  places, for a person to preview and apply (see "The AI copilot"). Reviews
+  (1–5 stars, optional text) exist only on published trips (October 2026,
   `docs/permissions.md`); they aren't comments on a working trip.
   Ask first. The one authorised exception (October 2026) is the two-person,
   audio-only voice call between members of a trip (see "Voice calls"); it
@@ -148,7 +150,9 @@ contradict the README, stop and ask. Don't quietly change the product.
 
 - Deterministic first: `src/schedule.ts` computes end times, gaps, overlaps,
   shortfalls and every candidate fix with its exact edits. The model never
-  does time arithmetic and never proposes an edit of its own.
+  does time arithmetic and never proposes an edit of its own: the copilot
+  recommends among the app's own fixes, and the planner's choices become
+  edits only through `buildDraft`'s checks.
 - It reviews a day ("Review this day") and answers questions about the
   selected day, with or without issues, in the asker's language (Chinese or
   English). The day being discussed is always shown.
@@ -168,9 +172,26 @@ contradict the README, stop and ask. Don't quietly change the product.
   (`describeAiError`).
 - Model calls only on request: never on render, map movement or snapshot
   receipt. Cached by model + day input + question + history + language;
-  identical in-flight requests share one call; per-user per-minute and
-  per-day limits and a global daily ceiling (`WAYLINE_AI_*`); bounded
-  question (500), history (4 turns) and output; a timeout and cancellation.
+  identical in-flight requests share one call; bounded question (500),
+  history (4 turns) and output; a timeout and cancellation; no automatic
+  retries (`AI_RETRIES = 0`).
+- Every model call goes through `guardedCall` (`src/aiusage.ts`): app-wide
+  limits for everyone together (requests per day, calls at once, tokens per
+  day; `WAYLINE_AI_*`), checked and reserved in one SQLite transaction before
+  the provider is called, and each call's tokens and estimated cost recorded
+  in `ai_usage`. No per-user quotas (a course demo); user ids are for logs.
+  `src/ai.ts` is the only code that talks to the provider; keep it that way so
+  a gateway can replace it.
+- "Plan with AI" (`src/planner.ts`, October 2026) drafts an order for the
+  untimed stops, travel modes, and a few Google places near the day, using
+  the person's preferences (`src/preferences.ts`). Same rules as the
+  copilot: the model picks among ids, the server builds the edits, a preview
+  is shown, and Apply Plan applies exactly that draft (kept server-side, by
+  id) in one `mutate()`, refused if the day changed. Timed stops never move;
+  excluded modes are never chosen; places come only from Google. Allergy text
+  is never sent to the model, and food suggestions always say Google can't
+  verify allergens or diets. Food preferences are private to the person; a
+  trip stores only shared choices (transport, pace, budget, interests).
 - The conversation lives in the asking tab only. `spec/` only mocks the
   provider; `pnpm check:ai` is the separate live check.
 
@@ -308,7 +329,7 @@ contradict the README, stop and ask. Don't quietly change the product.
   pending invitations, never trip content; trip streams stay members-only.
 - Sessions are HttpOnly SameSite=Lax cookies (Secure behind Fly's TLS), stored
   hashed. Writes require JSON and a same-origin `Origin`.
-- `GOOGLE_MAPS_SERVER_KEY`, `ANTHROPIC_API_KEY` and the TURN secrets
+- `GOOGLE_MAPS_SERVER_KEY`, `OPENAI_API_KEY` and the TURN secrets
   (`CLOUDFLARE_TURN_API_TOKEN`, `WAYLINE_TURN_SECRET`) never leave the server.
   `/api/config` is the only place the browser key is exposed, and its key set
   is pinned by `spec/restart.test.ts`. No keys in the repo, ever. Browser
@@ -329,8 +350,10 @@ contradict the README, stop and ask. Don't quietly change the product.
   inspector), `editor.js` (the trip workspace), `map.js` (Google map or
   labelled schematic), `ui.js` (helpers). Server-side Google calls live only
   in `src/google.ts`, behind `src/discovery.ts` and the trip routes.
-  **Add no runtime dependency without asking.** The AI provider uses `fetch`
-  for this reason.
+  **Add no runtime dependency without asking.** The one runtime dependency is
+  the official `openai` SDK (October 2026, asked for), used only in
+  `src/ai.ts`, pinned exactly and installed from the lockfile in the
+  Dockerfile. Don't bypass pnpm's minimum release age to get a newer version.
 - Build DOM with `h()`; user text goes in as text nodes, never `innerHTML`.
 - **Storage:** `DATA_DIR/wayline.db` (`/data` on Fly). Schema changes are
   additive. The old `gym.db` beside it is left untouched as the gym's record.

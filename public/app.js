@@ -138,6 +138,12 @@ function renderPrivacy() {
         {},
         "When you ask to join a trip through an invite link, Wayline stores your request (your account, the trip, when, and whether the owner approved or rejected it); the owner sees your username and display name. If you publish a trip, anyone can see its title, description, destination, stops, times and places, and your display name as its author. Your notes, the people on the trip and invite links are never published, and unpublishing hides it again. Reviews you write show your display name, rating and comment to everyone who views that trip, until you delete them.",
       ),
+      h("h2", {}, "Travel preferences and AI"),
+      h(
+        "p",
+        {},
+        "If you set travel preferences, Wayline stores them with your account. Your food choices, dietary needs and allergies are private to you; a trip's shared choices (transport, pace, budget, interests) are visible to everyone on that trip. When you use the copilot or Plan with AI, the selected day's stops and notes, your preferences and nearby Google places are sent to the AI provider (OpenAI). Your allergy text is never sent, only that you have allergies. Wayline records that a request was made, by whom, and how many tokens it used, but not the request or the answer.",
+      ),
       h("h2", {}, "Your location"),
       h(
         "p",
@@ -154,7 +160,7 @@ function renderPrivacy() {
       h(
         "p",
         {},
-        "Only when you press “Review this day” or ask a question, Wayline sends that one day of the trip to its AI provider (Anthropic): the trip's destination and that day's date, each stop's title, type, times and notes, the travel times and transit lines Google returned between stops, and the schedule problems and fixes Wayline calculated. Your question and up to four of your earlier questions and answers about the same day go with it. Your name, account, other days, the trip's title and members, your location and your map view are not sent. Nothing is sent when the map moves, the plan updates or the page opens. Answers are kept in the server's memory for a while so the same question about the same plan isn't asked twice, and your conversation stays in your browser tab only; Wayline doesn't save it. Notes you write are shared with the AI provider when you ask, so don't put anything in a note you wouldn't want sent.",
+        "Only when you press “Review this day” or ask a question, Wayline sends that one day of the trip to its AI provider (OpenAI): the trip's destination and that day's date, each stop's title, type, times and notes, the travel times and transit lines Google returned between stops, and the schedule problems and fixes Wayline calculated. Your question and up to four of your earlier questions and answers about the same day go with it. Your name, account, other days, the trip's title and members, your location and your map view are not sent. Nothing is sent when the map moves, the plan updates or the page opens. Answers are kept in the server's memory for a while so the same question about the same plan isn't asked twice, and your conversation stays in your browser tab only; Wayline doesn't save it. Notes you write are shared with the AI provider when you ask, so don't put anything in a note you wouldn't want sent.",
       ),
       h("h2", {}, "Voice calls"),
       h(

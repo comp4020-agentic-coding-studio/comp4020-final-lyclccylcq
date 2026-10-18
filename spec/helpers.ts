@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
-import { createServer } from "node:net";
+import { createServer as httpServer, type Server } from "node:http";
+import { type AddressInfo, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -170,7 +171,7 @@ export async function startApp(env: Record<string, string> = {}, dataDir = mkdte
       DATA_DIR: dataDir,
       GOOGLE_MAPS_SERVER_KEY: "",
       GOOGLE_MAPS_BROWSER_KEY: "",
-      ANTHROPIC_API_KEY: "",
+      OPENAI_API_KEY: "",
       ...env,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -204,3 +205,39 @@ export async function startApp(env: Record<string, string> = {}, dataDir = mkdte
       }),
   };
 }
+
+// A stand-in for the model provider's Messages API, on a local port: the
+// app's real request, parsing and limits code runs, and no model is called.
+export type Reply = (body: any) => { status?: number; body: unknown; delayMs?: number };
+export function stubProvider(): Promise<{ url: string; seen: { headers: any; body: any; url: string }[]; reply: { fn: Reply }; server: Server }> {
+  const seen: { headers: any; body: any; url: string }[] = [];
+  const reply: { fn: Reply } = { fn: () => ({ status: 500, body: {} }) }; // each test sets its reply
+  const server = httpServer(async (req, res) => {
+    let raw = "";
+    for await (const c of req) raw += c;
+    const body = JSON.parse(raw);
+    seen.push({ headers: req.headers, body, url: req.url ?? "" });
+    const r = reply.fn(body);
+    if (r.delayMs) await new Promise((x) => setTimeout(x, r.delayMs));
+    res.writeHead(r.status ?? 200, { "content-type": "application/json" });
+    res.end(JSON.stringify(r.body));
+  });
+  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve({ url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, seen, reply, server })));
+}
+// Replies in the Responses API's shape (what the official SDK parses).
+export const response = (over: Record<string, unknown> = {}, outputText: string | null = null, usage = { input_tokens: 100, output_tokens: 50 }) => ({
+  id: "resp_test",
+  object: "response",
+  created_at: 0,
+  model: "test-model",
+  status: "completed",
+  incomplete_details: null,
+  error: null,
+  output: outputText === null ? [] : [{ id: "msg_test", type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: outputText, annotations: [] }] }],
+  usage: { input_tokens: usage.input_tokens, input_tokens_details: { cached_tokens: 0 }, output_tokens: usage.output_tokens, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: usage.input_tokens + usage.output_tokens },
+  ...over,
+});
+export const text = (obj: unknown, usage?: { input_tokens: number; output_tokens: number }) => ({ body: response({}, JSON.stringify(obj), usage) });
+export const rawText = (s: string) => ({ body: response({}, s) });
+export const refusal = () => ({ body: response({ output: [{ id: "msg_r", type: "message", role: "assistant", status: "completed", content: [{ type: "refusal", refusal: "I can't help with that." }] }] }) });
+export const truncated = () => ({ body: response({ status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }, '{"summary": "cut') });

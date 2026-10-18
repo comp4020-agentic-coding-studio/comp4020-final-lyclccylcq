@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { AiError, type AiProvider } from "./ai.ts";
+import { type AiUsage, guardedCall } from "./aiusage.ts";
 import { hhmm, minutesLabel, travelMinutes } from "./schedule.ts";
 import type { Day } from "./trips.ts";
 
@@ -200,45 +201,25 @@ export function describeAiError(err: unknown): { status: number; error: string; 
   }
 }
 
-export type AskInput = { userId: string; day: Day; trip: { destination: string; timezone: string }; question: string; history: Turn[]; lang: Lang; signal?: AbortSignal };
+export type AskInput = { userId: string; tripId?: string | null; day: Day; trip: { destination: string; timezone: string }; question: string; history: Turn[]; lang: Lang; signal?: AbortSignal };
 export type AskResult = { answer: CopilotAnswer; cached: boolean; fingerprint: string; lang: Lang };
 
-export type CopilotOptions = { perUserPerMinute?: number; perUserPerDay?: number; globalPerDay?: number; cacheSize?: number; now?: () => number };
+export type CopilotOptions = { usage: AiUsage; cacheSize?: number; log?: (level: "info" | "warn", event: string, fields: Record<string, unknown>) => void };
 
-export function createCopilot(provider: AiProvider | null, opts: CopilotOptions = {}) {
-  const now = opts.now ?? Date.now;
-  const perMinute = opts.perUserPerMinute ?? 6;
-  const perDay = opts.perUserPerDay ?? 60;
-  const globalPerDay = opts.globalPerDay ?? 500;
+// Limits are app-wide and live in SQLite (src/aiusage.ts); cached and
+// shared in-flight answers don't count against them.
+export function createCopilot(provider: AiProvider | null, opts: CopilotOptions) {
   const cacheSize = opts.cacheSize ?? 200;
   // The same question about the same day gets the same answer without
   // another model call; any change to the day, question, earlier turns,
   // language or model changes the key.
   const cache = new Map<string, CopilotAnswer>();
   const inflight = new Map<string, Promise<CopilotAnswer>>();
-  const recent = new Map<string, number[]>();
-  let usage = { day: "", count: 0 };
-
-  const tooMany = (message: string) => Object.assign(new Error(message), { status: 429 });
-
-  function admit(userId: string): void {
-    const t = now();
-    const today = new Date(t).toISOString().slice(0, 10);
-    if (usage.day !== today) usage = { day: today, count: 0 };
-    if (usage.count >= globalPerDay) throw Object.assign(new Error("The AI copilot has reached today's usage limit. The schedule check still works."), { status: 503 });
-    const times = (recent.get(userId) ?? []).filter((x) => t - x < 86_400_000);
-    if (times.filter((x) => t - x < 60_000).length >= perMinute) throw tooMany("Too many copilot requests. Wait a minute and try again.");
-    if (times.length >= perDay) throw tooMany("You've reached today's copilot limit. The schedule check still works.");
-    recent.set(userId, [...times, t]);
-    if (recent.size > 10_000) for (const [k, v] of recent) if (!v.some((x) => t - x < 86_400_000)) recent.delete(k);
-    usage.count++;
-  }
-
   return {
     configured: provider !== null,
     model: provider?.model ?? null,
 
-    async ask({ userId, day, trip, question, history, lang, signal }: AskInput): Promise<AskResult> {
+    async ask({ userId, tripId = null, day, trip, question, history, lang, signal }: AskInput): Promise<AskResult> {
       if (!provider) throw new Error("no provider");
       const input = copilotInput(day, trip);
       const fingerprint = dayFingerprint(day);
@@ -252,18 +233,14 @@ export function createCopilot(provider: AiProvider | null, opts: CopilotOptions 
       // limit, and cancelling one caller doesn't cancel the shared call.
       let job = inflight.get(key);
       if (!job) {
-        admit(userId);
         const user = `<day_data>\n${JSON.stringify(input)}\n</day_data>\n${history.length ? `<earlier_turns>\n${JSON.stringify(history)}\n</earlier_turns>\n` : ""}<request>\n${JSON.stringify({ question: question || "Review this day.", answerLanguage: payload.answerLanguage })}\n</request>`;
-        job = provider
-          .completeJson({ system: SYSTEM, user, schema: SCHEMA })
-          .then((raw) => {
-            const answer = validateAnswer(raw, day);
-            if (!answer.summary) throw new AiError("invalid", "empty summary");
-            cache.set(key, answer);
-            if (cache.size > cacheSize) cache.delete(cache.keys().next().value as string);
-            return answer;
-          })
-          .finally(() => inflight.delete(key));
+        job = guardedCall(opts.usage, provider, { userId, tripId, feature: "copilot", maxTokens: provider.maxTokens, request: { system: SYSTEM, user, schema: SCHEMA }, log: opts.log }, (raw) => {
+          const answer = validateAnswer(raw, day);
+          if (!answer.summary) throw new AiError("invalid", "empty summary");
+          cache.set(key, answer);
+          if (cache.size > cacheSize) cache.delete(cache.keys().next().value as string);
+          return answer;
+        }).finally(() => inflight.delete(key));
         inflight.set(key, job);
       }
       const answer = signal

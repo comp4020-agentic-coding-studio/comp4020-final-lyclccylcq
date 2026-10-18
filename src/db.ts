@@ -190,7 +190,7 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
     create index if not exists trip_invitations_by_invitee on trip_invitations(invitee_id, status);
   `);
 
-  // Invite links (November 2026): only a hash of the token, a creation and an
+  // Invite links (October 2026): only a hash of the token, a creation and an
   // expiry time (24 hours later, set by the server), and when it was revoked.
   // A link lets a signed-in person *ask* to join; the owner decides.
   db.exec(`
@@ -280,6 +280,44 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
   for (const [col, type] of [["forked_from_publication_id", "text"], ["forked_from_title", "text"], ["forked_from_author", "text"], ["forked_at", "integer"], ["cover_key", "text"]]) {
     if (!tripCols2.includes(col)) db.exec(`alter table trips add column ${col} ${type}`);
   }
+  // AI: one row per model call, written before the call (status 'running')
+  // and finished after it. The app-wide limits count these rows, so they
+  // survive restarts; a row left 'running' by a crash stops counting as
+  // active once its lease ends. Travel preferences: a person's defaults, and
+  // a trip's shared choices (transport, pace, budget, interests). Diet and
+  // allergies live only on the person, never on the trip.
+  db.exec(`
+    create table if not exists ai_usage (
+      id            text primary key,
+      user_id       text, -- who asked, for the log; not a quota and not a foreign key
+      trip_id       text,
+      feature       text not null,
+      model         text not null,
+      status        text not null check (status in ('running', 'ok', 'error', 'cancelled')),
+      error_kind    text,
+      day           text not null,
+      started_at    integer not null,
+      lease_until   integer not null,
+      finished_at   integer,
+      reserved_tokens integer not null,
+      input_tokens  integer,
+      output_tokens integer,
+      cost_usd      real
+    );
+    create index if not exists ai_usage_by_day on ai_usage(day, status);
+
+    create table if not exists user_preferences (
+      user_id    text primary key references users(id) on delete cascade,
+      data       text not null,
+      updated_at integer not null
+    );
+    create table if not exists trip_preferences (
+      trip_id    text primary key references trips(id) on delete cascade,
+      data       text not null,
+      updated_by text references users(id) on delete set null,
+      updated_at integer not null
+    );
+  `);
   // Legacy invite links (trips.invite_hash) never expired and joined people
   // without the owner's approval. They're switched off rather than carried
   // over: an owner who wants a link makes a new, expiring one.

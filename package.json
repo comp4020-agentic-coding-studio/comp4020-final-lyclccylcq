@@ -23,5 +23,8 @@
   },
   "engines": {
     "pnpm": ">=11"
+  },
+  "dependencies": {
+    "openai": "7.32.0"
   }
 }

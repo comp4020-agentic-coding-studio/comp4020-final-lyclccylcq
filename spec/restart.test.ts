@@ -30,7 +30,7 @@ describe("persistence and configuration", () => {
   it("never sends server-side keys to the browser", async () => {
     const app = await startApp({
       GOOGLE_MAPS_SERVER_KEY: "server-side-maps-secret-value",
-      ANTHROPIC_API_KEY: "server-side-ai-secret-value",
+      OPENAI_API_KEY: "server-side-ai-secret-value",
       GOOGLE_MAPS_BROWSER_KEY: "browser-key-meant-to-be-public",
     });
     try {

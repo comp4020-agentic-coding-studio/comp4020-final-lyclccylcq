@@ -1053,3 +1053,7 @@ textarea { resize: vertical; }
 .review p { margin: 0; }
 .review-text { margin-top: 4px !important; white-space: pre-wrap; overflow-wrap: anywhere; }
 .stars { color: var(--warn); letter-spacing: 1px; }
+.pref-form h3 { margin: 8px 0 0; }
+.pref-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.plan-preview .change-preview li + li { margin-top: 6px; }
+.plan-caveats { margin: 4px 0 0; padding-left: 18px; }

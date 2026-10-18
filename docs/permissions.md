@@ -29,7 +29,7 @@ says who can), and 404 means not a member, so a trip id reveals nothing.
 Removing a collaborator, or deleting the trip, sends `revoked` on their open
 streams and closes them at once (`hub.publish`).
 
-The collaborator rule is the conservative one from the November 2026 brief:
+The collaborator rule is the conservative one from the October 2026 brief:
 collaborators add, and can change only what they added (`activities.created_by`).
 Before that, any member could change any stop. The version check and the
 "load theirs / save mine" conflict flow still apply, mostly between the owner
@@ -64,7 +64,7 @@ and the stop's author now.
 - Inviting by username (`trip_invitations`) is unchanged: the owner chose that
   account, and the invitee accepts in My Trips.
 
-**Legacy links.** Links made before November 2026 (`trips.invite_hash`) never
+**Legacy links.** Links made before October 2026 (`trips.invite_hash`) never
 expired and let people in without approval. On startup they're cleared, so
 none can stay permanent; owners make a new, expiring link when they need one.
 

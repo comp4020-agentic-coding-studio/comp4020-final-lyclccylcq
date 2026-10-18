@@ -7,8 +7,8 @@
 //
 //   APP_URL=http://localhost:8080 pnpm check:ai
 //
-// The app under test must have ANTHROPIC_API_KEY (and, for a proxy,
-// ANTHROPIC_BASE_URL) set. This script never sees or prints them. It makes at
+// The app under test must have OPENAI_API_KEY (and, for a proxy,
+// OPENAI_BASE_URL) set. This script never sees or prints them. It makes at
 // most five model calls.
 
 const base = process.env.APP_URL ?? "http://localhost:8080";

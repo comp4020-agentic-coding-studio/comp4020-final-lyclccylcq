@@ -34,6 +34,8 @@ Two people on a trip can also talk it through in an audio-only voice call from t
 
 The AI copilot helps; it doesn't decide. Overlaps and too-short gaps are calculated by plain arithmetic, from travel times Google's Routes API actually returned. The AI's job is to review a day, answer questions about it ("Is this morning too rushed?", in English or Chinese), explain conflicts and recommend among the exact fixes the app already worked out, pointing at the stops it means. It can't change the plan: every fix is previewed with its exact edits, needs a confirmation, and is refused if anyone has changed that day since the answer. Numbers shown come from the app's own calculation; the AI's words are labelled as interpretation. Each person's conversation stays in their own editor. Without a configured AI key, the rule-based checks still work and the app says AI is unavailable.
 
+"Plan with AI" drafts one day from your travel preferences: an order for the stops without set times, how to travel between them, and a few nearby places Google returned that match your cuisines, interests and budget. It never moves a stop whose time you set, never picks a way of travelling you excluded, and never invents a place. Allergies and dietary needs are treated as constraints, but Google can't confirm what a restaurant serves, so every food suggestion says to check with the restaurant. You see the whole plan first; nothing changes until you press Apply Plan. Your food preferences stay private to you; a trip shares only transport, pace, budget and interests ([docs/ai.md](docs/ai.md)).
+
 ## Why this interaction should be meaningful
 
 In Virtual Gym, other people were visible but nothing they did touched your session. In Wayline, the hope is that interaction matters because the plan is genuinely shared: one person's change shapes everyone's day, and conflicts become decisions the group makes together. That is a design intention, still to be evaluated with real groups.
@@ -52,7 +54,7 @@ In Virtual Gym, other people were visible but nothing they did touched your sess
 
 ## What it deliberately doesn't do
 
-No booking, payments, feeds, text chat or comments, AI-generated itineraries or multi-day route optimisation. Each would move decisions away from the travellers or the focus away from the shared plan. The one exception to "no chat" is the two-person voice call above: talking while both look at the same map and timeline keeps the plan at the centre, where a text channel would compete with it. No video, group calls or call recording.
+No booking, payments, feeds, text chat or comments, whole AI-generated trips or multi-day route optimisation. Each would move decisions away from the travellers or the focus away from the shared plan. The one exception to "no chat" is the two-person voice call above: talking while both look at the same map and timeline keeps the plan at the centre, where a text channel would compete with it. No video, group calls or call recording.
 
 ## Sources
 

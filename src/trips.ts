@@ -96,6 +96,10 @@ export type TripSnapshot = {
 type Row = Record<string, unknown>;
 
 export const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
+export type AppliedChange =
+  | { type: "move"; activityId: string; toIndex: number }
+  | { type: "mode"; segmentId: string; to: Mode }
+  | { type: "add"; clientId: string; title: string; kind: string; startMin: number | null; durationMin: number; meal: string | null; notes: string; place: unknown };
 export type ForkStop = {
   day: number;
   position: number;
@@ -1149,6 +1153,61 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
             q("update transport_segments set selected_mode = ? where id = ?").run(c.to, c.segmentId);
           }
         }
+        return snapshot(tripId);
+      });
+    },
+
+    // Applies a previewed AI plan for one day (src/planner.ts) in one change.
+    // Refused if the day changed since the preview (basedOn), and each part
+    // is held to the ordinary rules: a collaborator may add stops, but moving
+    // others' stops or choosing modes needs the owner, so those parts are
+    // refused rather than quietly skipped. Times people set never move: the
+    // planner only reorders untimed stops.
+    applyPlan(userId: string, tripId: string, plan: { dayId: string; basedOn: string; changes: AppliedChange[] }): TripSnapshot {
+      requireMember(tripId, userId);
+      const day = snapshot(tripId).days.find((d) => d.id === plan.dayId);
+      if (!day) throw notFound("That day isn't part of this trip.");
+      if (plan.basedOn !== day.fingerprint) throw new HttpError(409, "The day changed since this plan was made. Make a new plan for the updated day.", { code: "stale" });
+      const moves = plan.changes.filter((c) => c.type === "move") as Extract<AppliedChange, { type: "move" }>[];
+      const modes = plan.changes.filter((c) => c.type === "mode") as Extract<AppliedChange, { type: "mode" }>[];
+      const adds = plan.changes.filter((c) => c.type === "add") as Extract<AppliedChange, { type: "add" }>[];
+      for (const m of moves) {
+        const a = day.activities.find((x) => x.id === m.activityId);
+        if (!a || a.startMin !== null || a.role === "start") throw new HttpError(409, "The plan tried to move a stop with a set time. Make a new plan.");
+        requireActivity(tripId, userId, a);
+      }
+      if (modes.length) require(tripId, userId, "select_mode");
+      if (adds.length) require(tripId, userId, "add_activity");
+      return mutate(tripId, userId, () => {
+        if (moves.length) {
+          const fixed = day.activities.filter((a) => a.role === "start" || a.startMin !== null).map((a) => a.id);
+          const untimedNow = day.activities.filter((a) => a.role !== "start" && a.startMin === null).map((a) => a.id);
+          const wanted = [...moves].sort((a, b) => a.toIndex - b.toIndex).map((m) => m.activityId);
+          const rest = untimedNow.filter((id) => !wanted.includes(id));
+          const set = q("update activities set position = ?, updated_at = ? where id = ?");
+          [...fixed, ...wanted, ...rest].forEach((id, i) => set.run(i, now(), id));
+        }
+        for (const m of modes) {
+          const seg = q("select options from transport_segments where id = ? and trip_id = ?").get(m.segmentId, tripId);
+          if (!seg) throw new HttpError(409, "A route in this plan is no longer part of the day. Make a new plan.");
+          if (!(JSON.parse(String(seg.options)) as RouteOption[]).some((o) => o.mode === m.to && o.status === "ok")) throw new HttpError(409, "A route in this plan isn't available any more. Make a new plan.");
+          q("update transport_segments set selected_mode = ? where id = ?").run(m.to, m.segmentId);
+        }
+        for (const a of adds) {
+          if (q("select 1 from activities where trip_id = ? and client_id = ?").get(tripId, a.clientId)) continue; // applied already
+          const place = placeInput(a.place);
+          const count = Number((q("select count(*) as n from activities where day_id = ?").get(day.id) as Row).n);
+          q(
+            `insert into activities (id, trip_id, day_id, client_id, position, title, kind, start_min, duration_min, notes,
+                                     place_id, place_source, lat, lng, place_cached_at, meal, created_by, updated_by, updated_at)
+             values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).run(
+            randomUUID(), tripId, day.id, a.clientId, count, text(a.title, "Title", 120), kind(a.kind), startMinute(a.startMin), duration(a.durationMin), text(a.notes, "Notes", 2000, 0),
+            place?.placeId ?? null, place?.source ?? null, place?.lat ?? null, place?.lng ?? null, place ? now() : null, meal(a.meal),
+            userId, userId, now(),
+          );
+        }
+        renumber(day.id);
         return snapshot(tripId);
       });
     },

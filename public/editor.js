@@ -1661,6 +1661,7 @@ export async function openEditor(root, tripId, ctx) {
           ),
         ),
       ),
+      planSection(d),
       aiSection(d),
     );
     const log = copilotPane.querySelector(".co-log");
@@ -1790,6 +1791,160 @@ export async function openEditor(root, tripId, ctx) {
         ),
       form,
     );
+  }
+
+  // --- Plan with AI: preferences, a preview, then Apply Plan ---
+  const PREF = {
+    cuisines: { local: "Local", chinese: "Chinese", japanese: "Japanese", korean: "Korean", thai: "Thai", vietnamese: "Vietnamese", indian: "Indian", italian: "Italian", french: "French", mexican: "Mexican", middle_eastern: "Middle Eastern", seafood: "Seafood", cafe: "Cafés" },
+    diets: { vegetarian: "Vegetarian", vegan: "Vegan", halal: "Halal", kosher: "Kosher", gluten_free: "Gluten-free", dairy_free: "Dairy-free" },
+    prices: { any: "No preference", budget: "Budget", moderate: "Moderate", premium: "Premium" },
+    transport: { any: "No preference", walk: "Walking", transit: "Public transport", drive: "Driving", mixed: "Mixed" },
+    paces: { relaxed: "Relaxed", balanced: "Balanced", intensive: "Intensive" },
+    interests: { nature: "Nature", museums: "Museums", history: "Historical sites", architecture: "Architecture", shopping: "Shopping", photography: "Photography", local_food: "Local food", entertainment: "Entertainment", outdoors: "Outdoor activities" },
+    modes: { WALK: "Walking", TRANSIT: "Public transport", DRIVE: "Driving" },
+  };
+
+  function planSection(d) {
+    const cfg = ctx.config.ai;
+    const head = h("h3", {}, "Plan this day ", h("span", { class: "tag tag-ai" }, cfg.configured ? "AI" : "Unavailable"));
+    if (!cfg.configured) return h("section", { class: "co-section", "data-plan": "off" }, head, h("p", { class: "muted small" }, "AI planning isn't available on this server. Planning by hand works as usual."));
+    const p = S.plan?.dayId === d.id ? S.plan : null;
+    const stale = p?.draft && p.draft.basedOn !== d.fingerprint;
+    return h(
+      "section",
+      { class: "co-section", "data-plan": p?.draft ? (stale ? "stale" : "preview") : "idle" },
+      head,
+      h("p", { class: "tiny muted" }, "Suggests an order, travel modes and a few nearby places from Google, using your preferences. Nothing changes until you press Apply Plan."),
+      h(
+        "div",
+        { class: "row-actions" },
+        h("button", { class: "btn btn-dark btn-sm", type: "button", "data-plan-action": "start", disabled: Boolean(p?.busy), onclick: () => startPlan(d) }, icon("spark"), p?.draft ? "Plan again" : "Plan with AI"),
+        h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-plan-action": "prefs", onclick: () => preferencesDialog({ then: null }) }, "Preferences"),
+      ),
+      p?.busy && h("div", { class: "co-pending", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), h("span", {}, p.busy)),
+      p?.error && h("p", { class: "co-err small", role: "alert" }, p.error),
+      p?.draft && planPreview(d, p.draft, stale),
+    );
+  }
+
+  async function startPlan(d) {
+    S.plan = { dayId: d.id, busy: "Planning this day…" };
+    renderCopilot();
+    try {
+      const draft = await api(`${base}/plan`, { method: "POST", body: { dayId: d.id } });
+      S.plan = { dayId: d.id, draft };
+    } catch (err) {
+      if (err.status === 409 && err.data?.code === "preferences") {
+        S.plan = null;
+        renderCopilot();
+        return preferencesDialog({ first: true, then: () => startPlan(d) });
+      }
+      S.plan = { dayId: d.id, error: err.message };
+    }
+    renderCopilot();
+  }
+
+  function planPreview(d, draft, stale) {
+    const name = (id) => d.activities.find((a) => a.id === id)?.title ?? "a stop";
+    const lines = draft.changes.map((c) =>
+      c.type === "move"
+        ? h("li", { "data-change": "move" }, `Move ${c.title} to position ${c.toIndex + 1}`)
+        : c.type === "mode"
+          ? h("li", { "data-change": "mode" }, `${c.from}: ${PREF.modes[c.to]}${c.fromMode ? ` instead of ${PREF.modes[c.fromMode].toLowerCase()}` : ""}`)
+          : h(
+              "li",
+              { "data-change": "add" },
+              h("strong", {}, `Add ${c.candidate.name}`),
+              ` (${c.candidate.category ?? (c.kind === "food" ? "Food" : "Place")}${c.candidate.priceLevel ? `, ${c.candidate.priceLevel}` : ""}, ${c.candidate.distanceKm} km away)`,
+              c.startMin !== null ? ` at ${hhmm(c.startMin)} for ${dur(c.durationMin)}` : `, ${dur(c.durationMin)}, no time set`,
+              c.reason && h("span", { class: "ai-text small" }, ` ${c.reason}`),
+              c.warning && h("p", { class: "small leg-warn", "data-warning": "diet" }, c.warning),
+            ),
+    );
+    const apply = async (e) => {
+      e.target.disabled = true;
+      try {
+        applySnapshot(await api(`${base}/plan/apply`, { method: "POST", body: { draftId: draft.draftId } }));
+        S.plan = null;
+        toast("Plan applied for everyone on the trip.");
+      } catch (err) {
+        S.plan = { dayId: d.id, draft, error: err.status === 409 ? "The day changed since this plan was made, so nothing was applied. Plan again." : err.message };
+      }
+      renderCopilot();
+    };
+    return h(
+      "div",
+      { class: "proposal proposal-ai plan-preview" },
+      h("p", { class: "ai-badge" }, icon("spark"), "AI plan, preview"),
+      draft.summary && h("p", { class: "ai-text" }, draft.summary),
+      lines.length ? h("ul", { class: "change-preview", "aria-label": "Changes this plan will make" }, lines) : h("p", { class: "small muted" }, "No changes suggested. The day already fits your preferences."),
+      h("details", { class: "small" }, h("summary", {}, "Rules this plan keeps"), h("ul", {}, draft.preferences.hard.map((x) => h("li", {}, x)))),
+      draft.caveats.length > 0 && h("ul", { class: "small muted plan-caveats" }, draft.caveats.map((x) => h("li", {}, x))),
+      stale
+        ? h("p", { class: "small leg-warn" }, "The day has changed since this plan was made. Plan again to see an up-to-date one.")
+        : lines.length > 0 &&
+            h(
+              "div",
+              { class: "row-actions" },
+              h("button", { class: "btn btn-primary btn-sm", type: "button", "data-plan-action": "apply", onclick: apply }, "Apply Plan"),
+              h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.plan = null; renderCopilot(); } }, "Discard"),
+            ),
+    );
+  }
+
+  // Short on purpose: sensible defaults, everything optional. Food stays
+  // private to this person; the trip's shared choices apply to everyone on it.
+  async function preferencesDialog({ first = false, then }) {
+    let mine, trip;
+    try {
+      [mine, trip] = await Promise.all([api("/api/me/preferences"), api(`${base}/preferences`)]);
+    } catch (err) {
+      return toast(err.message, { kind: "error" });
+    }
+    const food = mine.preferences.food;
+    const travel = { ...mine.preferences.travel, ...trip.trip };
+    const checks = (name, options, chosen) =>
+      h("div", { class: "pref-chips", role: "group" }, Object.entries(options).map(([k, label]) => h("label", { class: "star-opt" }, h("input", { type: "checkbox", name, value: k, checked: chosen.includes(k) }), h("span", {}, label))));
+    const select = (name, options, value) => h("select", { name }, Object.entries(options).map(([k, label]) => h("option", { value: k, selected: k === value }, label)));
+    const error = h("p", { class: "form-error", role: "alert", hidden: true });
+    const form = h(
+      "form",
+      { method: "dialog", class: "stack pref-form" },
+      h("h2", {}, "Travel preferences"),
+      first && h("p", { class: "small muted" }, "A few choices so the AI plans for you. Everything is optional; you can change it later from Preferences."),
+      h("h3", { class: "small" }, "This trip (shared with everyone on it)"),
+      h("div", { class: "row-2" }, h("label", { class: "field" }, h("span", {}, "Getting around"), select("transport", PREF.transport, travel.transport)), h("label", { class: "field" }, h("span", {}, "Pace"), select("pace", PREF.paces, travel.pace))),
+      h("div", { class: "row-2" }, h("label", { class: "field" }, h("span", {}, "Budget"), select("budget", PREF.prices, travel.budget)), h("label", { class: "field" }, h("span", {}, "Longest walk"), h("select", { name: "maxWalkMin" }, [["", "No limit"], ["10", "10 min"], ["20", "20 min"], ["30", "30 min"], ["45", "45 min"]].map(([v, l]) => h("option", { value: v, selected: String(travel.maxWalkMin ?? "") === v }, l))))),
+      h("p", { class: "small" }, "Never use"),
+      checks("avoidModes", PREF.modes, travel.avoidModes),
+      h("label", { class: "small" }, h("input", { type: "checkbox", name: "fewerTransfers", checked: travel.fewerTransfers }), " Fewer transfers"),
+      h("p", { class: "small" }, "Interests"),
+      checks("interests", PREF.interests, travel.interests),
+      h("h3", { class: "small" }, "Food (private to you)"),
+      checks("cuisines", PREF.cuisines, food.cuisines),
+      checks("diets", PREF.diets, food.diets),
+      h("div", { class: "row-2" }, h("label", { class: "field" }, h("span", {}, "Restaurant price"), select("price", PREF.prices, food.price)), h("label", { class: "field" }, h("span", {}, "Allergies"), h("input", { name: "allergies", maxlength: 200, value: food.allergies, placeholder: "e.g. peanuts" }))),
+      h("p", { class: "tiny muted" }, "Google can't confirm allergens or whether a restaurant is halal, kosher or vegan. Suggestions will say to check with the restaurant. Your allergies aren't sent to the AI or shown to others; only that you have some."),
+      error,
+      h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, "Cancel"), h("button", { class: "btn btn-primary", type: "submit", "data-pref": "save" }, then ? "Save and plan" : "Save")),
+    );
+    const dialog = openDialog(h("dialog", { class: "dialog" }, form));
+    const all = (name) => [...form.querySelectorAll(`input[name=${name}]:checked`)].map((x) => x.value);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const shared = { transport: form.transport.value, pace: form.pace.value, budget: form.budget.value, maxWalkMin: form.maxWalkMin.value ? Number(form.maxWalkMin.value) : null, avoidModes: all("avoidModes"), fewerTransfers: form.fewerTransfers.checked, interests: all("interests") };
+      try {
+        // personal defaults keep their own travel choices; the trip gets the shared ones
+        await api("/api/me/preferences", { method: "PUT", body: { food: { cuisines: all("cuisines"), diets: all("diets"), price: form.price.value, allergies: form.allergies.value }, travel: mine.preferences.saved ? mine.preferences.travel : shared } });
+        await api(`${base}/preferences`, { method: "PUT", body: { travel: shared } });
+        dialog.close();
+        toast("Preferences saved.");
+        then?.();
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+      }
+    });
   }
 
   function turnView(d, t, c) {

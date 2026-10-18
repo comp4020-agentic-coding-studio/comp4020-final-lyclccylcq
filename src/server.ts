@@ -2,13 +2,16 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join } from "node:path";
 import { aiProvider } from "./ai.ts";
+import { AiLimitError, createAiUsage, limitsFromEnv, pricesFromEnv } from "./aiusage.ts";
 import { clearCookie, COOKIE, createAuth, readCookie, sessionCookie, type User } from "./auth.ts";
 import { createCalls, iceConfigured, iceServersFor } from "./calls.ts";
 import { cleanHistory, createCopilot, describeAiError, detectLang, LIMITS } from "./copilot.ts";
 import { openDb } from "./db.ts";
 import { HttpError } from "./errors.ts";
 import { createDiscovery } from "./discovery.ts";
-import { computeRouteOptions, DEMO_PLACES, googleConfigured, mapsKeyWarnings, placeDetails, searchPlaces } from "./google.ts";
+import { computeRouteOptions, DEMO_PLACES, googleConfigured, mapsKeyWarnings, nearbyPlaces, placeDetails, searchPlaces } from "./google.ts";
+import { type Candidate, createPlanner, dayCentre, type PlanDraft, searchTypes, toCandidates } from "./planner.ts";
+import { createPreferences } from "./preferences.ts";
 import { createItineraryStore } from "./itineraries.ts";
 import { createPublications } from "./publications.ts";
 import { afterEvent, flushAfter, log, note, notes, sanitize, setUser, shortId, withRequest } from "./log.ts";
@@ -63,17 +66,23 @@ const calls = createCalls({
     }
   },
 });
-const envInt = (name: string, fallback: number) => (Number(process.env[name]) > 0 ? Math.floor(Number(process.env[name])) : fallback);
 const itineraries = createItineraryStore(db);
 itineraries.seed();
 const publications = createPublications(db, trips);
 const discovery = createDiscovery({ itineraries, trips, publications });
 const joinLimit = createLimiter(20, 60_000); // join requests per person per minute
-const copilot = createCopilot(aiProvider(), {
-  perUserPerMinute: envInt("WAYLINE_AI_PER_MINUTE", 6),
-  perUserPerDay: envInt("WAYLINE_AI_PER_USER_DAY", 60),
-  globalPerDay: envInt("WAYLINE_AI_DAILY_LIMIT", 500),
-});
+// AI: one provider (src/ai.ts, key from the environment only) and one
+// app-wide budget in SQLite (src/aiusage.ts) shared by every AI feature.
+const ai = aiProvider();
+const aiUsage = createAiUsage(db, limitsFromEnv(process.env, ai?.timeoutMs), pricesFromEnv());
+const aiLog = (level: "info" | "warn", event: string, fields: Record<string, unknown>) => log[level](event, fields);
+const copilot = createCopilot(ai, { usage: aiUsage, log: aiLog });
+const planner = createPlanner(ai, { usage: aiUsage, log: aiLog });
+const preferences = createPreferences(db, (tripId, userId) => trips.roleOf(tripId, userId));
+// A plan is applied by id, exactly as previewed, so a client can't edit it on
+// the way back. Drafts are disposable: kept 30 minutes, in memory.
+const drafts = new Map<string, { userId: string; tripId: string; draft: PlanDraft; at: number }>();
+const DRAFT_TTL_MS = 30 * 60_000;
 const callLimit = createLimiter(60, 60_000); // invites, answers and hang-ups per person per minute
 const iceLimit = createLimiter(20, 60_000);
 const searchLimit = createLimiter(60, 60_000); // username searches per owner per minute
@@ -222,6 +231,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   const user: User = maybeUser;
 
   if (method === "GET" && path === "/api/auth/me") return json(res, 200, { user });
+
+  // a person's own travel preferences: private to them
+  if (path === "/api/me/preferences") {
+    if (method === "GET") return json(res, 200, { preferences: preferences.mine(user.id) });
+    if (method === "PUT") return json(res, 200, { preferences: preferences.saveMine(user.id, await body(req)) });
+  }
+
+  // AI usage for the developer: totals and limits, no prompts, keys or content.
+  // Only accounts named in WAYLINE_AI_ADMINS (comma-separated usernames).
+  if (method === "GET" && path === "/api/admin/ai-usage") {
+    const admins = (process.env.WAYLINE_AI_ADMINS ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+    if (!admins.includes(user.username.toLowerCase())) return json(res, 404, { error: "No such endpoint." });
+    return json(res, 200, aiUsage.summary());
+  }
 
   if (path === "/api/trips") {
     if (method === "GET") return json(res, 200, trips.list(user.id));
@@ -403,6 +426,90 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   // Review a day or answer a question about it. Works whether or not the
   // day has issues; the deterministic analysis is returned alongside so the
   // numbers shown come from the server, not the model.
+  // shared trip choices (transport, pace, budget, interests); never food or allergies
+  if (rest === "/preferences") {
+    if (method === "GET") return json(res, 200, { trip: preferences.forTrip(user.id, tripId), effective: preferences.effective(user.id, tripId) });
+    if (method === "PUT") {
+      preferences.saveTrip(user.id, tripId, await body(req));
+      return json(res, 200, { trip: preferences.forTrip(user.id, tripId), effective: preferences.effective(user.id, tripId) });
+    }
+  }
+
+  // "Plan with AI" for one day: a preview only; nothing changes until /apply
+  if (method === "POST" && rest === "/plan") {
+    const input = await body(req);
+    const snap = trips.view(user.id, tripId);
+    const day = snap.days.find((d) => d.id === input.dayId);
+    if (!day) throw new HttpError(404, "That day isn't part of this trip.");
+    if (!planner.configured) return json(res, 503, { configured: false, error: "AI planning isn't available on this server. Planning by hand still works." });
+    const prefs = preferences.effective(user.id, tripId);
+    if (!prefs.confirmed) return json(res, 409, { code: "preferences", error: "Set your travel preferences first.", effective: prefs });
+    const centre = dayCentre(day, snap.center);
+    let candidates: Candidate[] = [];
+    let candidateNote: string | null = null;
+    if (!centre) candidateNote = "This day has no places on the map yet, so there's nothing nearby to suggest.";
+    else if (!googleConfigured()) candidateNote = "Nearby suggestions need Google Maps configured on the server.";
+    else {
+      // one Places request per type, at most four; a failure leaves that type out rather than guessing
+      const groups = await Promise.all(searchTypes(prefs).map(async (t) => ({ kind: t.kind, places: (await nearbyPlaces(centre, 2500, t.type, { withPrice: true }).catch(() => ({ places: [] }))).places })));
+      candidates = toCandidates(groups, day, centre);
+      if (!candidates.length) candidateNote = "Google found no new places near this day to suggest.";
+    }
+    const ac = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) ac.abort();
+    });
+    try {
+      const draft = await planner.plan({ userId: user.id, tripId, day, prefs, candidates });
+      if (candidateNote) draft.caveats.unshift(candidateNote);
+      const id = shortId("plan");
+      const t = Date.now();
+      for (const [k, v] of drafts) if (t - v.at > DRAFT_TTL_MS) drafts.delete(k);
+      drafts.set(id, { userId: user.id, tripId, draft, at: t });
+      note({ dayId: day.id, changes: draft.changes.length });
+      return json(res, 200, { draftId: id, ...draft });
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 429 || status === 503 || err instanceof HttpError) throw err;
+      const d = describeAiError(err);
+      return json(res, d.status, { error: d.error.replace("AI copilot", "AI planner"), retry: d.retry });
+    }
+  }
+
+  if (method === "POST" && rest === "/plan/apply") {
+    const input = await body(req);
+    const entry = typeof input.draftId === "string" ? drafts.get(input.draftId) : undefined;
+    if (!entry || entry.tripId !== tripId || entry.userId !== user.id || Date.now() - entry.at > DRAFT_TTL_MS) {
+      trips.requireMember(tripId, user.id);
+      throw new HttpError(410, "This plan has expired. Make a new one.", { code: "expired" });
+    }
+    const d = entry.draft;
+    const snap = trips.applyPlan(user.id, tripId, {
+      dayId: d.dayId,
+      basedOn: d.basedOn,
+      changes: d.changes.map((c) =>
+        c.type === "move"
+          ? { type: "move", activityId: c.activityId, toIndex: c.toIndex }
+          : c.type === "mode"
+            ? { type: "mode", segmentId: c.segmentId, to: c.to }
+            : {
+                type: "add",
+                clientId: c.clientId,
+                title: c.candidate.name,
+                kind: c.kind === "food" ? "food" : "attraction",
+                startMin: c.startMin,
+                durationMin: c.durationMin,
+                meal: c.meal,
+                notes: c.warning ?? "",
+                place: { placeId: c.candidate.placeId, source: c.candidate.source === "demo" ? "demo" : "google", lat: c.candidate.lat, lng: c.candidate.lng },
+              },
+      ),
+    });
+    drafts.delete(input.draftId as string);
+    note({ dayId: d.dayId, changes: d.changes.length });
+    return json(res, 200, snap);
+  }
+
   if (method === "POST" && rest === "/copilot") {
     const input = await body(req);
     const snap = trips.view(user.id, tripId);
@@ -420,7 +527,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       if (!res.writableEnded) ac.abort();
     });
     try {
-      const r = await copilot.ask({ userId: user.id, day, trip: snap, question, history: cleanHistory(input.history), lang, signal: ac.signal });
+      const r = await copilot.ask({ userId: user.id, tripId, day, trip: snap, question, history: cleanHistory(input.history), lang, signal: ac.signal });
       return json(res, 200, { configured: true, rev: snap.rev, dayId: day.id, fingerprint: r.fingerprint, model: copilot.model, cached: r.cached, lang: r.lang, question, answer: r.answer });
     } catch (err) {
       const status = (err as { status?: number }).status;
@@ -557,6 +664,10 @@ const ROUTES: [string, RegExp, Route][] = [
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/segments\/[0-9a-f-]{36}\/mode$/, { event: "TRIP_ROUTE_MODE_SELECTED", action: "select_mode", message: "User chose a transport mode for a leg" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/proposals\/apply$/, { event: "TRIP_SCHEDULE_MODIFIED", action: "apply_proposal", message: "User applied a schedule fix" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/copilot$/, { event: "COPILOT_ASKED", action: "ask_copilot", message: "User asked the copilot about a day" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/plan$/, { event: "AI_PLAN_DRAFTED", action: "plan_day", message: "User asked the AI to plan a day (preview only)" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/plan\/apply$/, { event: "AI_PLAN_APPLIED", action: "apply_plan", message: "User applied a previewed AI plan" }],
+  ["PUT", /^\/api\/trips\/[0-9a-f-]{36}\/preferences$/, { event: "TRIP_PREFERENCES_UPDATED", action: "update_trip_preferences", message: "A member changed the trip's shared travel preferences" }],
+  ["PUT", /^\/api\/me\/preferences$/, { event: "USER_PREFERENCES_UPDATED", action: "update_preferences", message: "User saved their own travel preferences" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/call$/, { event: "CALL_INVITED", action: "start_call", message: "User started a voice call" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/call\/[0-9a-f-]{36}\/accept$/, { event: "CALL_ACCEPTED", action: "accept_call", message: "User accepted a voice call" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/call\/[0-9a-f-]{36}\/hangup$/, { event: "CALL_ENDED", action: "hang_up", message: "User hung up the voice call" }],
@@ -695,6 +806,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 function respondError(res: ServerResponse, err: unknown): void {
   if (res.headersSent) return void res.end();
   if (err instanceof HttpError) return json(res, err.status, { error: err.message, ...err.details });
+  if (err instanceof AiLimitError) return json(res, err.status, { error: err.message, code: err.code });
   // the full stack stays on the server, sanitised; the user gets a plain message
   log.error("UNHANDLED_ERROR", { action: "request", status: "failure", errorCode: "INTERNAL_ERROR", message: sanitize(err), stack: err instanceof Error ? sanitize(err.stack, 2000) : undefined });
   json(res, 500, { error: "Something went wrong on our side." });
@@ -711,7 +823,8 @@ server.listen(port, "0.0.0.0", () => {
     googleBrowserKey: on(process.env.GOOGLE_MAPS_BROWSER_KEY),
     googleServerKey: on(process.env.GOOGLE_MAPS_SERVER_KEY),
     mapId: process.env.GOOGLE_MAPS_MAP_ID ? "set" : "DEMO_MAP_ID",
-    ai: on(process.env.ANTHROPIC_API_KEY),
+    ai: on(process.env.OPENAI_API_KEY),
+    aiModel: ai?.model ?? null,
     turn: iceConfigured().turn ?? "missing",
     stun: iceConfigured().stun ? "set" : "missing",
   });
