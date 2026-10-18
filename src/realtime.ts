@@ -14,7 +14,10 @@ import type { ServerResponse } from "node:http";
 // It's the map view only (never the device's location), lives in memory with
 // the stream, and is never written to the database or counted as a revision.
 export type MapView = { lat: number; lng: number; zoom: number; heading: number; at: number };
-type Conn = { userId: string; displayName: string; session: string | null; view: MapView | null; res: ServerResponse };
+type Conn = { id: string; userId: string; username: string | null; displayName: string; session: string | null; view: MapView | null; res: ServerResponse; opened: number };
+type LogFn = (event: string, fields: Record<string, unknown>) => void;
+type Logger = { info: LogFn; warn: LogFn; afterEvent?: (fn: () => void) => void };
+const quiet: Logger = { info: () => {}, warn: () => {} };
 const VIEW_TTL_MS = 60_000;
 const VIEW_MIN_GAP_MS = 150;
 
@@ -23,15 +26,33 @@ const VIEW_MIN_GAP_MS = 150;
 export type HubHooks = {
   onJoin?: (tripId: string, userId: string, session: string | null) => void;
   onLeave?: (tripId: string, userId: string, session: string | null) => void;
+  // Connections, joins and leaves, and one line per broadcast. Map views and
+  // keep-alives are never logged: they're high-frequency and say nothing
+  // about what anyone did.
+  log?: Logger;
 };
 
 export function createHub(hooks: HubHooks = {}) {
   const rooms = new Map<string, Set<Conn>>();
   const users = new Map<string, Set<ServerResponse>>(); // userId -> their own streams
+  const log = hooks.log ?? quiet;
+  let seq = 0;
+  const connId = () => `sse_${Date.now().toString(36)}${(seq++).toString(36)}`;
 
   const write = (c: Conn, event: string, data: unknown) => {
     c.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
+
+  const who = (c: Conn) => ({ userId: c.userId, username: c.username, connectionId: c.id, tabSession: c.session });
+  const userIn = (tripId: string, userId: string) => [...(rooms.get(tripId) ?? [])].some((c) => c.userId === userId);
+
+  // A tab's stream went away (closed, or cut off by publish()).
+  function left(tripId: string, c: Conn, reason: string): void {
+    log.info("REALTIME_DISCONNECTED", { ...who(c), tripId, action: "sse_disconnect", status: "success", message: `Live stream closed (${reason})`, reason, durationMs: Date.now() - c.opened });
+    if (!userIn(tripId, c.userId)) {
+      log.info("COLLAB_COLLABORATOR_LEFT", { ...who(c), tripId, action: "leave_session", status: "success", message: "User's last open tab on this trip closed", online: presence(tripId).length });
+    }
+  }
 
   function presence(tripId: string): { id: string; displayName: string }[] {
     const seen = new Map<string, string>();
@@ -66,7 +87,7 @@ export function createHub(hooks: HubHooks = {}) {
   heartbeat.unref();
 
   return {
-    join(tripId: string, user: { id: string; displayName: string }, res: ServerResponse, initial: unknown, session: string | null = null): void {
+    join(tripId: string, user: { id: string; displayName: string; username?: string }, res: ServerResponse, initial: unknown, session: string | null = null): void {
       res.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",
         "cache-control": "no-cache, no-transform",
@@ -74,9 +95,14 @@ export function createHub(hooks: HubHooks = {}) {
         "x-accel-buffering": "no",
       });
       res.write("retry: 2000\n\n");
-      const conn: Conn = { userId: user.id, displayName: user.displayName, session, view: null, res };
+      const conn: Conn = { id: connId(), userId: user.id, username: user.username ?? null, displayName: user.displayName, session, view: null, res, opened: Date.now() };
+      const firstTab = !userIn(tripId, user.id);
       if (!rooms.has(tripId)) rooms.set(tripId, new Set());
       rooms.get(tripId)?.add(conn);
+      log.info("REALTIME_CONNECTED", { ...who(conn), tripId, action: "sse_connect", status: "success", message: "Live stream opened for the trip" });
+      if (firstTab) {
+        log.info("COLLAB_COLLABORATOR_JOINED", { ...who(conn), tripId, action: "join_session", status: "success", message: "User is now live on this trip", online: presence(tripId).length });
+      }
       write(conn, "snapshot", initial);
       // where the others are looking right now, so a (re)joining tab sees them at once
       for (const o of rooms.get(tripId) ?? []) if (o !== conn && o.view && Date.now() - o.view.at < VIEW_TTL_MS) write(conn, "view", viewEvent(o));
@@ -88,27 +114,44 @@ export function createHub(hooks: HubHooks = {}) {
         if (conn.view) toOthers(tripId, conn, "view-gone", { session: conn.session });
         if (room.size === 0) rooms.delete(tripId);
         else announcePresence(tripId);
+        left(tripId, conn, "closed");
         hooks.onLeave?.(tripId, conn.userId, conn.session);
       });
     },
 
     // Sends the new snapshot to everyone still allowed to see the trip; a
-    // stream whose user has been removed is told so and closed.
+    // stream whose user has been removed is told so and closed. Runs inside
+    // the request that made the change, so its log line carries that user.
     publish(tripId: string, snapshot: unknown | null, isMember: (userId: string) => boolean): void {
       const room = rooms.get(tripId);
-      if (!room) return;
+      if (!room) return; // nobody has the trip open: nothing was sent, nothing to log
+      const rev = (snapshot as { rev?: number } | null)?.rev ?? null;
       const payload = JSON.stringify(snapshot);
+      let recipients = 0;
+      let failed = 0;
+      const cut: Conn[] = [];
       for (const c of [...room]) {
         if (snapshot === null || !isMember(c.userId)) {
           write(c, "revoked", { reason: snapshot === null ? "deleted" : "removed" });
           room.delete(c);
           c.res.end();
+          cut.push(c);
           hooks.onLeave?.(tripId, c.userId, c.session);
+        } else if (c.res.destroyed || c.res.writableEnded) {
+          failed++;
         } else {
           c.res.write(`event: snapshot\ndata: ${payload}\n\n`);
+          recipients++;
         }
       }
+      if (room.size === 0) rooms.delete(tripId);
       announcePresence(tripId);
+      const fields = { tripId, rev, action: "broadcast", recipients, failed, revoked: cut.length };
+      (log.afterEvent ?? ((fn: () => void) => fn()))(() => {
+        if (failed > 0) log.warn("COLLAB_UPDATE_BROADCAST", { ...fields, status: "failure", errorCode: "STREAM_CLOSED", message: `Snapshot sent to ${recipients} tab(s); ${failed} stream(s) had already closed` });
+        else log.info("COLLAB_UPDATE_BROADCAST", { ...fields, status: "success", message: snapshot === null ? "Trip deleted; open tabs were told and closed" : `Snapshot rev ${rev} sent to ${recipients} open tab(s)` });
+        for (const c of cut) left(tripId, c, snapshot === null ? "trip deleted" : "removed from trip");
+      });
     },
 
     presence,
@@ -149,16 +192,24 @@ export function createHub(hooks: HubHooks = {}) {
     // A signed-in person's own stream (not a trip's): it carries only
     // "something about your invitations changed", never trip content, so
     // nobody sees a trip before they've joined it.
-    joinUser(userId: string, res: ServerResponse, initial: unknown): void {
+    // Every signed-in page holds one, so the first one opening and the last
+    // one closing are when a person comes online and goes away.
+    joinUser(userId: string, res: ServerResponse, initial: unknown, username: string | null = null): void {
       res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", connection: "keep-alive", "x-accel-buffering": "no" });
       res.write("retry: 4000\n\n");
+      const first = !users.get(userId)?.size;
       if (!users.has(userId)) users.set(userId, new Set());
       users.get(userId)?.add(res);
+      const opened = Date.now();
+      if (first) log.info("USER_CONNECTED", { userId, username, action: "connect", status: "success", message: "User came online (first open page)" });
       res.write(`event: invitations\ndata: ${JSON.stringify(initial)}\n\n`);
       res.on("close", () => {
         const set = users.get(userId);
         set?.delete(res);
-        if (set?.size === 0) users.delete(userId);
+        if (set?.size === 0) {
+          users.delete(userId);
+          log.info("USER_DISCONNECTED", { userId, username, action: "disconnect", status: "success", message: "User's last open page closed", durationMs: Date.now() - opened });
+        }
       });
     },
 

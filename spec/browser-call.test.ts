@@ -68,7 +68,8 @@ async function sharedTrip(owner: Page, guest: Page) {
     await inPage(owner, "POST", `/api/trips/${trip.id}/activities`, { clientId: `${title}-${Math.random()}`, dayId: trip.days[0].id, title, kind: "attraction", startMin, durationMin: 120 });
   }
   const { token } = await inPage(owner, "POST", `/api/trips/${trip.id}/invite`, {});
-  await inPage(guest, "POST", `/api/invites/${token}/accept`, {});
+  const asked = await inPage(guest, "POST", `/api/invites/${token}/request`, {});
+  await inPage(owner, "POST", `/api/trips/${trip.id}/requests/${asked.requestId}/approve`, {});
   return trip;
 }
 

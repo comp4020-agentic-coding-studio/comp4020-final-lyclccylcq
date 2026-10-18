@@ -15,8 +15,8 @@ const baseUrl = inject("baseUrl");
 
 function day(over: { notes?: string } = {}): Day {
   const activities = [
-    { id: "zoo", dayId: "d", position: 0, title: "Taronga Zoo", kind: "attraction" as const, startMin: 540, durationMin: 180, notes: over.notes ?? "", place: { placeId: "p1", source: "google", lat: 0, lng: 0 }, role: null, meal: null, version: 1, updatedBy: null, updatedAt: 0 },
-    { id: "lunch", dayId: "d", position: 1, title: "Lunch", kind: "food" as const, startMin: 735, durationMin: 60, notes: "", place: { placeId: "p2", source: "google", lat: 0, lng: 0 }, role: null, meal: null, version: 1, updatedBy: null, updatedAt: 0 },
+    { id: "zoo", dayId: "d", position: 0, title: "Taronga Zoo", kind: "attraction" as const, startMin: 540, durationMin: 180, notes: over.notes ?? "", place: { placeId: "p1", source: "google", lat: 0, lng: 0 }, role: null, meal: null, version: 1, createdBy: null, updatedBy: null, updatedAt: 0 },
+    { id: "lunch", dayId: "d", position: 1, title: "Lunch", kind: "food" as const, startMin: 735, durationMin: 60, notes: "", place: { placeId: "p2", source: "google", lat: 0, lng: 0 }, role: null, meal: null, version: 1, createdBy: null, updatedBy: null, updatedAt: 0 },
   ];
   const segments = [{ id: "s", fromId: "zoo", toId: "lunch", options: [{ mode: "TRANSIT" as const, status: "ok" as const, durationSec: 2100, distanceM: 5000 }], selectedMode: "TRANSIT" as const, computedAt: 0, departKey: "", stale: false }];
   return {
@@ -288,7 +288,7 @@ describe("the copilot endpoint", () => {
     const guest = await signUp(app.url);
     const trip = await newTrip(owner);
     await share(owner, guest, trip.id);
-    const a = (await addActivity(owner, trip, { title: "Zoo", startMin: 540, durationMin: 180 })).data.activityId;
+    await addActivity(owner, trip, { title: "Zoo", startMin: 540, durationMin: 180 });
     await addActivity(owner, trip, { title: "Lunch", startMin: 690, durationMin: 60 });
     const before = (await owner.get(`/api/trips/${trip.id}`)).data.days[0];
     const proposal = before.analysis.proposals[0];
@@ -296,9 +296,8 @@ describe("the copilot endpoint", () => {
     const answer = (await owner.send("POST", `/api/trips/${trip.id}/copilot`, { dayId: before.id, question: "Which fix?" })).data;
     expect(answer.answer.recommendations[0].proposalId).toBe(proposal.id);
 
-    // the collaborator edits a note on the same day: the plan the answer saw is gone
-    const zoo = before.activities.find((x: any) => x.id === a);
-    expect((await guest.send("PATCH", `/api/trips/${trip.id}/activities/${a}`, { notes: "Bring a hat", baseVersion: zoo.version })).status).toBe(200);
+    // a collaborator adds a stop to the same day: the plan the answer saw is gone
+    expect((await addActivity(guest, trip, { title: "Ferry", startMin: 1000, durationMin: 30 })).status).toBe(201);
     const after = (await owner.get(`/api/trips/${trip.id}`)).data.days[0];
     expect(after.fingerprint).not.toBe(answer.fingerprint);
     expect(after.analysis.proposals.map((p: any) => p.id)).toContain(proposal.id); // same id, different plan

@@ -1,3 +1,4 @@
+import { log } from "./log.ts";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -188,6 +189,101 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
     create unique index if not exists trip_invitations_one_pending on trip_invitations(trip_id, invitee_id) where status = 'pending';
     create index if not exists trip_invitations_by_invitee on trip_invitations(invitee_id, status);
   `);
+
+  // Invite links (November 2026): only a hash of the token, a creation and an
+  // expiry time (24 hours later, set by the server), and when it was revoked.
+  // A link lets a signed-in person *ask* to join; the owner decides.
+  db.exec(`
+    create table if not exists trip_invite_links (
+      id         text primary key,
+      trip_id    text not null references trips(id) on delete cascade,
+      token_hash text not null unique,
+      created_by text not null references users(id) on delete cascade,
+      created_at integer not null,
+      expires_at integer not null,
+      revoked_at integer
+    );
+    create index if not exists trip_invite_links_by_trip on trip_invite_links(trip_id);
+
+    create table if not exists trip_join_requests (
+      id          text primary key,
+      trip_id     text not null references trips(id) on delete cascade,
+      user_id     text not null references users(id) on delete cascade,
+      link_id     text references trip_invite_links(id) on delete set null,
+      status      text not null check (status in ('pending', 'approved', 'rejected')),
+      created_at  integer not null,
+      resolved_at integer,
+      resolved_by text references users(id) on delete set null
+    );
+    create unique index if not exists trip_join_requests_one_pending on trip_join_requests(trip_id, user_id) where status = 'pending';
+    create index if not exists trip_join_requests_by_user on trip_join_requests(user_id, status);
+
+    -- A published trip: a snapshot taken when the owner publishes or
+    -- republishes, never the live working trip. One per trip, so its id (and
+    -- its reviews) stay stable across republishing and unpublishing.
+    create table if not exists trip_publications (
+      id                 text primary key,
+      trip_id            text not null unique references trips(id) on delete cascade,
+      author_id          text references users(id) on delete set null,
+      title              text not null,
+      description        text not null,
+      destination        text not null,
+      timezone           text not null,
+      days               integer not null,
+      cover              text,
+      ref_lat            real,
+      ref_lng            real,
+      ref_cached_at      integer,
+      status             text not null check (status in ('published', 'unpublished')),
+      first_published_at integer not null,
+      published_at       integer not null,
+      trip_rev           integer not null
+    );
+    create index if not exists trip_publications_public on trip_publications(status, published_at);
+
+    -- lat/lng follow the same rule as activities: Google coordinates are a
+    -- temporary copy (cached_at), a custom point is the traveller's own.
+    -- Notes are never published.
+    create table if not exists publication_stops (
+      id             text primary key,
+      publication_id text not null references trip_publications(id) on delete cascade,
+      day            integer not null,
+      position       integer not null,
+      title          text not null,
+      kind           text not null,
+      start_min      integer,
+      duration_min   integer not null,
+      meal           text,
+      role           text,
+      place_id       text,
+      place_source   text,
+      lat            real,
+      lng            real,
+      cached_at      integer
+    );
+    create index if not exists publication_stops_by_pub on publication_stops(publication_id, day, position);
+
+    create table if not exists trip_reviews (
+      id             text primary key,
+      publication_id text not null references trip_publications(id) on delete cascade,
+      user_id        text not null references users(id) on delete cascade,
+      rating         integer not null check (rating between 1 and 5),
+      comment        text not null default '',
+      created_at     integer not null,
+      updated_at     integer not null,
+      unique (publication_id, user_id)
+    );
+  `);
+  // where a trip was forked from: kept as text, so a fork outlives the
+  // publication being unpublished or deleted
+  const tripCols2 = db.prepare("pragma table_info(trips)").all().map((c) => String(c.name));
+  for (const [col, type] of [["forked_from_publication_id", "text"], ["forked_from_title", "text"], ["forked_from_author", "text"], ["forked_at", "integer"], ["cover_key", "text"]]) {
+    if (!tripCols2.includes(col)) db.exec(`alter table trips add column ${col} ${type}`);
+  }
+  // Legacy invite links (trips.invite_hash) never expired and joined people
+  // without the owner's approval. They're switched off rather than carried
+  // over: an owner who wants a link makes a new, expiring one.
+  db.exec("update trips set invite_hash = null where invite_hash is not null");
   return db;
 }
 
@@ -224,7 +320,7 @@ export function migrateDisplayNames(db: DatabaseSync): { collisions: number } {
     db.exec("create unique index users_display_name_key on users(display_name_key)");
   } else {
     // counts only: names are personal data and stay out of the log
-    console.warn(`display names: ${colliding.length} group(s) covering ${blocked.size} accounts already share a name; the unique index is waiting until they're resolved (see docs/unique-names.md).`);
+    log.warn("DB_DISPLAY_NAME_COLLISIONS", { action: "migrate", status: "failure", errorCode: "DATA_COLLISION", groups: colliding.length, accounts: blocked.size, message: "Some accounts already share a display name; the unique index is waiting until they're resolved (see docs/unique-names.md)" });
   }
   return { collisions: colliding.length };
 }

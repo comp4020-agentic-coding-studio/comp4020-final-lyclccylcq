@@ -158,36 +158,45 @@ describe.skipIf(!chromePath)("in a real browser", () => {
     const trip = await tripWithStops(alice);
     const { token } = await inPage(alice, "POST", `/api/trips/${trip.id}/invite`, {});
 
-    // Bob joins through the invite page, like a person would
+    // Bob opens the link and asks to join, like a person would; that alone lets him in nowhere
     await bob.goto(new URL(`/join/${token}`, baseUrl).href);
-    await bob.waitFor(`[...document.querySelectorAll('button')].some(b => b.textContent === 'Join this trip')`);
-    await bob.eval(`[...document.querySelectorAll('button')].find(b => b.textContent === 'Join this trip').click()`);
-    await bob.waitFor(`location.pathname === '/trips/${trip.id}' && document.querySelectorAll('.timeline .stop').length === 3`);
-    // a collaborator has no settings button, and no stray "false" where it would be
-    expect(await bob.eval<string>(`document.querySelector('.trip-bar').textContent`)).not.toMatch(/false|undefined|null/);
+    await bob.waitFor(`document.querySelector('[data-join-action=request]')?.textContent === 'Request to Join'`);
+    await bob.click("[data-join-action=request]");
+    await bob.waitFor(`document.querySelector('[data-join-status]')?.dataset.joinStatus === 'pending'`);
+    expect((await bob.eval<number>(`fetch('/api/trips/${trip.id}').then(r => r.status)`))).toBe(404);
+
+    // Alice sees the request in the share dialog and approves it
     await alice.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await alice.waitFor(`document.querySelector('[aria-label="1 requests to join"]')`);
+    await alice.eval(`[...document.querySelectorAll('.trip-bar button')].find(b => b.textContent.includes('Share')).click()`);
+    await alice.waitFor(`document.querySelector('[data-share=approval-note]') && document.querySelector('[data-request-action=approve]')`);
+    await alice.click("[data-request-action=approve]");
+    await alice.waitFor(`document.querySelector('[data-request] [data-status=approved]')`);
+    await alice.eval(`document.querySelector('dialog[open] .dialog-actions .btn-primary').click()`);
+
+    // now Bob can open the trip; as a collaborator he sees no settings and can't remove Alice's stops
+    await bob.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await bob.waitFor(`document.querySelectorAll('.timeline .stop').length === 3`);
+    expect(await bob.eval<string>(`document.querySelector('.trip-bar').textContent`)).not.toMatch(/false|undefined|null|Publish/);
+    expect(await bob.eval(`document.querySelectorAll('.timeline [aria-label^="Remove "]').length`)).toBe(0);
     await alice.waitFor(`document.querySelector('.conn-live') && /2 people/.test(document.querySelector('.presence-label').textContent)`);
 
-    // Alice adds a stop through the UI; Bob's open page shows it
-    await alice.click(".plan-foot button");
-    await alice.waitFor(`document.querySelector('dialog[open] input[name=title]')`);
-    await alice.eval(`document.querySelector('dialog[open] input[name=title]').value = 'Ferry to Manly'; document.querySelector('dialog[open] form').requestSubmit()`);
-    const added = await bob.waitFor(`${stopTitles}.includes('Ferry to Manly')`, 3000);
+    // Bob adds a stop through the UI; Alice's open page shows it
+    await bob.click(".plan-foot button");
+    await bob.waitFor(`document.querySelector('dialog[open] input[name=title]')`);
+    await bob.eval(`document.querySelector('dialog[open] input[name=title]').value = 'Ferry to Manly'; document.querySelector('dialog[open] form').requestSubmit()`);
+    const added = await alice.waitFor(`${stopTitles}.includes('Ferry to Manly')`, 3000);
     expect(added).toBeLessThan(1500);
+    // his own stop has its controls; deleting the trip is refused by the server
+    await bob.waitFor(`document.querySelector('[aria-label="Remove Ferry to Manly"]')`);
+    expect(await bob.eval<number>(`fetch('/api/trips/${trip.id}', { method: 'DELETE' }).then(r => r.status)`)).toBe(403);
 
-    // Bob moves Opera House to the morning on his phone (by its time); Alice sees the new order
-    await bob.click('[aria-label="Change the time of Opera House"]');
-    await bob.waitFor(`document.querySelector('dialog[open] input[name=start]')`);
-    await bob.eval(`(() => { const f = document.querySelector('dialog[open] form'); f.start.value = '08:00'; f.requestSubmit(); })()`);
-    const moved = await alice.waitFor(`JSON.stringify(${stopTitles}.slice(0, 3)) === '["Opera House","Zoo","Lunch"]'`, 3000);
+    // Alice moves Opera House to the morning (by its time); Bob sees the new order
+    await alice.click('[aria-label="Change the time of Opera House"]');
+    await alice.waitFor(`document.querySelector('dialog[open] input[name=start]')`);
+    await alice.eval(`(() => { const f = document.querySelector('dialog[open] form'); f.start.value = '08:00'; f.requestSubmit(); })()`);
+    const moved = await bob.waitFor(`JSON.stringify(${stopTitles}.slice(0, 3)) === '["Opera House","Zoo","Lunch"]'`, 3000);
     expect(moved).toBeLessThan(1500);
-
-    // Alice edits a time; it reaches Bob too
-    const zoo = trip.days[0].activities?.[0];
-    const fresh = await inPage(alice, "GET", `/api/trips/${trip.id}`);
-    const zooNow = fresh.days[0].activities.find((a: any) => a.title === "Zoo") ?? zoo;
-    await inPage(alice, "PATCH", `/api/trips/${trip.id}/activities/${zooNow.id}`, { baseVersion: zooNow.version, startMin: 7 * 60 + 30 });
-    await bob.waitFor(`document.querySelector('.timeline .stop h3').textContent === 'Zoo' && document.querySelector('.timeline .stop .stop-clock').textContent === '07:30'`, 3000);
     await sleep(50);
   });
 });
@@ -495,7 +504,8 @@ describe.skipIf(!chromePath)("collaborating live, every kind of change", () => {
     await signUpIn(bob, baseUrl, uniqueName("bob"));
     const trip = await tripWithStops(alice);
     const { token } = await inPage(alice, "POST", `/api/trips/${trip.id}/invite`, {});
-    await inPage(bob, "POST", `/api/invites/${token}/accept`, {});
+    const asked = await inPage(bob, "POST", `/api/invites/${token}/request`, {});
+    await inPage(alice, "POST", `/api/trips/${trip.id}/requests/${asked.requestId}/approve`, {});
     await alice.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
     await bob.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
     await alice.waitFor(`document.querySelector('.conn-live') && /2 people/.test(document.querySelector('.presence-label').textContent)`);
@@ -503,14 +513,27 @@ describe.skipIf(!chromePath)("collaborating live, every kind of change", () => {
     const timings: Record<string, number> = {};
     const ids = (await inPage(alice, "GET", `/api/trips/${trip.id}`)).days[0].activities.map((a: any) => a);
 
-    // Bob removes Lunch; Alice sees it go
-    await bob.eval(`window.confirm = () => true; document.querySelector('[aria-label="Remove Lunch"]').click()`);
-    timings.remove = await alice.waitFor(`!${stopTitles}.includes('Lunch') && ${stopTitles}.length === 2`, 3000);
+    // Bob, a collaborator, can't remove Alice's stops: the button isn't there
+    // and the server refuses (docs/permissions.md)
+    expect(await bob.eval(`Boolean(document.querySelector('[aria-label="Remove Lunch"]'))`)).toBe(false);
+    const lunch = ids.find((a: any) => a.title === "Lunch");
+    expect(await bob.eval<number>(`fetch('/api/trips/${trip.id}/activities/${lunch.id}', { method: 'DELETE' }).then(r => r.status)`)).toBe(403);
 
-    // Bob retimes the Zoo; Alice's timeline shows the new time
+    // Alice removes Lunch; Bob sees it go
+    await alice.eval(`window.confirm = () => true; document.querySelector('[aria-label="Remove Lunch"]').click()`);
+    timings.remove = await bob.waitFor(`!${stopTitles}.includes('Lunch') && ${stopTitles}.length === 2`, 3000);
+
+    // Alice retimes the Zoo; Bob's timeline shows the new time
     const zoo = ids.find((a: any) => a.title === "Zoo");
-    await inPage(bob, "PATCH", `/api/trips/${trip.id}/activities/${zoo.id}`, { baseVersion: zoo.version, startMin: 8 * 60 + 30 });
-    timings.retime = await alice.waitFor(`document.querySelector('.timeline .stop .stop-clock').textContent === '08:30'`, 3000);
+    await inPage(alice, "PATCH", `/api/trips/${trip.id}/activities/${zoo.id}`, { baseVersion: zoo.version, startMin: 8 * 60 + 30 });
+    timings.retime = await bob.waitFor(`document.querySelector('.timeline .stop .stop-clock').textContent === '08:30'`, 3000);
+
+    // Bob adds a stop and retimes his own; Alice sees both, credited to Bob
+    const day = (await inPage(bob, "GET", `/api/trips/${trip.id}`)).days[0];
+    const mine = await inPage(bob, "POST", `/api/trips/${trip.id}/activities`, { clientId: `bob-${Math.random()}`, dayId: day.id, title: "Harbour Bridge", kind: "attraction", startMin: 16 * 60, durationMin: 60 });
+    timings.add = await alice.waitFor(`${stopTitles}.includes('Harbour Bridge')`, 3000);
+    await inPage(bob, "PATCH", `/api/trips/${trip.id}/activities/${mine.activityId}`, { baseVersion: 1, startMin: 17 * 60 });
+    timings.retimeOwn = await alice.waitFor(`[...document.querySelectorAll('.timeline .stop .stop-clock')].some(e => e.textContent === '17:00')`, 3000);
     expect(await alice.eval(`document.querySelector('.stop-touched')?.textContent ?? ''`)).toMatch(/Changed by/);
 
     // Alice sets a starting point; it arrives first in Bob's timeline
@@ -520,7 +543,7 @@ describe.skipIf(!chromePath)("collaborating live, every kind of change", () => {
     console.log(`live sync (ms): ${JSON.stringify(timings)}`);
     for (const ms of Object.values(timings)) expect(ms).toBeLessThan(1500);
     // nothing confirmed was lost on either side
-    const final = ["Central Station", "Zoo", "Opera House"];
+    const final = ["Central Station", "Zoo", "Opera House", "Harbour Bridge"];
     expect(await alice.eval<string[]>(stopTitles)).toEqual(final);
     expect(await bob.eval<string[]>(stopTitles)).toEqual(final);
   });
@@ -534,7 +557,8 @@ describe.skipIf(!chromePath)("collaborating live, every kind of change", () => {
     await signUpIn(bob, baseUrl, uniqueName("bob"));
     const trip = await inPage(alice, "POST", "/api/trips", { title: "Same time", destination: "Sydney", startDate: "2026-12-01", endDate: "2026-12-01", timezone: "Australia/Sydney" });
     const { token } = await inPage(alice, "POST", `/api/trips/${trip.id}/invite`, {});
-    await inPage(bob, "POST", `/api/invites/${token}/accept`, {});
+    const asked = await inPage(bob, "POST", `/api/invites/${token}/request`, {});
+    await inPage(alice, "POST", `/api/trips/${trip.id}/requests/${asked.requestId}/approve`, {});
     await alice.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
     await bob.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
     await alice.waitFor(`/2 people/.test(document.querySelector('.presence-label')?.textContent ?? '')`);
@@ -651,7 +675,8 @@ describe.skipIf(!chromePath)("my spot and view sharing", () => {
     await signUpIn(b, baseUrl, uniqueName("mt"));
     const trip = await tripWithStops(a);
     const { token } = await inPage(a, "POST", `/api/trips/${trip.id}/invite`, {});
-    await inPage(b, "POST", `/api/invites/${token}/accept`, {});
+    const asked = await inPage(b, "POST", `/api/invites/${token}/request`, {});
+    await inPage(a, "POST", `/api/trips/${trip.id}/requests/${asked.requestId}/approve`, {});
     await a.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
     await b.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
     for (const p of [a, b]) await p.waitFor(`document.querySelector('.conn-live') && /2 people/.test(document.querySelector('.presence-label')?.textContent ?? '')`, 8000);

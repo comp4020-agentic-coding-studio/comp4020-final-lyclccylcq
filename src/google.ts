@@ -1,3 +1,4 @@
+import { log, sanitize } from "./log.ts";
 import { DESTINATIONS } from "./curated.ts";
 import { HttpError } from "./errors.ts";
 import { haversineKm, type LatLng } from "./geo.ts";
@@ -131,13 +132,13 @@ async function google(url: string, init: { method: string; fieldMask?: string; b
     });
   } catch (err) {
     const timeout = err instanceof Error && err.name === "TimeoutError";
-    console.warn(`google ${api}: ${timeout ? "timed out" : "network error"}`);
+    log.warn("GOOGLE_API_FAILED", { action: api, status: "failure", errorCode: timeout ? "UPSTREAM_TIMEOUT" : "UPSTREAM_UNREACHABLE", message: `google ${api}: ${timeout ? "timed out" : "network error"}` });
     throw new HttpError(502, timeout ? "Google Maps took too long to answer. Try again." : "Couldn't reach Google Maps. Check the connection and try again.");
   }
   const data = (await res.json().catch(() => ({}))) as any;
   if (!res.ok) {
     const e = describeGoogleError(res.status, data, api);
-    console.warn(`google ${api}: HTTP ${res.status} ${e.reason}: ${String(data?.error?.message ?? "").slice(0, 200)}`);
+    log.warn("GOOGLE_API_FAILED", { action: api, status: "failure", errorCode: "UPSTREAM_ERROR", httpStatus: res.status, reason: e.reason, message: sanitize(`google ${api}: HTTP ${res.status} ${e.reason}: ${String(data?.error?.message ?? "")}`) });
     throw new HttpError(e.status, e.message, { reason: e.reason });
   }
   return data;
@@ -452,7 +453,7 @@ export async function reverseGeocode(p: LatLng): Promise<{ label: string; source
     return nearestKnown();
   }
   if (data?.status !== "OK" || !Array.isArray(data.results) || !data.results[0]) {
-    if (data?.status && data.status !== "ZERO_RESULTS") console.warn(`google Geocoding API: ${data.status}: ${String(data.error_message ?? "").slice(0, 200)}`);
+    if (data?.status && data.status !== "ZERO_RESULTS") log.warn("GOOGLE_API_FAILED", { action: "Geocoding API", status: "failure", errorCode: "UPSTREAM_ERROR", reason: data.status, message: sanitize(`google Geocoding API: ${data.status}: ${String(data.error_message ?? "")}`) });
     return nearestKnown();
   }
   const comps: any[] = data.results[0].address_components ?? [];

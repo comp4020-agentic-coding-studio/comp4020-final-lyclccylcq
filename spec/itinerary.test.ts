@@ -49,7 +49,8 @@ describe("the itinerary", () => {
     const guest = await signUp(baseUrl);
     const trip = await newTrip(owner);
     await share(owner, guest, trip.id);
-    const id = (await addActivity(owner, trip, { title: "Lunch" })).data.activityId;
+    // the guest's own stop: collaborators change what they added (docs/permissions.md)
+    const id = (await addActivity(guest, trip, { title: "Lunch" })).data.activityId;
 
     const a = await owner.send("PATCH", `/api/trips/${trip.id}/activities/${id}`, { baseVersion: 1, startMin: 12 * 60 + 30 });
     expect(a.status).toBe(200);

@@ -1,6 +1,7 @@
 import { CATEGORY_LABEL } from "/home.js";
 import { createMap } from "/map.js";
 import { placeDialog } from "/places.js";
+import { coverImg, photoFor } from "/photos.js";
 import { api, decodePolyline, dur, fill, h, hhmm, icon, KIND_LABEL, openDialog, toast } from "/ui.js";
 
 const MODE_LABEL = { WALK: "Walk", TRANSIT: "Public transport", DRIVE: "Drive" };
@@ -20,10 +21,14 @@ export async function renderPreview(app, id, ctx) {
     return () => {};
   }
 
+  // a trip a traveller published (pub-…) rather than one of Wayline's own
+  const shared = t.source === "user";
   const S = { day: 1, selected: null, mode: "WALK", routes: new Map(), loading: false };
   const days = [...new Set(t.stops.map((s) => s.day))];
   const dayStops = () => t.stops.filter((s) => s.day === S.day);
   const verified = t.stops.filter((s) => s.placeId).length;
+  const located = (s) => typeof s.lat === "number" && typeof s.lng === "number";
+  const reviewsBox = h("section", { class: "pv-reviews", "aria-labelledby": "pv-reviews-h" });
 
   const mapHost = h("div", { class: "map-host" });
   const mapPane = h("section", { class: "preview-map", "aria-label": "Map of the itinerary" }, mapHost);
@@ -35,20 +40,24 @@ export async function renderPreview(app, id, ctx) {
     "section",
     { class: "preview-panel" },
     h("a", { class: "back-link", href: "/#near", "data-link": true }, icon("back"), "Back to recommendations"),
-    h("p", { class: "it-tags" }, t.categories.map((c) => h("span", { class: "tag" }, CATEGORY_LABEL[c] ?? c))),
+    shared && photoFor(t.cover) && h("div", { class: "pv-cover has-photo" }, coverImg(photoFor(t.cover), { decorative: true })),
+    !shared && h("p", { class: "it-tags" }, t.categories.map((c) => h("span", { class: "tag" }, CATEGORY_LABEL[c] ?? c))),
     h("h1", {}, t.title),
+    shared && h("p", { class: "pv-author", "data-pv": "author" }, `By ${t.author.displayName} · published ${new Date(t.publishedAt).toLocaleDateString()}`),
+    shared && h("p", { class: "pv-rating", "data-pv": "rating" }, ratingText(t.rating)),
     h(
       "p",
       { class: "pv-meta" },
       h("span", {}, t.destination),
       h("span", {}, t.days > 1 ? `${t.days} days` : `About ${dur(Math.round(t.durationMin / 30) * 30)}`),
-      h("span", {}, `${t.stopCount} stops`),
+      h("span", {}, `${t.stopCount} ${t.stopCount === 1 ? "stop" : "stops"}`),
     ),
     h("p", { class: "pv-desc" }, t.description),
+    shared && t.status === "unpublished" && h("p", { class: "small leg-warn" }, "Unpublished: only you can see this page."),
     h(
       "p",
       { class: "pv-source" },
-      "A curated sample itinerary by Wayline. ",
+      shared ? "Shared by a Wayline traveller, as they published it. It doesn't change when they edit their own trip. " : "A curated sample itinerary by Wayline. ",
       verified === t.stopCount
         ? "Every stop is matched to a Google Maps place."
         : verified
@@ -58,12 +67,13 @@ export async function renderPreview(app, id, ctx) {
     h(
       "div",
       { class: "pv-actions" },
-      h("button", { class: "btn btn-primary", type: "button", onclick: copyDialog }, icon("plus"), "Plan this trip"),
-      h("span", { class: "muted small" }, "Copies the stops into a new trip you can edit and share."),
+      !(shared && t.status !== "published") && h("button", { class: "btn btn-primary", type: "button", "data-pv": "use", onclick: copyDialog }, icon("plus"), shared ? "Use This Template" : "Plan this trip"),
+      h("span", { class: "muted small" }, "Copies the stops into a new private trip you can edit and share."),
     ),
     days.length > 1 && dayTabs,
     routeBar,
     stopsBox,
+    shared && reviewsBox,
   );
   app.querySelector("main").replaceChildren(h("div", { class: "preview-grid" }, mapPane, panel));
 
@@ -156,7 +166,7 @@ export async function renderPreview(app, id, ctx) {
               "p",
               { class: "stop-meta" },
               h("span", { class: `tag tag-${s.kind}` }, KIND_LABEL[s.kind] ?? s.kind),
-              s.placeId ? h("span", { class: "tag tag-rule" }, "Google place") : h("span", { class: "tag tag-demo" }, "Approximate location"),
+              s.placeId ? h("span", { class: "tag tag-rule" }, "Google place") : s.placeSource === "custom" ? h("span", { class: "tag" }, "Pinned spot") : s.placeSource === "demo" ? h("span", { class: "tag tag-demo" }, "Demo place") : !located(s) ? h("span", { class: "muted small" }, "No place") : h("span", { class: "tag tag-demo" }, "Approximate location"),
             ),
             s.note && h("p", { class: "muted small" }, s.note),
           ),
@@ -176,7 +186,7 @@ export async function renderPreview(app, id, ctx) {
       if (r?.status === "ok" && r.polyline) routes.push({ mode: S.mode, path: decodePolyline(r.polyline) });
     });
     map.update({
-      stops: stops.map((s) => ({ id: s.id, title: s.title, kind: s.kind, lat: s.lat, lng: s.lng, selected: s.id === S.selected })),
+      stops: stops.filter(located).map((s) => ({ id: s.id, title: s.title, kind: s.kind, lat: s.lat, lng: s.lng, selected: s.id === S.selected })),
       results: [],
       routes,
       center: t.ref,
@@ -189,7 +199,7 @@ export async function renderPreview(app, id, ctx) {
     S.selected = sid;
     render();
     const s = t.stops.find((x) => x.id === sid);
-    if (s) map.focus(s);
+    if (s && located(s)) map.focus(s);
     if (scroll) stopsBox.querySelector(`[data-id="${sid}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 
@@ -207,8 +217,8 @@ export async function renderPreview(app, id, ctx) {
     const form = h(
       "form",
       { method: "dialog", class: "stack" },
-      h("h2", {}, "Plan this trip"),
-      h("p", { class: "muted" }, `Wayline will create a new trip with ${t.stopCount} stops over ${t.days} day${t.days > 1 ? "s" : ""}. You can change anything afterwards and invite others.`),
+      h("h2", {}, shared ? "Use This Template" : "Plan this trip"),
+      h("p", { class: "muted" }, `Wayline will create a new private trip with ${t.stopCount} ${t.stopCount === 1 ? "stop" : "stops"} over ${t.days} day${t.days > 1 ? "s" : ""}, owned by you. You can change anything afterwards and invite others${shared ? `; ${t.author.displayName}'s trip isn't affected` : ""}.`),
       h("label", { class: "field" }, h("span", {}, "First day"), h("input", { name: "startDate", type: "date", required: true, value: d.toISOString().slice(0, 10) })),
       error,
       h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, "Cancel"), h("button", { class: "btn btn-primary", type: "submit" }, "Create trip")),
@@ -228,12 +238,93 @@ export async function renderPreview(app, id, ctx) {
     });
   }
 
+  // --- ratings and reviews (published trips only) ---
+  function renderReviews() {
+    if (!shared) return;
+    const mine = t.myReview;
+    const canReview = ctx.me && !t.mine && t.status === "published";
+    const form = canReview ? reviewForm(mine) : null;
+    fill(
+      reviewsBox,
+      h("h2", { id: "pv-reviews-h" }, "Reviews"),
+      h("p", { class: "pv-rating" }, ratingText(t.rating)),
+      !ctx.me && h("p", { class: "small muted" }, h("a", { href: `/login?next=${encodeURIComponent(`/itineraries/${t.id}`)}`, "data-link": true }, "Sign in"), " to rate this trip."),
+      t.mine && h("p", { class: "small muted" }, "This is your trip, so you can't review it."),
+      form,
+      h(
+        "ul",
+        { class: "review-list" },
+        t.reviews.length
+          ? t.reviews.map((r) =>
+              h(
+                "li",
+                { class: "review", "data-review": r.id },
+                h("p", {}, h("span", { class: "stars", "aria-label": `${r.rating} out of 5` }, "★".repeat(r.rating) + "☆".repeat(5 - r.rating)), " ", h("strong", {}, r.author.displayName), r.mine && " (you)", h("span", { class: "muted small" }, ` · ${new Date(r.updatedAt).toLocaleDateString()}`)),
+                r.comment && h("p", { class: "review-text" }, r.comment),
+              ),
+            )
+          : h("li", { class: "muted small" }, "No reviews yet."),
+      ),
+    );
+  }
+
+  function reviewForm(mine) {
+    const error = h("p", { class: "form-error", role: "alert", hidden: true });
+    const stars = h(
+      "div",
+      { class: "star-pick", role: "radiogroup", "aria-label": "Rating" },
+      [1, 2, 3, 4, 5].map((n) => h("label", { class: "star-opt" }, h("input", { type: "radio", name: "rating", value: String(n), required: true, checked: mine?.rating === n }), h("span", {}, `${n}★`))),
+    );
+    const form = h(
+      "form",
+      { class: "stack review-form", "data-pv": "review-form" },
+      h("h3", {}, mine ? "Your review" : "Write a Review"),
+      stars,
+      h("label", { class: "field" }, h("span", {}, "Comment (optional)"), h("textarea", { name: "comment", maxlength: 1000, rows: 3 }, mine?.comment ?? "")),
+      error,
+      h(
+        "div",
+        { class: "row-actions" },
+        h("button", { class: "btn btn-primary btn-sm", type: "submit" }, mine ? "Update review" : "Post review"),
+        mine && h("button", { class: "btn btn-ghost btn-sm btn-danger-text", type: "button", "data-pv": "delete-review", onclick: remove }, "Delete review"),
+      ),
+    );
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        const res = await api(`/api/itineraries/${t.id}/reviews`, { method: "PUT", body: { rating: Number(form.rating.value), comment: form.comment.value } });
+        Object.assign(t, res);
+        toast(mine ? "Review updated." : "Thanks for your review.");
+        render();
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+      }
+    });
+    async function remove() {
+      if (!confirm("Delete your review?")) return;
+      try {
+        Object.assign(t, await api(`/api/itineraries/${t.id}/reviews/${mine.id}`, { method: "DELETE" }));
+        toast("Review deleted.");
+        render();
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+      }
+    }
+    return form;
+  }
+
   function render() {
     renderDays();
     renderRouteBar();
     renderStops();
     renderMap();
+    renderReviews();
+    for (const el of panel.querySelectorAll(".pv-rating")) el.textContent = ratingText(t.rating);
   }
   render();
   return () => map.destroy();
 }
+
+const ratingText = (r) => (r.count ? `Rating: ${r.average.toFixed(1)} / 5 · ${r.count} ${r.count === 1 ? "review" : "reviews"}` : "No ratings yet");

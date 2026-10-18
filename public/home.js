@@ -47,10 +47,11 @@ const permissionState = () =>
   navigator.permissions?.query({ name: "geolocation" }).then((p) => p.state, () => null) ?? Promise.resolve(null);
 
 export function itineraryCard(t, { navigate }) {
+  const shared = t.source === "user";
   const primary = t.categories.find((c) => !["half-day", "one-day", "weekend"].includes(c)) ?? t.categories[0];
   const length = t.days > 1 ? `${t.days} days` : `About ${dur(Math.round(t.durationMin / 30) * 30)}`;
   const open = () => navigate(`/itineraries/${t.id}`);
-  const photo = photoFor(t.id);
+  const photo = photoFor(shared ? t.cover : t.id);
   return h(
     "article",
     { class: "it-card", dataset: { id: t.id } },
@@ -72,11 +73,12 @@ export function itineraryCard(t, { navigate }) {
         { class: "it-meta" },
         h("span", {}, t.destination),
         h("span", {}, length),
-        h("span", {}, `${t.stopCount} stops`),
+        h("span", {}, `${t.stopCount} ${t.stopCount === 1 ? "stop" : "stops"}`),
         typeof t.distanceKm === "number" && h("span", { class: "it-distance" }, t.distanceKm < 1 ? "Right here" : `${km(t.distanceKm)} away`),
       ),
       h("p", { class: "it-desc" }, t.description),
-      h("div", { class: "it-foot" }, h("span", { class: "it-source" }, "Curated by Wayline"), h("button", { class: "btn btn-outline btn-sm", type: "button", onclick: open }, "Preview")),
+      shared && h("p", { class: "it-rating small", "data-rating": t.rating.count }, t.rating.count ? `★ ${t.rating.average.toFixed(1)} / 5 · ${t.rating.count} ${t.rating.count === 1 ? "review" : "reviews"}` : "No ratings yet"),
+      h("div", { class: "it-foot" }, h("span", { class: `it-source${shared ? " it-source-user" : ""}` }, shared ? `Shared by ${t.author}` : "Curated by Wayline"), h("button", { class: "btn btn-outline btn-sm", type: "button", onclick: open }, "Preview")),
     ),
   );
 }
@@ -541,7 +543,23 @@ export function renderHome(app, ctx) {
       .catch((err) => tripsBox.replaceChildren(h("p", { class: "form-error" }, err.message)));
   }
 
-  app.replaceChildren(ctx.topbar("home"), h("main", { class: "home" }, hero, explore.el, near, exploreDest, featured, myTrips), ctx.footer());
+  // trips travellers published: their own section, labelled by author, never
+  // ranked in among Wayline's curated itineraries
+  const sharedGrid = h("div", { class: "it-grid" });
+  const sharedSection = h(
+    "section",
+    { class: "home-section", id: "shared", hidden: true },
+    h("div", { class: "section-head" }, h("div", {}, h("h2", {}, "Shared by travellers"), h("p", { class: "section-sub" }, "Trips other Wayline travellers published. Preview one, rate it, or use it as the start of your own."))),
+    sharedGrid,
+  );
+  api("/api/publications")
+    .then(({ publications }) => {
+      sharedSection.hidden = publications.length === 0;
+      sharedGrid.replaceChildren(...publications.slice(0, 9).map((t) => itineraryCard(t, ctx)));
+    })
+    .catch(() => {});
+
+  app.replaceChildren(ctx.topbar("home"), h("main", { class: "home" }, hero, explore.el, near, exploreDest, sharedSection, featured, myTrips), ctx.footer());
 
   S.place = activePlace();
   renderChips();

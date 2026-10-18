@@ -132,6 +132,12 @@ function renderPrivacy() {
         {},
         "Usernames and display names are unique, so someone planning a trip can find you by your username. Only a trip's owner can search, and only while inviting people to that trip; a search shows the matching usernames and display names and nothing else about your account. When an owner invites you, Wayline stores who invited you to which trip and whether you accepted, declined, or the owner cancelled it. You see the trip's title, destination and dates before deciding, and you join only if you accept.",
       ),
+      h("h2", {}, "Invite links, publishing and reviews"),
+      h(
+        "p",
+        {},
+        "When you ask to join a trip through an invite link, Wayline stores your request (your account, the trip, when, and whether the owner approved or rejected it); the owner sees your username and display name. If you publish a trip, anyone can see its title, description, destination, stops, times and places, and your display name as its author. Your notes, the people on the trip and invite links are never published, and unpublishing hides it again. Reviews you write show your display name, rating and comment to everyone who views that trip, until you delete them.",
+      ),
       h("h2", {}, "Your location"),
       h(
         "p",
@@ -359,6 +365,7 @@ async function renderDashboard() {
         { class: "trip-card-body" },
         h("h3", {}, t.title),
         h("p", { class: "trip-card-dates" }, fmtRange(t.startDate, t.endDate)),
+        t.basedOn && h("p", { class: "trip-card-origin small muted" }, `Based on a trip by ${t.basedOn}`),
         h(
           "p",
           { class: "trip-card-meta" },
@@ -376,12 +383,68 @@ async function renderDashboard() {
   // new one appears while this page is open (the account's own stream says
   // the list changed; the list itself comes with this session).
   const invitesBox = h("section", { class: "dash-section invites", "aria-label": "Invitations", hidden: true });
+  const requestsBox = h("section", { class: "dash-section invites", "aria-label": "Requests to join your trips", "data-dash": "requests", hidden: true });
+  const myRequestsBox = h("section", { class: "dash-section", "aria-label": "Your requests to join", "data-dash": "my-requests", hidden: true });
   const renderInvites = () => {
     invitesBox.hidden = invites.invitations.length === 0;
     fill(
       invitesBox,
       h("h2", {}, "Invitations", h("span", { class: "badge badge-danger" }, String(invites.invitations.length))),
       h("ul", { class: "invite-list" }, invites.invitations.map(inviteRow)),
+    );
+    const reqs = invites.requests ?? [];
+    requestsBox.hidden = reqs.length === 0;
+    fill(
+      requestsBox,
+      h("h2", {}, "Requests to join your trips", h("span", { class: "badge badge-danger" }, String(reqs.length))),
+      h("ul", { class: "invite-list" }, reqs.map(requestRow)),
+    );
+    const mine = invites.myRequests ?? [];
+    myRequestsBox.hidden = mine.length === 0;
+    const LABEL = { pending: "Waiting for approval", approved: "Approved", rejected: "Not approved" };
+    fill(
+      myRequestsBox,
+      h("h2", {}, "Your requests to join"),
+      h(
+        "ul",
+        { class: "members" },
+        mine.map((r) =>
+          h(
+            "li",
+            { "data-my-request": r.status },
+            h("span", { class: "grow" }, h("strong", {}, r.trip.title), h("br"), h("small", { class: "muted" }, `${r.trip.destination} · ${r.trip.ownerName}'s trip`)),
+            r.trip.id ? h("a", { class: "btn btn-ghost btn-sm", href: `/trips/${r.trip.id}`, "data-link": true }, "Open") : h("span", { class: `chip ${r.status === "rejected" ? "" : "chip-soft"}` }, LABEL[r.status]),
+          ),
+        ),
+      ),
+    );
+  };
+  const requestRow = (rq) => {
+    const status = h("span", { class: "small muted", role: "status" });
+    const actions = h("div", { class: "row-actions" });
+    const decide = async (what) => {
+      for (const b of actions.querySelectorAll("button")) b.disabled = true;
+      try {
+        await api(`/api/trips/${rq.trip.id}/requests/${rq.id}/${what}`, { method: "POST", body: {} });
+        actions.replaceChildren();
+        status.textContent = what === "approve" ? "Approved." : "Rejected.";
+        setTimeout(refresh, 1200);
+        if (what === "approve") onTrips();
+      } catch (err) {
+        status.textContent = err.message;
+        setTimeout(refresh, 1500);
+      }
+    };
+    actions.append(
+      h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-request-action": "reject", onclick: () => decide("reject") }, "Reject"),
+      h("button", { class: "btn btn-primary btn-sm", type: "button", "data-request-action": "approve", onclick: () => decide("approve") }, "Approve"),
+    );
+    return h(
+      "li",
+      { class: "invite-row", "data-request": rq.id },
+      avatar(rq.user, "md"),
+      h("div", { class: "grow" }, h("p", { class: "small muted" }, h("strong", {}, rq.user.displayName), ` @${rq.user.username} asked to join`), h("h3", {}, rq.trip.title), status),
+      actions,
     );
   };
   const inviteRow = (inv) => {
@@ -435,8 +498,9 @@ async function renderDashboard() {
     return refreshing;
   };
   const events = new EventSource("/api/me/events");
-  events.addEventListener("invitations", (e) => {
-    if (JSON.parse(e.data).pending !== invites.invitations.length || invites.invitations.length) refresh();
+  events.addEventListener("invitations", () => {
+    refresh();
+    onTrips(); // an approval adds a trip to "Shared with you"
   });
   const onTrips = () => api("/api/trips").then((d) => {
     data = d;
@@ -468,7 +532,9 @@ async function renderDashboard() {
       h("div", {}, h("p", { class: "eyebrow" }, "Your trips"), h("h1", {}, `Where to next, ${state.me.displayName}?`)),
       h("button", { class: "btn btn-primary", type: "button", onclick: newTripDialog }, icon("plus"), "New trip"),
     ),
+    requestsBox,
     invitesBox,
+    myRequestsBox,
     lists,
   );
   renderInvites();
@@ -535,38 +601,61 @@ function newTripDialog() {
 
 // --- joining a shared trip -----------------------------------------------------
 
+// A link lets a signed-in person ask to join; the owner approves. The page
+// shows only whose trip it is and where this person stands.
 async function renderJoin(token) {
   app.replaceChildren(topbar(), h("main", { class: "center-page" }, h("div", { class: "boot" }, "Checking your invite…")));
   const main = app.querySelector("main");
+  let p;
   try {
-    const p = await api(`/api/invites/${token}`);
-    if (p.alreadyMember) return navigate(`/trips/${p.tripId}`, { replace: true });
-    const btn = h("button", { class: "btn btn-primary btn-block", type: "button" }, "Join this trip");
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      try {
-        const { tripId } = await api(`/api/invites/${token}/accept`, { method: "POST", body: {} });
-        toast(`You joined ${p.title}.`);
-        navigate(`/trips/${tripId}`, { replace: true });
-      } catch (err) {
-        toast(err.message, { kind: "error" });
-        btn.disabled = false;
-      }
-    });
-    main.replaceChildren(
-      h(
-        "div",
-        { class: "invite-card", style: `--hue:${hue(p.destination)}` },
-        h("p", { class: "eyebrow" }, `${p.ownerName} invited you to plan`),
-        h("h1", {}, p.title),
-        h("p", { class: "lede" }, `${p.destination} · ${fmtRange(p.startDate, p.endDate)}`),
-        h("p", { class: "muted" }, "As a collaborator you can add places, change times and reorder the plan. Everyone on the trip sees changes as they happen."),
-        btn,
-      ),
-    );
+    p = await api(`/api/invites/${token}`);
   } catch (err) {
-    main.replaceChildren(h("div", { class: "invite-card" }, h("h1", {}, "Invite not valid"), h("p", {}, err.message), h("a", { class: "btn btn-ghost", href: "/", "data-link": true }, "Go to your trips")));
+    main.replaceChildren(h("div", { class: "invite-card", "data-join": "invalid" }, h("h1", {}, "Invite not valid"), h("p", {}, err.message), h("a", { class: "btn btn-ghost", href: "/", "data-link": true }, "Go to your trips")));
+    return;
   }
+  if (p.state === "member") return navigate(`/trips/${p.tripId}`, { replace: true });
+  const status = h("p", { class: "small", role: "status", "data-join-status": p.state });
+  const card = h("div", { class: "invite-card", style: `--hue:${hue(p.destination)}`, "data-join": p.state });
+  const show = (state, message) => {
+    card.dataset.join = state;
+    status.dataset.joinStatus = state;
+    status.textContent = message;
+  };
+  const btn = h("button", { class: "btn btn-primary btn-block", type: "button", "data-join-action": "request" }, "Request to Join");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      await api(`/api/invites/${token}/request`, { method: "POST", body: {} });
+      btn.remove();
+      show("pending", `Request sent. ${p.ownerName} will see it and can approve or reject it. The trip appears in My Trips once you're approved.`);
+    } catch (err) {
+      btn.disabled = false;
+      if (err.status === 410) {
+        btn.remove();
+        show("expired", "This link has expired. Ask the trip's owner for a new one.");
+      } else show(card.dataset.join, err.message);
+    }
+  });
+  const MESSAGES = {
+    can_request: "The owner approves each person before they can see or change the trip.",
+    pending: `Your request is waiting for ${p.ownerName} to approve it.`,
+    expired: "This invite link has expired. Ask the trip's owner for a new one.",
+    rejected: "Your last request wasn't approved. You can ask again while this link is valid.",
+  };
+  show(p.state, MESSAGES[p.state]);
+  // h() drops false children; the DOM's own append() would print "false"
+  fill(
+    card,
+    h("p", { class: "eyebrow" }, `${p.ownerName} invited you to plan`),
+    h("h1", {}, p.title),
+    h("p", { class: "lede" }, p.destination),
+    p.state !== "expired" && h("p", { class: "muted small" }, `Link valid until ${new Date(p.expiresAt).toLocaleString("en-AU", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}.`),
+    h("p", { class: "muted" }, "As a collaborator you can add places to the plan and change the ones you added. Everyone on the trip sees changes as they happen."),
+    status,
+    (p.state === "can_request" || p.state === "rejected") && btn,
+    h("a", { class: "btn btn-ghost", href: "/trips", "data-link": true }, "Go to your trips"),
+  );
+  main.replaceChildren(card);
 }
 
 function renderMissing(message) {

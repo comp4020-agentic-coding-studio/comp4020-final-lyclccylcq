@@ -1,5 +1,5 @@
 import { describe, expect, inject, it } from "vitest";
-import { addActivity, anon, newTrip, share, signUp } from "./helpers.ts";
+import { addActivity, anon, newTrip, requestAndApprove, share, signUp } from "./helpers.ts";
 
 // "Only authorised users may edit a private trip": owner, collaborator and
 // outsider are told apart on the server, for every kind of request.
@@ -40,7 +40,7 @@ describe("who can see and change a trip", () => {
     expect(after.data.days[0].activities.map((a: any) => a.title)).toEqual(["Somewhere"]);
   });
 
-  it("lets an invited collaborator edit the itinerary but not run the trip", async () => {
+  it("lets an invited collaborator add to the itinerary but not run the trip", async () => {
     const owner = await signUp(baseUrl);
     const guest = await signUp(baseUrl);
     const trip = await newTrip(owner);
@@ -66,11 +66,12 @@ describe("who can see and change a trip", () => {
     const second = (await owner.send("POST", `/api/trips/${trip.id}/invite`, {})).data.token as string;
     expect(second).not.toBe(first);
 
-    expect((await a.send("POST", `/api/invites/${first}/accept`, {})).status).toBe(404);
-    expect((await a.send("POST", `/api/invites/${second}/accept`, {})).status).toBe(200);
+    expect((await a.send("POST", `/api/invites/${first}/request`, {})).status).toBe(404);
+    await requestAndApprove(owner, a, trip.id, second);
+    expect((await a.get(`/api/trips/${trip.id}`)).status).toBe(200);
 
     await owner.send("DELETE", `/api/trips/${trip.id}/invite`);
-    expect((await b.send("POST", `/api/invites/${second}/accept`, {})).status).toBe(404);
+    expect((await b.send("POST", `/api/invites/${second}/request`, {})).status).toBe(404);
     expect((await b.get(`/api/trips/${trip.id}`)).status).toBe(404);
     // the trip never reveals its link to anyone, owner included
     expect(JSON.stringify((await owner.get(`/api/trips/${trip.id}`)).data)).not.toContain(second);

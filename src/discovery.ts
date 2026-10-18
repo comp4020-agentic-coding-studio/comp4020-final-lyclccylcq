@@ -1,3 +1,4 @@
+import { log, sanitize } from "./log.ts";
 import type { IncomingMessage } from "node:http";
 import type { User } from "./auth.ts";
 import { bad, HttpError } from "./errors.ts";
@@ -20,6 +21,7 @@ import {
 import { type ItineraryStore, parseCategory } from "./itineraries.ts";
 import { clientIp, createLimiter } from "./ratelimit.ts";
 import { type Mode, MODES } from "./schedule.ts";
+import type { Publications } from "./publications.ts";
 import type { TripStore } from "./trips.ts";
 
 // The public discovery API behind the homepage: curated itineraries ranked
@@ -45,8 +47,8 @@ function waypointInput(v: unknown, field: string): Waypoint {
   return parseLatLng(w.lat, w.lng);
 }
 
-export function createDiscovery(deps: { itineraries: ItineraryStore; trips: TripStore }) {
-  const { itineraries, trips } = deps;
+export function createDiscovery(deps: { itineraries: ItineraryStore; trips: TripStore; publications: Publications }) {
+  const { itineraries, trips, publications } = deps;
   const placesLimit = createLimiter(60, 60_000);
   const routesLimit = createLimiter(30, 60_000);
   const verifying = new Map<string, Promise<void>>();
@@ -69,7 +71,7 @@ export function createDiscovery(deps: { itineraries: ItineraryStore; trips: Trip
           const hit = await resolvePlace(s.placeQuery as string, s);
           itineraries.recordLookup(s.id, hit?.placeId ?? null);
         } catch (err) {
-          console.warn(`place lookup failed for ${s.id}:`, err instanceof Error ? err.message : err);
+          log.warn("CURATED_PLACE_LOOKUP_FAILED", { action: "verify_stop", status: "failure", errorCode: "UPSTREAM_ERROR", stopId: s.id, message: sanitize(err) });
         }
       }),
     )
@@ -106,7 +108,32 @@ export function createDiscovery(deps: { itineraries: ItineraryStore; trips: Trip
       });
       return ok({ origin: coarse(origin), radiusKm, itineraries: list });
     }
-    let m = path.match(/^\/api\/itineraries\/([a-z0-9-]{3,80})(\/copy)?$/);
+    // trips travellers published: a separate list, never mixed into the curated ones
+    if (method === "GET" && path === "/api/publications") {
+      return ok({ publications: publications.list() });
+    }
+    let m = path.match(/^\/api\/itineraries\/(pub-[0-9a-f-]{36})(\/copy|\/reviews(?:\/[0-9a-f-]{36})?)?$/);
+    if (m) {
+      const id = m[1];
+      if (method === "GET" && !m[2]) return ok(publications.get(id, user?.id ?? null));
+      if (method === "POST" && m[2] === "/copy") {
+        if (!user) throw new HttpError(401, "Sign in to use this template.");
+        return ok(publications.fork(user.id, id, await readBody()), 201);
+      }
+      if (m[2]?.startsWith("/reviews")) {
+        if (!user) throw new HttpError(401, "Sign in to review this trip.");
+        const reviewId = m[2].split("/")[2];
+        if (method === "PUT" && !reviewId) {
+          const r = publications.review(user.id, id, await readBody());
+          return ok({ review: r.review, created: r.created, ...publications.get(id, user.id) }, r.created ? 201 : 200);
+        }
+        if (method === "DELETE" && reviewId) {
+          publications.deleteReview(user.id, id, reviewId);
+          return ok(publications.get(id, user.id));
+        }
+      }
+    }
+    m = path.match(/^\/api\/itineraries\/([a-z0-9-]{3,80})(\/copy)?$/);
     if (m && method === "GET" && !m[2]) {
       itineraries.get(m[1]); // 404 before any Google call
       await verifyStops(m[1]);

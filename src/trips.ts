@@ -5,6 +5,7 @@ import { DESTINATIONS } from "./curated.ts";
 import { transaction } from "./db.ts";
 import { haversineKm } from "./geo.ts";
 import { bad, HttpError, notFound } from "./errors.ts";
+import { type Action, authorize, authorizeActivity, type Role } from "./permissions.ts";
 import type { TemplateDetail } from "./itineraries.ts";
 import {
   analyseDay,
@@ -23,7 +24,7 @@ import {
 
 export const KINDS = ["attraction", "food", "shopping", "accommodation", "custom"] as const;
 export type Kind = (typeof KINDS)[number];
-export type Role = "owner" | "collaborator";
+export type { Role };
 export const MEALS = ["breakfast", "brunch", "lunch", "afternoon_tea", "dinner"] as const;
 export type Meal = (typeof MEALS)[number];
 export type MealTimes = Record<Meal, { from: number; to: number; usual: number }>;
@@ -52,6 +53,7 @@ export type Activity = {
   role: "start" | null;
   meal: Meal | null;
   version: number;
+  createdBy: string | null;
   updatedBy: string | null;
   updatedAt: number;
 };
@@ -83,12 +85,33 @@ export type TripSnapshot = {
   rev: number;
   updatedAt: number;
   hasInvite: boolean;
+  pendingRequests: number;
+  forkedFrom: { publicationId: string; title: string; author: string | null; at: number } | null;
+  publication: { id: string; status: "published" | "unpublished"; publishedAt: number; outdated: boolean } | null;
   members: { id: string; displayName: string; role: Role }[];
   mealTimes: MealTimes;
   days: Day[];
 };
 
 type Row = Record<string, unknown>;
+
+export const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
+export type ForkStop = {
+  day: number;
+  position: number;
+  title: string;
+  kind: string;
+  startMin: number | null;
+  durationMin: number;
+  meal: string | null;
+  role: string | null;
+  placeId: string | null;
+  placeSource: string | null;
+  lat: number | null;
+  lng: number | null;
+  cachedAt: number | null;
+};
+export type InviteLink = { id: string; createdAt: number; expiresAt: number; expired: boolean };
 
 // --- input validation (the server's checks are the real ones) ----------------
 
@@ -202,14 +225,29 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
 
   // Non-members get the same 404 as a trip that doesn't exist, so an id
   // reveals nothing on its own.
-  function requireMember(tripId: string, userId: string): Role {
-    const role = typeof tripId === "string" ? roleOf(tripId, userId) : null;
-    if (!role) throw notFound("Trip not found.");
-    return role;
+  // every role check goes through permissions.ts
+  const require = (tripId: string, userId: string, action: Action): Role => authorize(typeof tripId === "string" ? roleOf(tripId, userId) : null, action);
+  const requireMember = (tripId: string, userId: string): Role => require(tripId, userId, "view");
+  const requireActivity = (tripId: string, userId: string, a: Activity): void => void authorizeActivity(roleOf(tripId, userId), userId, a.createdBy);
+
+  // The trip's current (unrevoked, unexpired) link, if any.
+  const liveLink = (tripId: string) => q("select id from trip_invite_links where trip_id = ? and revoked_at is null and expires_at > ?").get(tripId, now());
+
+  // A link by its token: unknown and revoked links look the same (404).
+  // Expired ones are found, so the page can say "expired" rather than "invalid".
+  function linkFor(token: unknown): { id: string; tripId: string; expiresAt: number } {
+    if (typeof token !== "string" || token.length < 20 || token.length > 100) throw notFound("This invite link isn't valid. Ask the trip's owner for a new one.");
+    const r = q("select id, trip_id, expires_at from trip_invite_links where token_hash = ? and revoked_at is null").get(sha256(token));
+    if (!r) throw notFound("This invite link isn't valid any more. Ask the trip's owner for a new one.");
+    return { id: String(r.id), tripId: String(r.trip_id), expiresAt: Number(r.expires_at) };
   }
 
-  function requireOwner(tripId: string, userId: string): void {
-    if (requireMember(tripId, userId) !== "owner") throw new HttpError(403, "Only the trip's owner can do that.");
+  // Whether the trip has a publication, and whether the plan has changed
+  // since it was last published (so the owner can republish on purpose).
+  function publicationOf(tripId: string, rev: number) {
+    const r = q("select id, status, published_at, trip_rev from trip_publications where trip_id = ?").get(tripId);
+    if (!r) return null;
+    return { id: String(r.id), status: r.status as "published" | "unpublished", publishedAt: Number(r.published_at), outdated: Number(r.trip_rev) !== rev };
   }
 
   const toActivity = (r: Row): Activity => {
@@ -235,6 +273,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       role: r.role === "start" ? "start" : null,
       meal: (r.meal as Meal | null) ?? null,
       version: Number(r.version),
+      createdBy: r.created_by === null ? null : String(r.created_by),
       updatedBy: r.updated_by === null ? null : String(r.updated_by),
       updatedAt: Number(r.updated_at),
     };
@@ -390,7 +429,12 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       center: fresh && t.dest_lat !== null ? { lat: Number(t.dest_lat), lng: Number(t.dest_lng) } : null,
       rev: Number(t.rev),
       updatedAt: Number(t.updated_at),
-      hasInvite: t.invite_hash !== null,
+      hasInvite: Boolean(liveLink(tripId)),
+      pendingRequests: Number((q("select count(*) as n from trip_join_requests where trip_id = ? and status = 'pending'").get(tripId) as Row).n),
+      forkedFrom: t.forked_from_publication_id
+        ? { publicationId: String(t.forked_from_publication_id), title: String(t.forked_from_title), author: t.forked_from_author === null ? null : String(t.forked_from_author), at: Number(t.forked_at) }
+        : null,
+      publication: publicationOf(tripId, Number(t.rev)),
       members,
       mealTimes: t.meal_times ? (JSON.parse(String(t.meal_times)) as MealTimes) : DEFAULT_MEAL_TIMES,
       days,
@@ -413,6 +457,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
   // coordinates still allowed to be kept), else none and the card keeps its
   // colour band.
   function coverFor(t: Row): string | null {
+    if (t.cover_key) return String(t.cover_key); // a fork keeps its template's photo
     const placeId = t.dest_place_id === null ? "" : String(t.dest_place_id);
     if (placeId.startsWith("tpl:")) return placeId.slice(4);
     const fresh = t.dest_cached_at !== null && now() - Number(t.dest_cached_at) < CACHE_MS && t.dest_lat !== null;
@@ -433,6 +478,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
   const store = {
     roleOf,
     requireMember,
+    require,
     snapshot,
 
     view(userId: string, tripId: string): TripSnapshot {
@@ -443,7 +489,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     list(userId: string) {
       const rows = q(
         `select t.id, t.title, t.destination, t.start_date, t.end_date, t.updated_at, m.role,
-                t.dest_place_id, t.dest_lat, t.dest_lng, t.dest_cached_at,
+                t.dest_place_id, t.dest_lat, t.dest_lng, t.dest_cached_at, t.cover_key, t.forked_from_author,
                 o.display_name as owner_name,
                 (select count(*) from trip_members x where x.trip_id = t.id) as people
            from trip_members m join trips t on t.id = m.trip_id join users o on o.id = t.owner_id
@@ -460,6 +506,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         ownerName: String(r.owner_name),
         people: Number(r.people),
         cover: coverFor(r),
+        basedOn: r.forked_from_author === undefined || r.forked_from_author === null ? null : String(r.forked_from_author),
       }));
       return { owned: trips.filter((t) => t.role === "owner"), shared: trips.filter((t) => t.role !== "owner") };
     },
@@ -530,7 +577,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     },
 
     update(userId: string, tripId: string, input: Row): TripSnapshot {
-      requireOwner(tripId, userId);
+      require(tripId, userId, "update_trip");
       const cur = q("select * from trips where id = ?").get(tripId) as Row;
       const title = input.title === undefined ? String(cur.title) : text(input.title, "Trip name", 80);
       const destination = input.destination === undefined ? String(cur.destination) : text(input.destination, "Destination", 120);
@@ -557,7 +604,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     },
 
     remove(userId: string, tripId: string): void {
-      requireOwner(tripId, userId);
+      require(tripId, userId, "delete_trip");
       const invited = q("select invitee_id from trip_invitations where trip_id = ? and status = 'pending'").all(tripId).map((r) => String(r.invitee_id));
       q("delete from trips where id = ?").run(tripId);
       onChange(tripId);
@@ -566,45 +613,146 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
 
     // --- sharing ---
 
-    // A fresh random link replaces any earlier one, which stops working.
-    // Only its hash is stored, so the link is shown once, to the owner.
-    createInvite(userId: string, tripId: string): string {
-      requireOwner(tripId, userId);
+    // Invite links: a fresh random token, stored only as a hash, expiring 24
+    // hours after it's made (the server's clock decides). Making a new link
+    // revokes the old one; it never extends it. A link lets a signed-in person
+    // ask to join; it never adds anyone by itself.
+    createInvite(userId: string, tripId: string): { token: string; link: InviteLink } {
+      require(tripId, userId, "manage_invites");
       const token = newToken();
-      mutate(tripId, userId, () => q("update trips set invite_hash = ? where id = ?").run(sha256(token), tripId));
-      return token;
+      const id = randomUUID();
+      const t = now();
+      transaction(db, () => {
+        q("update trip_invite_links set revoked_at = ? where trip_id = ? and revoked_at is null").run(t, tripId);
+        q("insert into trip_invite_links (id, trip_id, token_hash, created_by, created_at, expires_at) values (?, ?, ?, ?, ?, ?)").run(id, tripId, sha256(token), userId, t, t + INVITE_TTL_MS);
+      });
+      onChange(tripId);
+      return { token, link: store.inviteLink(userId, tripId) as InviteLink };
     },
 
     revokeInvite(userId: string, tripId: string): void {
-      requireOwner(tripId, userId);
-      mutate(tripId, userId, () => q("update trips set invite_hash = null where id = ?").run(tripId));
+      require(tripId, userId, "manage_invites");
+      q("update trip_invite_links set revoked_at = ? where trip_id = ? and revoked_at is null").run(now(), tripId);
+      onChange(tripId);
     },
 
+    // The owner's view of the current link: when it was made and expires. The
+    // token itself was shown once and can't be shown again.
+    inviteLink(userId: string, tripId: string): InviteLink | null {
+      require(tripId, userId, "manage_invites");
+      const r = q("select * from trip_invite_links where trip_id = ? and revoked_at is null order by created_at desc limit 1").get(tripId);
+      return r ? { id: String(r.id), createdAt: Number(r.created_at), expiresAt: Number(r.expires_at), expired: Number(r.expires_at) <= now() } : null;
+    },
+
+    // What someone holding a link may see before they're let in: whose trip,
+    // its title and destination, and where they stand. No dates, stops,
+    // members or anything else from the trip.
     previewInvite(userId: string, token: unknown) {
-      if (typeof token !== "string" || token.length < 20) throw notFound("This invite link isn't valid any more.");
-      const t = q(
-        "select t.id, t.title, t.destination, t.start_date, t.end_date, u.display_name as owner from trips t join users u on u.id = t.owner_id where t.invite_hash = ?",
-      ).get(sha256(token));
-      if (!t) throw notFound("This invite link isn't valid any more. Ask the trip's owner for a new one.");
+      const link = linkFor(token);
+      const t = q("select t.id, t.title, t.destination, u.display_name as owner from trips t join users u on u.id = t.owner_id where t.id = ?").get(link.tripId) as Row;
+      const role = roleOf(link.tripId, userId);
+      const req = q("select status from trip_join_requests where trip_id = ? and user_id = ? order by created_at desc limit 1").get(link.tripId, userId);
+      const expired = link.expiresAt <= now();
+      const state = role ? "member" : req?.status === "pending" ? "pending" : expired ? "expired" : req?.status === "rejected" ? "rejected" : "can_request";
       return {
-        tripId: String(t.id),
+        tripId: role ? link.tripId : null,
         title: String(t.title),
         destination: String(t.destination),
-        startDate: String(t.start_date),
-        endDate: String(t.end_date),
         ownerName: String(t.owner),
-        alreadyMember: roleOf(String(t.id), userId) !== null,
+        expiresAt: link.expiresAt,
+        state: state as "member" | "pending" | "expired" | "rejected" | "can_request",
+        alreadyMember: role !== null,
       };
     },
 
-    acceptInvite(userId: string, token: unknown): string {
-      const preview = store.previewInvite(userId, token);
-      if (!preview.alreadyMember) {
-        mutate(preview.tripId, userId, () =>
-          q("insert into trip_members (trip_id, user_id, role, joined_at) values (?, ?, 'collaborator', ?)").run(preview.tripId, userId, now()),
-        );
+    // Asking to join through a link. Only while the link is live; one pending
+    // request per person per trip; members can't ask again. Each person asks
+    // for themself: a request is tied to the account that sent it.
+    requestToJoin(userId: string, token: unknown): { requestId: string; status: "pending"; tripId: string; created: boolean } {
+      const link = linkFor(token);
+      if (link.expiresAt <= now()) throw new HttpError(410, "This invite link has expired. Ask the trip's owner for a new one.", { code: "expired" });
+      if (roleOf(link.tripId, userId)) throw new HttpError(409, "You're already on this trip.", { code: "member" });
+      const pending = q("select id from trip_join_requests where trip_id = ? and user_id = ? and status = 'pending'").get(link.tripId, userId);
+      if (pending) return { requestId: String(pending.id), status: "pending", tripId: link.tripId, created: false };
+      const id = randomUUID();
+      try {
+        q("insert into trip_join_requests (id, trip_id, user_id, link_id, status, created_at) values (?, ?, ?, ?, 'pending', ?)").run(id, link.tripId, userId, link.id, now());
+      } catch (err) {
+        if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
+          const again = q("select id from trip_join_requests where trip_id = ? and user_id = ? and status = 'pending'").get(link.tripId, userId) as Row;
+          return { requestId: String(again.id), status: "pending", tripId: link.tripId, created: false };
+        }
+        throw err;
       }
-      return preview.tripId;
+      onChange(link.tripId);
+      onInvitation(String((q("select owner_id from trips where id = ?").get(link.tripId) as Row).owner_id));
+      return { requestId: id, status: "pending", tripId: link.tripId, created: true };
+    },
+
+    // The owner's list: pending first, then recent decisions.
+    joinRequests(userId: string, tripId: string) {
+      require(tripId, userId, "manage_requests");
+      return q(
+        `select r.id, r.status, r.created_at, r.resolved_at, u.id as user_id, u.username, u.display_name
+           from trip_join_requests r join users u on u.id = r.user_id
+          where r.trip_id = ? order by r.status = 'pending' desc, coalesce(r.resolved_at, r.created_at) desc limit 30`,
+      ).all(tripId).map((r) => ({
+        id: String(r.id),
+        status: String(r.status) as "pending" | "approved" | "rejected",
+        createdAt: Number(r.created_at),
+        resolvedAt: r.resolved_at === null ? null : Number(r.resolved_at),
+        user: { id: String(r.user_id), username: String(r.username), displayName: String(r.display_name) },
+      }));
+    },
+
+    // Approve or reject one pending request. Only the owner; never the
+    // requester (who isn't a member, and an owner never has a request). A
+    // request stays decidable after its link expires. Approving adds the
+    // member and closes the request in one mutate(), so live editors see them.
+    decideJoinRequest(userId: string, tripId: string, requestId: string, decision: "approve" | "reject"): { requesterId: string; status: "approved" | "rejected" } {
+      require(tripId, userId, "manage_requests");
+      const req = q("select * from trip_join_requests where id = ? and trip_id = ?").get(requestId, tripId);
+      if (!req) throw notFound("That request doesn't exist.");
+      const requesterId = String(req.user_id);
+      if (requesterId === userId) throw new HttpError(403, "You can't decide your own request.");
+      if (req.status !== "pending") throw new HttpError(409, `That request was already ${req.status}.`, { code: String(req.status) });
+      const status = decision === "approve" ? "approved" : "rejected";
+      mutate(tripId, userId, () => {
+        const r = q("update trip_join_requests set status = ?, resolved_at = ?, resolved_by = ? where id = ? and status = 'pending'").run(status, now(), userId, requestId);
+        if (Number(r.changes) !== 1) throw new HttpError(409, "That request was already decided.");
+        if (status === "approved") q("insert into trip_members (trip_id, user_id, role, joined_at) values (?, ?, 'collaborator', ?) on conflict do nothing").run(tripId, requesterId, now());
+      });
+      onInvitation(requesterId);
+      onInvitation(userId);
+      return { requesterId, status };
+    },
+
+    // What the signed-in person has asked to join, and how it went.
+    myJoinRequests(userId: string) {
+      return q(
+        `select r.id, r.status, r.created_at, r.resolved_at, t.id as trip_id, t.title, t.destination, u.display_name as owner
+           from trip_join_requests r join trips t on t.id = r.trip_id join users u on u.id = t.owner_id
+          where r.user_id = ? and (r.status = 'pending' or r.resolved_at > ?) order by r.created_at desc limit 20`,
+      ).all(userId, now() - 7 * 86_400_000).map((r) => ({
+        id: String(r.id),
+        status: String(r.status),
+        createdAt: Number(r.created_at),
+        trip: { id: r.status === "approved" ? String(r.trip_id) : null, title: String(r.title), destination: String(r.destination), ownerName: String(r.owner) },
+      }));
+    },
+
+    // Pending requests across every trip this person owns, for My Trips.
+    requestsToMe(userId: string) {
+      return q(
+        `select r.id, r.created_at, t.id as trip_id, t.title, u.id as user_id, u.username, u.display_name
+           from trip_join_requests r join trips t on t.id = r.trip_id join users u on u.id = r.user_id
+          where t.owner_id = ? and r.status = 'pending' order by r.created_at`,
+      ).all(userId).map((r) => ({
+        id: String(r.id),
+        createdAt: Number(r.created_at),
+        trip: { id: String(r.trip_id), title: String(r.title) },
+        user: { id: String(r.user_id), username: String(r.username), displayName: String(r.display_name) },
+      }));
     },
 
     // --- inviting an existing account by username ---
@@ -614,7 +762,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     // wildcards), exact match first, at most 8. Each says whether it's you,
     // already on the trip, or already invited. Only what choosing needs.
     searchInvitees(userId: string, tripId: string, query: unknown) {
-      requireOwner(tripId, userId);
+      require(tripId, userId, "manage_invites");
       const raw = typeof query === "string" ? query.trim().replace(/^@/, "").toLowerCase() : "";
       if (raw.length < 2) throw bad("Type at least 2 characters of a username.");
       if (raw.length > 32 || !/^[a-z0-9_.-]+$/.test(raw)) return { query: raw, results: [] };
@@ -642,7 +790,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     // accepts it from My Trips. One pending per person per trip (the partial
     // unique index decides under concurrent requests).
     inviteUser(userId: string, tripId: string, input: Row) {
-      requireOwner(tripId, userId);
+      require(tripId, userId, "manage_invites");
       const inviteeId = input.userId;
       if (typeof inviteeId !== "string" || !q("select 1 from users where id = ?").get(inviteeId)) throw notFound("That account doesn't exist.");
       if (inviteeId === userId) throw bad("You're already on this trip.");
@@ -661,7 +809,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     // The owner's view of named invitations: pending ones, then the latest
     // outcome for anyone else they invited.
     invitationsFor(userId: string, tripId: string) {
-      requireOwner(tripId, userId);
+      require(tripId, userId, "manage_invites");
       return q(
         `select i.id, i.status, i.created_at, i.resolved_at, u.id as user_id, u.username, u.display_name
            from trip_invitations i join users u on u.id = i.invitee_id
@@ -676,7 +824,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     },
 
     cancelInvitation(userId: string, tripId: string, invitationId: string): void {
-      requireOwner(tripId, userId);
+      require(tripId, userId, "manage_invites");
       const r = q("update trip_invitations set status = 'cancelled', resolved_at = ? where id = ? and trip_id = ? and status = 'pending' returning invitee_id").get(now(), invitationId, tripId);
       if (!r) throw notFound("That invitation isn't pending any more.");
       onInvitation(String(r.invitee_id));
@@ -725,8 +873,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
 
     // The owner can remove a collaborator; a collaborator can remove themself.
     removeMember(userId: string, tripId: string, memberId: string): void {
-      const role = requireMember(tripId, userId);
-      if (memberId !== userId && role !== "owner") throw new HttpError(403, "Only the trip's owner can remove people.");
+      require(tripId, userId, memberId === userId ? "leave" : "remove_member");
       const target = roleOf(tripId, memberId);
       if (!target) throw notFound("That person isn't on this trip.");
       if (target === "owner") throw bad("The owner can't be removed from their own trip.");
@@ -738,7 +885,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     // clientId makes adding idempotent: a retried request (a double click, a
     // reconnect replaying a POST) finds the activity it already created.
     addActivity(userId: string, tripId: string, input: Row): { created: boolean; activityId: string; trip: TripSnapshot } {
-      requireMember(tripId, userId);
+      require(tripId, userId, "add_activity");
       const clientId = text(input.clientId, "clientId", 64, 8);
       const existing = q("select id from activities where trip_id = ? and client_id = ?").get(tripId, clientId);
       if (existing) return { created: false, activityId: String(existing.id), trip: snapshot(tripId) };
@@ -779,6 +926,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     updateActivity(userId: string, tripId: string, activityId: string, input: Row): TripSnapshot {
       requireMember(tripId, userId);
       const cur = getActivity(tripId, activityId);
+      requireActivity(tripId, userId, cur);
       if (input.baseVersion !== cur.version) {
         throw new HttpError(409, "Someone else changed this activity while you were editing.", { current: cur });
       }
@@ -803,6 +951,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     moveActivity(userId: string, tripId: string, activityId: string, input: Row): TripSnapshot {
       requireMember(tripId, userId);
       const cur = getActivity(tripId, activityId);
+      if (cur.role !== "start") requireActivity(tripId, userId, cur);
       if (cur.role === "start") throw bad("The starting point stays first. Change it instead of moving it.");
       const day = getDay(tripId, input.dayId ?? cur.dayId);
       if (!Number.isInteger(input.index)) throw bad("Say where to move it (index).");
@@ -833,6 +982,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       requireMember(tripId, userId);
       const cur = getActivity(tripId, activityId);
       if (cur.role === "start") throw bad("Use 'Change start' for the starting point.");
+      requireActivity(tripId, userId, cur);
       if (input.baseVersion !== cur.version) {
         throw new HttpError(409, "Someone else changed this stop while you were choosing a new place.", { current: cur });
       }
@@ -852,7 +1002,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     // role = 'start'. Setting it again moves it to the new place and drops
     // only the routes that touch it; the other stops are untouched.
     setStart(userId: string, tripId: string, input: Row): { activityId: string; trip: TripSnapshot } {
-      requireMember(tripId, userId);
+      require(tripId, userId, "set_start");
       const title = text(input.title, "Title", 120);
       const place = placeInput(input.place);
       if (!place) throw bad("Choose where the trip starts.");
@@ -898,6 +1048,8 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     deleteActivity(userId: string, tripId: string, activityId: string): TripSnapshot {
       requireMember(tripId, userId);
       const cur = getActivity(tripId, activityId);
+      if (cur.role === "start") require(tripId, userId, "set_start");
+      else requireActivity(tripId, userId, cur);
       return mutate(tripId, userId, () => {
         q("delete from activities where id = ?").run(activityId);
         renumber(cur.dayId);
@@ -910,7 +1062,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     // What a route lookup needs, checked: the two activities are next to each
     // other on one day and both are places.
     routeRequest(userId: string, tripId: string, fromId: unknown, toId: unknown) {
-      requireMember(tripId, userId);
+      require(tripId, userId, "calculate_route");
       const from = getActivity(tripId, fromId);
       const to = getActivity(tripId, toId);
       const day = getDay(tripId, from.dayId);
@@ -934,7 +1086,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     },
 
     saveRoute(userId: string, tripId: string, fromId: string, toId: string, key: string, options: RouteOption[], keepMode: Mode | null): TripSnapshot {
-      requireMember(tripId, userId);
+      require(tripId, userId, "calculate_route");
       const usable = (m: Mode | null) => m !== null && options.some((o) => o.mode === m && o.status === "ok");
       const selected = usable(keepMode) ? keepMode : defaultMode(options);
       return mutate(tripId, userId, () => {
@@ -954,7 +1106,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     },
 
     selectMode(userId: string, tripId: string, segmentId: string, mode: unknown): TripSnapshot {
-      requireMember(tripId, userId);
+      require(tripId, userId, "select_mode");
       if (!MODES.includes(mode as Mode)) throw bad("Mode must be WALK, TRANSIT or DRIVE.");
       const seg = q("select options from transport_segments where id = ? and trip_id = ?").get(segmentId, tripId);
       if (!seg) throw notFound("That route is no longer part of the plan.");
@@ -973,7 +1125,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     // basedOn: the day fingerprint the preview was made from (always sent by
     // the copilot); if the day has changed since, the preview is out of date.
     applyProposal(userId: string, tripId: string, dayId: unknown, proposalId: unknown, basedOn?: unknown): TripSnapshot {
-      requireMember(tripId, userId);
+      require(tripId, userId, "apply_proposal");
       const day = snapshot(tripId).days.find((d) => d.id === dayId);
       if (!day) throw notFound("That day isn't part of this trip.");
       if (basedOn !== undefined && basedOn !== null && basedOn !== day.fingerprint) {
@@ -999,6 +1151,91 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         }
         return snapshot(tripId);
       });
+    },
+
+    // --- publishing (snapshot data for src/publications.ts) ---
+
+    // What a publication copies from the working trip, read in one go. Notes
+    // stay private; only stops, times, kinds, meals and places are published.
+    publishable(userId: string, tripId: string) {
+      require(tripId, userId, "publish");
+      const t = q("select * from trips where id = ?").get(tripId) as Row;
+      const days = q("select id, date from trip_days where trip_id = ? order by date").all(tripId);
+      const stops = days.flatMap((d, i) =>
+        dayActivities(String(d.id)).map((a) => {
+          const raw = q("select lat, lng, place_cached_at from activities where id = ?").get(a.id) as Row;
+          return {
+            day: i + 1,
+            position: a.position,
+            title: a.title,
+            kind: a.kind,
+            startMin: a.startMin,
+            durationMin: a.durationMin,
+            meal: a.meal,
+            role: a.role,
+            placeId: a.place?.placeId ?? null,
+            placeSource: a.place?.source ?? null,
+            lat: a.place?.lat ?? null,
+            lng: a.place?.lng ?? null,
+            cachedAt: raw.place_cached_at === null ? null : Number(raw.place_cached_at),
+          };
+        }),
+      );
+      const fresh = t.dest_cached_at !== null && now() - Number(t.dest_cached_at) < CACHE_MS && t.dest_lat !== null;
+      return {
+        title: String(t.title),
+        destination: String(t.destination),
+        timezone: String(t.timezone),
+        days: days.length,
+        rev: Number(t.rev),
+        cover: t.cover_key === null ? coverFor(t) : String(t.cover_key),
+        ref: fresh ? { lat: Number(t.dest_lat), lng: Number(t.dest_lng), cachedAt: Number(t.dest_cached_at) } : null,
+        stops,
+      };
+    },
+
+    // A new private trip, owned by the user, from a publication's snapshot.
+    // Nothing private comes along: no members, links, requests, invitations,
+    // reviews or publication. Where it came from is recorded for attribution.
+    createFork(
+      userId: string,
+      pub: { id: string; title: string; destination: string; timezone: string; days: number; author: string | null; cover: string | null; ref: { lat: number; lng: number; cachedAt: number | null } | null; stops: ForkStop[] },
+      input: Row,
+    ): TripSnapshot {
+      if (!isDate(input.startDate)) throw bad("Choose a start date (YYYY-MM-DD).");
+      const startDate = input.startDate;
+      const dates = datesBetween(startDate, new Date(Date.parse(`${startDate}T00:00:00Z`) + (pub.days - 1) * 86_400_000).toISOString().slice(0, 10));
+      const id = randomUUID();
+      transaction(db, () => {
+        const t = now();
+        q(
+          `insert into trips (id, owner_id, title, destination, start_date, end_date, timezone, dest_place_id, dest_lat, dest_lng, dest_cached_at,
+                              forked_from_publication_id, forked_from_title, forked_from_author, forked_at, cover_key, created_at, updated_at)
+           values (?, ?, ?, ?, ?, ?, ?, null, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(id, userId, pub.title, pub.destination, startDate, dates[dates.length - 1], pub.timezone, pub.ref?.lat ?? null, pub.ref?.lng ?? null, pub.ref?.cachedAt ?? null, pub.id, pub.title, pub.author, t, pub.cover, t, t);
+        q("insert into trip_members (trip_id, user_id, role, joined_at) values (?, ?, 'owner', ?)").run(id, userId, t);
+        const dayIds = dates.map((date) => {
+          const dayId = randomUUID();
+          q("insert into trip_days (id, trip_id, date) values (?, ?, ?)").run(dayId, id, date);
+          return dayId;
+        });
+        const ins = q(
+          `insert into activities (id, trip_id, day_id, client_id, position, title, kind, start_min, duration_min, notes, meal, role,
+                                   place_id, place_source, lat, lng, place_cached_at, created_by, updated_by, updated_at)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        for (const s of pub.stops) {
+          const dayId = dayIds[s.day - 1];
+          if (!dayId) continue;
+          ins.run(
+            randomUUID(), id, dayId, `fork:${randomUUID()}`, s.position, s.title, KINDS.includes(s.kind as Kind) ? s.kind : "custom", s.startMin, s.durationMin,
+            s.meal, s.role === "start" && s.day === 1 ? "start" : null,
+            s.placeId, s.placeSource, s.lat, s.lng, s.placeId ? (s.cachedAt ?? t) : null, userId, userId, t,
+          );
+        }
+        orderTrip(id);
+      });
+      return snapshot(id);
     },
 
     // Activities whose temporary coordinates have expired, for a refresh.

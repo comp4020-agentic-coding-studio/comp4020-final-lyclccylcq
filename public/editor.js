@@ -74,6 +74,10 @@ export async function openEditor(root, tripId, ctx) {
 
   const me = ctx.me;
   const role = () => S.trip.members.find((m) => m.id === me.id)?.role ?? null;
+  // the server's rule (src/permissions.ts), mirrored so the UI only offers
+  // what will work: owners change anything, collaborators their own stops
+  const isOwner = () => role() === "owner";
+  const canEdit = (a) => isOwner() || (a.role !== "start" && a.createdBy === me.id);
   const day = () => S.trip.days.find((d) => d.id === S.dayId) ?? S.trip.days[0];
   const memberName = (id) => (id === me.id ? "you" : S.trip.members.find((m) => m.id === id)?.displayName ?? "someone");
 
@@ -279,7 +283,13 @@ export async function openEditor(root, tripId, ctx) {
     fill(
       bar,
       h("a", { class: "icon-btn", href: "/", "data-link": true, "aria-label": "Back to your trips" }, icon("back")),
-      h("div", { class: "trip-title" }, h("h1", {}, t.title), h("p", {}, `${t.destination} · ${fmtRange(t.startDate, t.endDate)}`)),
+      h(
+        "div",
+        { class: "trip-title" },
+        h("h1", {}, t.title),
+        h("p", {}, `${t.destination} · ${fmtRange(t.startDate, t.endDate)}`),
+        t.forkedFrom && h("p", { class: "trip-origin small" }, "Based on ", h("a", { href: `/itineraries/${t.forkedFrom.publicationId}`, "data-link": true }, t.forkedFrom.title), t.forkedFrom.author ? ` by ${t.forkedFrom.author}` : ""),
+      ),
       h(
         "div",
         { class: "presence", title: online.map((p) => p.displayName).join(", ") },
@@ -288,8 +298,9 @@ export async function openEditor(root, tripId, ctx) {
       ),
       h("span", { class: `conn ${S.live ? "conn-live" : "conn-off"}`, role: "status" }, S.live ? "Live" : "Reconnecting…"),
       voice.render(),
-      h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: shareDialog }, icon("share"), h("span", { class: "hide-sm" }, "Share")),
-      role() === "owner" && h("button", { class: "icon-btn", type: "button", "aria-label": "Trip settings", onclick: settingsDialog }, icon("settings")),
+      h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: shareDialog }, icon("share"), h("span", { class: "hide-sm" }, "Share"), isOwner() && t.pendingRequests > 0 && h("span", { class: "badge badge-danger", "aria-label": `${t.pendingRequests} requests to join` }, String(t.pendingRequests))),
+      isOwner() && h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-publish": t.publication?.status ?? "none", onclick: publishDialog }, icon("spark"), h("span", { class: "hide-sm" }, t.publication?.status === "published" ? (t.publication.outdated ? "Update published" : "Published") : "Publish Trip")),
+      isOwner() && h("button", { class: "icon-btn", type: "button", "aria-label": "Trip settings", onclick: settingsDialog }, icon("settings")),
       h(
         "button",
         { class: `btn btn-sm ${S.copilotOpen ? "btn-dark" : "btn-ghost"} hide-phone`, type: "button", "aria-pressed": String(S.copilotOpen), onclick: () => { S.copilotOpen = !S.copilotOpen; render(); } },
@@ -369,7 +380,7 @@ export async function openEditor(root, tripId, ctx) {
         ),
       );
     }
-    if (!startOf() && !S.starting && idx === 0) {
+    if (!startOf() && !S.starting && idx === 0 && isOwner()) {
       dayHead.append(h("p", { class: "day-start-link" }, h("button", { class: "linklike small", type: "button", onclick: () => beginStart() }, icon("pin"), "Set a starting point")));
     }
 
@@ -413,9 +424,10 @@ export async function openEditor(root, tripId, ctx) {
     const first = d.activities[0]?.role === "start" ? 1 : 0;
     const firstUntimed = d.activities.findIndex((x) => x.role !== "start" && x.startMin === null);
     const timed = a.startMin !== null;
+    const mine = canEdit(a);
     const li = h(
       "li",
-      { class: `stop kind-${a.kind}${isStart ? " stop-start" : ""}${timed ? "" : " stop-untimed"}${a.id === S.selectedId ? " selected" : ""}`, dataset: { id: a.id }, draggable: isStart ? "false" : "true" },
+      { class: `stop kind-${a.kind}${isStart ? " stop-start" : ""}${timed ? "" : " stop-untimed"}${a.id === S.selectedId ? " selected" : ""}`, dataset: { id: a.id }, draggable: isStart || !mine ? "false" : "true" },
       h(
         "div",
         { class: "stop-rail" },
@@ -440,7 +452,8 @@ export async function openEditor(root, tripId, ctx) {
         ),
         a.notes && h("p", { class: "stop-notes" }, a.notes),
         a.updatedBy && a.updatedBy !== me.id && Date.now() - a.updatedAt < 120_000 && h("p", { class: "stop-touched" }, `Changed by ${memberName(a.updatedBy)} ${relTime(a.updatedAt)}`),
-        h(
+        !mine && a.createdBy && a.createdBy !== me.id && !(a.updatedBy && a.updatedBy !== me.id && Date.now() - a.updatedAt < 120_000) && h("p", { class: "stop-added-by small muted" }, `Added by ${memberName(a.createdBy)}`),
+        mine && h(
           "div",
           { class: "stop-actions" },
           isStart
@@ -457,7 +470,7 @@ export async function openEditor(root, tripId, ctx) {
         ),
       ),
     );
-    if (isStart) return li;
+    if (isStart || !mine) return li;
     li.addEventListener("dragstart", (e) => {
       S.dragging = a.id;
       e.dataTransfer.effectAllowed = "move";
@@ -598,7 +611,7 @@ export async function openEditor(root, tripId, ctx) {
             "aria-pressed": String(seg.selectedMode === o.mode),
             "aria-label": label,
             title: label,
-            disabled: !ok,
+            disabled: !ok || !isOwner(),
             onclick: () => seg.selectedMode !== o.mode && act(api(`${base}/segments/${seg.id}/mode`, { method: "POST", body: { mode: o.mode } })).catch(() => {}),
           },
           icon(MODE_ICON[o.mode]),
@@ -1711,7 +1724,9 @@ export async function openEditor(root, tripId, ctx) {
               h("button", { class: "btn btn-primary btn-sm", type: "button", "data-confirm": "yes", onclick: apply }, "Confirm change"),
               h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.confirming = null; renderCopilot(); } }, "Cancel"),
             )
-          : h("button", { class: "btn btn-primary btn-sm", type: "button", "data-apply": p.id, onclick: () => { S.confirming = key; renderCopilot(); } }, "Apply this change…"),
+          : isOwner()
+            ? h("button", { class: "btn btn-primary btn-sm", type: "button", "data-apply": p.id, onclick: () => { S.confirming = key; renderCopilot(); } }, "Apply this change…")
+            : h("p", { class: "small muted" }, "Only the trip's owner can apply changes."),
     );
   }
 
@@ -2031,31 +2046,81 @@ export async function openEditor(root, tripId, ctx) {
   function shareDialog() {
     const isOwner = role() === "owner";
     const linkBox = h("div", { class: "stack" });
-    const renderLink = (token) => {
-      const t = S.trip;
+    const expiry = (link) => {
+      const left = link.expiresAt - Date.now();
+      if (left <= 0) return "Expired. Create a new link to invite more people.";
+      const mins = Math.max(1, Math.ceil(left / 60_000));
+      const h_ = Math.floor(mins / 60);
+      const m = mins % 60;
+      const when = new Date(link.expiresAt).toLocaleString("en-AU", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+      return `Expires ${when} (in ${h_ ? `${h_} h` : ""}${h_ && m ? " " : ""}${m || !h_ ? `${m} min` : ""}).`;
+    };
+    // token: shown once, right after it's made; link: its times, from the server
+    const renderLink = (token, link) => {
       linkBox.replaceChildren();
       if (!isOwner) return;
+      linkBox.append(h("p", { class: "small", "data-share": "approval-note" }, "Links last 24 hours. Opening one doesn't let anyone in: each person asks to join, and you approve or reject them below."));
       if (token) {
         const url = `${location.origin}/join/${token}`;
         const input = h("input", { readonly: true, value: url, "aria-label": "Invite link", onfocus: (e) => e.target.select() });
         linkBox.append(
-          h("p", { class: "small" }, "Anyone signed in with this link can join as a collaborator. It's shown only now; create a new one later if you need it again (the old link then stops working)."),
           h("div", { class: "copy-row" }, input, h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: async () => { await navigator.clipboard?.writeText(url).catch(() => {}); input.select(); toast("Invite link copied."); } }, "Copy")),
+          h("p", { class: "small muted" }, "Shown only now. A new link replaces this one."),
         );
-      } else if (t.hasInvite) {
-        linkBox.append(h("p", { class: "small muted" }, "An invite link is active. For safety it can't be shown again."));
-      } else {
-        linkBox.append(h("p", { class: "small muted" }, "Create a private link to invite someone to edit this trip with you."));
+      } else if (link && !link.expired) {
+        linkBox.append(h("p", { class: "small muted" }, "An invite link is active. For safety it can't be shown again; create a new one if you need it."));
+      } else if (link?.expired) {
+        linkBox.append(h("p", { class: "small leg-warn", "data-share": "expired" }, "The last invite link has expired."));
       }
+      if (link) linkBox.append(h("p", { class: `small ${link.expired ? "leg-warn" : "muted"}`, "data-share": "expiry" }, expiry(link)));
+      const live = link && !link.expired;
       linkBox.append(
         h(
           "div",
           { class: "row-actions" },
-          h("button", { class: "btn btn-outline btn-sm", type: "button", onclick: async () => { const { token } = await act(api(`${base}/invite`, { method: "POST", body: {} })); renderLink(token); } }, t.hasInvite || token ? "Create a new link" : "Create invite link"),
-          (t.hasInvite || token) && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: async () => { await act(api(`${base}/invite`, { method: "DELETE" })); toast("Invite link turned off."); renderLink(null); } }, "Turn off link"),
+          h("button", { class: "btn btn-outline btn-sm", type: "button", "data-share": "new-link", onclick: async () => { const r = await act(api(`${base}/invite`, { method: "POST", body: {} })); renderLink(r.token, r.link); } }, link ? "Create a new link" : "Create invite link"),
+          (live || token) && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: async () => { await act(api(`${base}/invite`, { method: "DELETE" })); toast("Invite link turned off."); renderLink(null, null); } }, "Turn off link"),
         ),
       );
     };
+    const loadLink = () => isOwner && api(`${base}/invite`).then((r) => renderLink(null, r.link)).catch(() => {});
+
+    // requests to join through a link
+    const requests = h("ul", { class: "invitations", "data-share": "requests" });
+    const REQ_LABEL = { pending: "Waiting", approved: "Approved", rejected: "Rejected" };
+    const renderRequests = (list) =>
+      requests.replaceChildren(
+        ...(list.length ? [] : [h("li", { class: "muted small" }, "No requests yet.")]),
+        ...list.map((r) =>
+          h(
+            "li",
+            { "data-request": r.id },
+            avatar(r.user, "sm"),
+            h("span", { class: "grow" }, h("strong", {}, r.user.displayName), h("br"), h("small", { class: "muted" }, `@${r.user.username}`)),
+            r.status === "pending"
+              ? h(
+                  "span",
+                  { class: "row-actions" },
+                  h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-request-action": "reject", onclick: () => decide(r, "reject") }, "Reject"),
+                  h("button", { class: "btn btn-primary btn-sm", type: "button", "data-request-action": "approve", onclick: () => decide(r, "approve") }, "Approve"),
+                )
+              : h("span", { class: `chip ${r.status === "approved" ? "chip-live" : "chip-soft"}`, "data-status": r.status }, REQ_LABEL[r.status]),
+          ),
+        ),
+      );
+    const loadRequests = () => isOwner && api(`${base}/requests`).then((r) => renderRequests(r.requests)).catch(() => {});
+    const decide = async (r, what) => {
+      for (const b of requests.querySelectorAll(`[data-request="${r.id}"] button`)) b.disabled = true;
+      try {
+        const res = await api(`${base}/requests/${r.id}/${what}`, { method: "POST", body: {} });
+        toast(what === "approve" ? `${r.user.displayName} can now plan this trip with you.` : `Request from ${r.user.displayName} rejected.`);
+        renderRequests(res.requests);
+      } catch (err) {
+        toast(err.message, { kind: "error" });
+        loadRequests();
+      }
+    };
+
     const list = h("ul", { class: "members" });
     const renderMembers = () =>
       list.replaceChildren(
@@ -2086,7 +2151,9 @@ export async function openEditor(root, tripId, ctx) {
         ),
       );
     renderMembers();
-    renderLink(null);
+    renderLink(null, null);
+    loadLink();
+    loadRequests();
 
     // --- invite by username: search, choose, then an explicit Invite ---
     const STATUS = { you: "You", member: "Already a member", invited: "Invited", available: null };
@@ -2217,13 +2284,18 @@ export async function openEditor(root, tripId, ctx) {
       { class: "share-method", "aria-labelledby": "share-by-link" },
       h("h3", { id: "share-by-link" }, "Invite by link"),
       linkBox,
+      h("h4", { class: "small" }, "Requests to join"),
+      requests,
     );
     if (isOwner) loadSent();
     // someone accepted while this was open: their status and the member list follow
     const onSnap = () => {
       if (!dialog.open) return events.removeEventListener("snapshot", onSnap);
       renderMembers();
-      if (isOwner) loadSent();
+      if (isOwner) {
+        loadSent();
+        loadRequests();
+      }
     };
     events.addEventListener("snapshot", () => setTimeout(onSnap, 0));
 
@@ -2237,12 +2309,86 @@ export async function openEditor(root, tripId, ctx) {
           h("h2", {}, "People on this trip"),
           list,
           h("p", { class: "small muted", "data-share": "view-note" }, "While others have this trip open, they see roughly where your map is looking (its centre and zoom, never your location), and you see theirs. Your “My spot” stays on your screen only."),
-          isOwner ? byName : h("p", { class: "small muted" }, "Only the owner can invite people."),
+          isOwner ? byName : h("p", { class: "small muted" }, "Only the owner can invite people. As a collaborator you can add stops and change the ones you added."),
           byLink,
           h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-primary", type: "button", onclick: () => dialog.close() }, "Done")),
         ),
       ),
     );
+  }
+
+  // Publishing: a read-only snapshot for others to browse, review and copy.
+  // Editing this trip afterwards never changes it until "Update published".
+  async function publishDialog() {
+    const t = S.trip;
+    let pub = null;
+    try {
+      pub = (await api(`${base}/publication`)).publication;
+    } catch (err) {
+      return toast(err.message, { kind: "error" });
+    }
+    const live = pub?.status === "published";
+    const error = h("p", { class: "form-error", role: "alert", hidden: true });
+    const hasStops = t.days.some((d) => d.activities.some((a) => a.role !== "start"));
+    const form = h(
+      "form",
+      { method: "dialog", class: "stack" },
+      h("h2", {}, live ? "Published trip" : "Publish Trip"),
+      h(
+        "p",
+        { class: "small muted" },
+        "Publishing shares a read-only copy of this plan: title, destination, stops, times and places, with you named as the author. Notes, the people on this trip and invite links stay private. Anyone can view it, rate it and copy it into their own trip; nobody can edit yours.",
+      ),
+      live &&
+        h(
+          "p",
+          { class: "small", "data-publish": "state" },
+          `Published ${new Date(pub.publishedAt).toLocaleString()}. `,
+          t.publication?.outdated ? h("strong", {}, "You've changed the trip since; the public version still shows the earlier plan.") : "It matches the current plan.",
+          " ",
+          h("a", { href: `/itineraries/${pub.id}`, "data-link": true, onclick: () => dialog.close() }, "View public page"),
+        ),
+      pub?.status === "unpublished" && h("p", { class: "small muted" }, "Unpublished: hidden from others. Copies people already made are theirs to keep."),
+      h("label", { class: "field" }, h("span", {}, "Description"), h("textarea", { name: "description", required: true, maxlength: 600, rows: 3, placeholder: "What makes this trip worth copying?" }, pub?.description ?? "")),
+      !hasStops && h("p", { class: "small leg-warn" }, "Add at least one stop before publishing."),
+      error,
+      h(
+        "div",
+        { class: "dialog-actions" },
+        live && h("button", { class: "btn btn-ghost btn-danger-text", type: "button", "data-publish": "unpublish", onclick: unpublish }, "Unpublish"),
+        h("span", { class: "spacer" }),
+        h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, "Cancel"),
+        h("button", { class: "btn btn-primary", type: "submit", "data-publish": "submit", disabled: !hasStops }, live ? "Update published version" : pub ? "Publish again" : "Publish"),
+      ),
+    );
+    const dialog = openDialog(h("dialog", { class: "dialog" }, form));
+    async function unpublish() {
+      if (!confirm("Unpublish this trip? It disappears from Wayline for others; copies already made stay with their owners.")) return;
+      try {
+        await api(`${base}/publication`, { method: "DELETE" });
+        dialog.close();
+        toast("Unpublished.");
+        S.trip = await api(base);
+        render();
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+      }
+    }
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        const r = await api(`${base}/publication`, { method: "PUT", body: { description: form.description.value } });
+        dialog.close();
+        toast(live ? "Published version updated." : "Published. Others can now find and copy it.");
+        S.trip = await api(base);
+        render();
+        if (!live) ctx.navigate(`/itineraries/${r.publication.id}`);
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+      }
+    });
   }
 
   function settingsDialog() {

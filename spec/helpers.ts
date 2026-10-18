@@ -79,11 +79,20 @@ export async function addActivity(c: Client, trip: any, over: Record<string, unk
   });
 }
 
+// Adds a collaborator the way people do: the owner makes a link, the guest
+// asks to join through it, the owner approves.
 export async function share(owner: Client, guest: Client, tripId: string) {
   const { data } = await owner.send("POST", `/api/trips/${tripId}/invite`, {});
-  const res = await guest.send("POST", `/api/invites/${data.token}/accept`, {});
-  if (res.status !== 200) throw new Error(`accept failed: ${res.status}`);
+  await requestAndApprove(owner, guest, tripId, data.token);
   return data.token as string;
+}
+
+export async function requestAndApprove(owner: Client, guest: Client, tripId: string, token: string) {
+  const asked = await guest.send("POST", `/api/invites/${token}/request`, {});
+  if (asked.status !== 201 && asked.status !== 200) throw new Error(`join request failed: ${asked.status} ${JSON.stringify(asked.data)}`);
+  const ok = await owner.send("POST", `/api/trips/${tripId}/requests/${asked.data.requestId}/approve`, {});
+  if (ok.status !== 200) throw new Error(`approve failed: ${ok.status} ${JSON.stringify(ok.data)}`);
+  return asked.data.requestId as string;
 }
 
 // Reads a trip's event stream (or, with tripId null, the person's own
@@ -167,6 +176,9 @@ export async function startApp(env: Record<string, string> = {}, dataDir = mkdte
     stdio: ["ignore", "pipe", "pipe"],
   });
   const url = `http://127.0.0.1:${port}`;
+  let output = "";
+  proc.stdout?.on("data", (d) => (output += d));
+  proc.stderr?.on("data", (d) => (output += d));
   let exited = false;
   proc.once("exit", () => (exited = true));
   for (let i = 0; ; i++) {
@@ -182,6 +194,8 @@ export async function startApp(env: Record<string, string> = {}, dataDir = mkdte
   return {
     url,
     dataDir,
+    // everything the app has printed so far (stdout and stderr)
+    output: () => output,
     stop: () =>
       new Promise<void>((resolve) => {
         if (exited) return resolve();

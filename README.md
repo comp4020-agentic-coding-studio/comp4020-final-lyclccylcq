@@ -24,6 +24,10 @@ Small groups, roughly two to six people, planning a short trip together, who car
 
 Everyone invited to a trip edits the same itinerary, which lives on the server. When someone adds a stop, moves lunch to one o'clock or changes how long the museum takes, the change is saved and then pushed to every open editor, appearing within about a second. An edit made against an outdated version is refused instead of silently overwriting someone. Trips are private: only the owner and the people they invite can see or change them. The owner invites in one of two ways: a revocable link, or by searching for someone's username and sending them an invitation, which waits in their My Trips until they accept or decline it. Each account has a unique username and a unique display name, so the person you find is the person you meant.
 
+Invite links last 24 hours and never let anyone in by themselves: each person asks to join, and the owner approves or rejects them. Collaborators add stops and change the ones they added; only the owner deletes the trip, changes other people's stops, manages who's on it, or publishes it. Publishing shares a read-only snapshot, without notes or the people on the trip, that others can rate (1–5 stars, one review each) and copy into a private trip of their own with "Use This Template". The copy is independent: neither side's later edits reach the other ([docs/permissions.md](docs/permissions.md)).
+
+The server writes one structured JSON log line for each significant action (who signed in, who opened a trip, who added, moved or retimed a stop, who joined or left the live session, and every refused or failed operation), always attributed to the account behind the session cookie. It never logs passwords, cookies, keys, notes or map positions ([docs/logging.md](docs/logging.md)).
+
 Two people on a trip can also talk it through in an audio-only voice call from the editor's top bar, while both keep editing the same plan. The call is between them: browser to browser over WebRTC, never recorded, transcribed or sent to the AI, and never part of the itinerary. One call has two people. Reliable calling across different networks needs a TURN relay configured on the server ([ADR 0004](docs/decisions/0004-webrtc-voice-calls.md)).
 
 ## The planned role of AI
@@ -37,7 +41,7 @@ In Virtual Gym, other people were visible but nothing they did touched your sess
 ## What good means here
 
 - planning happens by touching the map and timeline, not filling in forms;
-- there is one shared plan, never diverging copies;
+- the people on a trip share one plan, never diverging copies (a template someone uses becomes their own, separate trip);
 - travel information is truthful: real route data, or a plain "unknown", and demo data is always labelled;
 - the AI explains and suggests; people decide;
 - a private trip stays private.
@@ -48,7 +52,7 @@ In Virtual Gym, other people were visible but nothing they did touched your sess
 
 ## What it deliberately doesn't do
 
-No booking, payments, reviews, feeds, text chat or comments, AI-generated itineraries or multi-day route optimisation. Each would move decisions away from the travellers or the focus away from the shared plan. The one exception to "no chat" is the two-person voice call above: talking while both look at the same map and timeline keeps the plan at the centre, where a text channel would compete with it. No video, group calls or call recording.
+No booking, payments, feeds, text chat or comments, AI-generated itineraries or multi-day route optimisation. Each would move decisions away from the travellers or the focus away from the shared plan. The one exception to "no chat" is the two-person voice call above: talking while both look at the same map and timeline keeps the plan at the centre, where a text channel would compete with it. No video, group calls or call recording.
 
 ## Sources
 

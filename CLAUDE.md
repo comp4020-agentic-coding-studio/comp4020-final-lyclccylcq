@@ -49,8 +49,10 @@ contradict the README, stop and ask. Don't quietly change the product.
   coordinates and a `custom:<uuid>` id (source `custom`). It's routed by
   coordinates, labelled "Pinned spot", and never given a made-up Google id.
   Its coordinates are the travellers' choice, so they don't expire.
-- **No text chat, comments, reviews, social feeds, bookings, payments,
-  expenses, AI-generated trips or multi-day route optimisation** (V1 scope).
+- **No text chat, comments, social feeds, bookings, payments, expenses,
+  AI-generated trips or multi-day route optimisation** (V1 scope). Reviews
+  (1–5 stars, optional text) exist only on published trips (November 2026,
+  `docs/permissions.md`); they aren't comments on a working trip.
   Ask first. The one authorised exception (October 2026) is the two-person,
   audio-only voice call between members of a trip (see "Voice calls"); it
   doesn't open the door to text chat, video, group calls or recording.
@@ -60,9 +62,13 @@ contradict the README, stop and ask. Don't quietly change the product.
 - The homepage is public: anyone can browse curated itineraries, search
   destinations and preview. Trips, copying an itinerary and invites need an
   account.
-- Itineraries are Wayline's own templates (`itinerary_templates`,
+- Curated itineraries are Wayline's own templates (`itinerary_templates`,
   `src/curated.ts`), labelled "Curated by Wayline". Never present them as
-  user-generated, and never add ratings, view counts or popularity numbers.
+  user-generated, and never add ratings, view counts or popularity numbers to
+  them. Trips travellers publish (`trip_publications`, `src/publications.ts`)
+  are a separate list ("Shared by travellers", labelled with the author),
+  never ranked among the curated ones; only they carry ratings, computed on
+  the server from real reviews.
 - Never write a Google place id by hand. Curated stops carry a search query
   and approximate coordinates; `discovery.ts` stores an id only when Google
   returns a match within 1.5 km, and the UI labels unmatched stops
@@ -265,11 +271,19 @@ contradict the README, stop and ask. Don't quietly change the product.
 
 ## Access and secrets
 
-- Roles: owner, collaborator, everyone else. Non-members get the same 404 as
-  a missing trip. Only owners invite, rename, change dates, delete or remove
-  people; collaborators edit the itinerary and can leave.
-- Invite links are 256-bit random tokens, stored hashed, shown once, replaced
-  or revoked by the owner. Never authorise by trip id alone.
+- Roles: owner, collaborator, everyone else, decided only in
+  `src/permissions.ts` (`authorize`, `authorizeActivity`). Non-members get the
+  same 404 as a missing trip; members without the right get a 403. Owners do
+  everything; collaborators add stops and change, move or remove only the
+  stops they added (`created_by`), and can leave. Don't add a role check
+  anywhere else.
+- Invite links are 256-bit random tokens, stored hashed, shown once, expiring
+  24 hours after creation (server clock), replaced or revoked by the owner. A
+  link only lets a signed-in person *request* to join; the owner approves
+  each request. Never authorise by trip id or link alone.
+- Publishing copies a snapshot; editing the trip never changes it until the
+  owner republishes. Notes, members and links are never published. Forks copy
+  the snapshot into a new private trip and nothing private (`docs/permissions.md`).
 - Usernames and display names are each unique. Usernames keep their ASCII
   rule and compare case-insensitively (`usernameKey`, the NOCASE column).
   Display names are stored as typed (trimmed) with a separate
@@ -321,6 +335,11 @@ contradict the README, stop and ask. Don't quietly change the product.
 - **Storage:** `DATA_DIR/wayline.db` (`/data` on Fly). Schema changes are
   additive. The old `gym.db` beside it is left untouched as the gym's record.
 - **Validate on the server.** Bad input is a 400 that writes nothing.
+- **Logs** go through `src/log.ts` only (no `console.*`): one JSON line per
+  significant action, user from the session context, never request bodies,
+  titles, notes, coordinates, cookies, tokens or keys. A new user-facing
+  route gets a line in `ROUTES` (`src/server.ts`); high-frequency traffic
+  (map views, keep-alives, signalling) stays unlogged (`docs/logging.md`).
 - **Starter contract:** `/` answers 200; `/readme/` serves `README.md` in full,
   server-rendered; listen on `0.0.0.0:$PORT`. Don't touch `fly.toml`'s machine,
   volume or region settings, or `spec/invariants.test.ts`.

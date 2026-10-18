@@ -1028,3 +1028,28 @@ textarea { resize: vertical; }
 .trip-card-band.has-photo { position: relative; overflow: hidden; isolation: isolate; }
 .trip-card-band.has-photo::after { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,.05) 35%, rgba(0,0,0,.55)); }
 .trip-card-band.has-photo > .trip-card-dest { position: relative; z-index: 2; }
+
+/* --- publishing, reviews, join requests --- */
+.trip-origin { margin: 0; color: var(--muted); }
+.trip-origin a { color: var(--sea); }
+.trip-card-origin { margin: 2px 0 0; }
+.stop-added-by { margin: 4px 0 0; }
+.it-source-user { color: var(--sea); }
+.it-rating { margin: 4px 0 0; color: var(--ink-2); }
+.pv-cover { position: relative; isolation: isolate; height: 160px; margin: 0 0 12px; border-radius: var(--radius); overflow: hidden; background: var(--paper-2); }
+.pv-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pv-author { margin: 0; color: var(--muted); }
+.pv-rating { margin: 4px 0 0; font-weight: 600; color: var(--ink-2); }
+.pv-reviews { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); display: grid; gap: 12px; }
+.pv-reviews h2 { margin: 0; font-size: 20px; }
+.review-form { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.review-form h3 { margin: 0; font-size: 16px; }
+.star-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.star-opt { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--line-2); border-radius: 999px; cursor: pointer; }
+.star-opt:has(input:checked) { border-color: var(--sun); background: var(--warn-bg); }
+.star-opt input { margin: 0; }
+.review-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.review { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.review p { margin: 0; }
+.review-text { margin-top: 4px !important; white-space: pre-wrap; overflow-wrap: anywhere; }
+.stars { color: var(--warn); letter-spacing: 1px; }

@@ -10,6 +10,8 @@ import { HttpError } from "./errors.ts";
 import { createDiscovery } from "./discovery.ts";
 import { computeRouteOptions, DEMO_PLACES, googleConfigured, mapsKeyWarnings, placeDetails, searchPlaces } from "./google.ts";
 import { createItineraryStore } from "./itineraries.ts";
+import { createPublications } from "./publications.ts";
+import { afterEvent, flushAfter, log, note, notes, sanitize, setUser, shortId, withRequest } from "./log.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { clientIp, createLimiter } from "./ratelimit.ts";
 import { createHub } from "./realtime.ts";
@@ -21,6 +23,7 @@ const auth = createAuth(db);
 const hub = createHub({
   onJoin: (tripId, userId, session) => calls.joined(tripId, userId, session),
   onLeave: (tripId, userId, session) => calls.left(tripId, userId, session),
+  log: { ...log, afterEvent },
 });
 const trips = createTripStore(
   db,
@@ -37,7 +40,7 @@ const trips = createTripStore(
   },
   // only a count goes down the person's own stream; the page then asks for
   // the list with its own session
-  (userId) => hub.toUser(userId, "invitations", { pending: trips.pendingFor(userId).length }),
+  (userId) => hub.toUser(userId, "invitations", { pending: trips.pendingFor(userId).length, requests: trips.requestsToMe(userId).length }),
 );
 const isMember = (tripId: string, userId: string): boolean => {
   try {
@@ -63,7 +66,9 @@ const calls = createCalls({
 const envInt = (name: string, fallback: number) => (Number(process.env[name]) > 0 ? Math.floor(Number(process.env[name])) : fallback);
 const itineraries = createItineraryStore(db);
 itineraries.seed();
-const discovery = createDiscovery({ itineraries, trips });
+const publications = createPublications(db, trips);
+const discovery = createDiscovery({ itineraries, trips, publications });
+const joinLimit = createLimiter(20, 60_000); // join requests per person per minute
 const copilot = createCopilot(aiProvider(), {
   perUserPerMinute: envInt("WAYLINE_AI_PER_MINUTE", 6),
   perUserPerDay: envInt("WAYLINE_AI_PER_USER_DAY", 60),
@@ -186,6 +191,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   if (method === "POST" && (path === "/api/auth/signup" || path === "/api/auth/login")) {
     const input = await body(req);
     const { user, token } = path.endsWith("signup") ? await auth.signup(input) : await auth.login(input);
+    setUser(user);
     return json(res, path.endsWith("signup") ? 201 : 200, { user }, { "set-cookie": sessionCookie(token, isSecure(req)) });
   }
   // sign-up form feedback; the insert still has the final say
@@ -195,6 +201,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   }
   if (method === "POST" && path === "/api/auth/logout") {
     const leaving = auth.userForToken(readCookie(req.headers.cookie, COOKIE));
+    setUser(leaving);
     if (leaving) calls.endFor(leaving.id, "signed-out");
     if (leaving) hub.closeUser(leaving.id);
     auth.logout(readCookie(req.headers.cookie, COOKIE));
@@ -202,8 +209,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   }
 
   const maybeUser: User | null = auth.userForToken(readCookie(req.headers.cookie, COOKIE));
+  setUser(maybeUser);
   const found = await discovery(req, url, maybeUser, () => body(req));
-  if (found) return json(res, found.status, found.data);
+  if (found) {
+    // a fork or a copy answers with the new trip: name it in the log line
+    const made = found.status === 201 && (found.data as { rev?: unknown; id?: unknown }).rev !== undefined ? (found.data as { id: string }).id : null;
+    if (made) note({ tripId: made });
+    return json(res, found.status, found.data);
+  }
 
   if (!maybeUser) return json(res, 401, { error: "Sign in to continue." });
   const user: User = maybeUser;
@@ -214,25 +227,43 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     if (method === "GET") return json(res, 200, trips.list(user.id));
     if (method === "POST") {
       const snap = trips.create(user.id, await body(req));
+      note({ tripId: snap.id });
       await locateDestination(snap);
       return json(res, 201, trips.snapshot(snap.id));
     }
   }
 
   // invitations addressed to me (by username, from a trip's owner)
-  if (method === "GET" && path === "/api/me/events") return hub.joinUser(user.id, res, { pending: trips.pendingFor(user.id).length });
-  if (method === "GET" && path === "/api/invitations") return json(res, 200, { invitations: trips.pendingFor(user.id) });
+  if (method === "GET" && path === "/api/me/events") return hub.joinUser(user.id, res, { pending: trips.pendingFor(user.id).length, requests: trips.requestsToMe(user.id).length }, user.username);
+  if (method === "GET" && path === "/api/invitations") {
+    return json(res, 200, { invitations: trips.pendingFor(user.id), requests: trips.requestsToMe(user.id), myRequests: trips.myJoinRequests(user.id) });
+  }
   let m = path.match(/^\/api\/invitations\/([0-9a-f-]{36})\/(accept|decline)$/);
   if (method === "POST" && m) {
-    if (m[2] === "accept") return json(res, 200, { tripId: trips.acceptInvitation(user.id, m[1]) });
+    if (m[2] === "accept") {
+      const joined = trips.acceptInvitation(user.id, m[1]);
+      note({ tripId: joined });
+      return json(res, 200, { tripId: joined });
+    }
     trips.declineInvitation(user.id, m[1]);
     return json(res, 200, { ok: true });
   }
 
-  m = path.match(/^\/api\/invites\/([A-Za-z0-9_-]+)(\/accept)?$/);
+  // An invite link: see whose trip it is, then ask to join. Never joins by itself.
+  m = path.match(/^\/api\/invites\/([A-Za-z0-9_-]+)(\/request|\/accept)?$/);
   if (m) {
-    if (method === "GET" && !m[2]) return json(res, 200, trips.previewInvite(user.id, m[1]));
-    if (method === "POST" && m[2]) return json(res, 200, { tripId: trips.acceptInvite(user.id, m[1]) });
+    if (method === "GET" && !m[2]) {
+      const p = trips.previewInvite(user.id, m[1]);
+      if (p.state === "expired") note({ event: "INVITATION_EXPIRED", action: "open_expired_link", message: "User opened an invite link that has expired" });
+      return json(res, 200, p);
+    }
+    if (method === "POST" && m[2]) {
+      joinLimit(user.id);
+      const r = trips.requestToJoin(user.id, m[1]);
+      note({ tripId: r.tripId, requestId: r.requestId, ...(r.created ? {} : { event: "COLLAB_REQUEST_REPEATED", message: "User asked again while a request was still pending" }) });
+      // the requester isn't a member: they get the request's state, not the trip
+      return json(res, r.created ? 201 : 200, { requestId: r.requestId, status: r.status });
+    }
   }
 
   m = path.match(/^\/api\/trips\/([0-9a-f-]{36})(\/.*)?$/);
@@ -275,10 +306,39 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   }
 
   if (rest === "/invite") {
-    if (method === "POST") return json(res, 201, { token: trips.createInvite(user.id, tripId) });
+    if (method === "GET") return json(res, 200, { link: trips.inviteLink(user.id, tripId) });
+    if (method === "POST") {
+      const { token, link } = trips.createInvite(user.id, tripId);
+      note({ linkId: link.id, expiresAt: new Date(link.expiresAt).toISOString() });
+      return json(res, 201, { token, link });
+    }
     if (method === "DELETE") {
       trips.revokeInvite(user.id, tripId);
       return json(res, 200, { ok: true });
+    }
+  }
+
+  // requests to join through a link: the owner approves or rejects each one
+  if (method === "GET" && rest === "/requests") return json(res, 200, { requests: trips.joinRequests(user.id, tripId) });
+  let jr = rest.match(/^\/requests\/([0-9a-f-]{36})\/(approve|reject)$/);
+  if (method === "POST" && jr) {
+    const d = trips.decideJoinRequest(user.id, tripId, jr[1], jr[2] as "approve" | "reject");
+    note({ requestId: jr[1], targetUserId: d.requesterId });
+    if (d.status === "approved") afterEvent(() => log.info("COLLABORATOR_ADDED", { tripId, targetUserId: d.requesterId, action: "add_collaborator", status: "success", message: "Approved requester is now a collaborator" }));
+    return json(res, 200, { status: d.status, requests: trips.joinRequests(user.id, tripId) });
+  }
+
+  // publishing: a snapshot of the trip, separate from the working copy
+  if (rest === "/publication") {
+    if (method === "GET") return json(res, 200, { publication: publications.forTrip(user.id, tripId) });
+    if (method === "PUT") {
+      const p = publications.publish(user.id, tripId, await body(req));
+      note({ publicationId: p.id, ...(p.republished ? { event: "TRIP_REPUBLISHED", action: "republish_trip", message: "Owner updated the published version of the trip" } : {}) });
+      return json(res, p.republished ? 200 : 201, { publication: publications.forTrip(user.id, tripId) });
+    }
+    if (method === "DELETE") {
+      note({ publicationId: publications.unpublish(user.id, tripId).id });
+      return json(res, 200, { publication: publications.forTrip(user.id, tripId) });
     }
   }
 
@@ -303,11 +363,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   r = rest.match(/^\/members\/([0-9a-f-]{36})$/);
   if (method === "DELETE" && r) {
     trips.removeMember(user.id, tripId, r[1]);
+    note(r[1] === user.id ? { targetUserId: r[1] } : { targetUserId: r[1], event: "COLLABORATOR_REMOVED", action: "remove_collaborator", message: "Owner removed a collaborator; their access and live streams were cut off" });
     return json(res, 200, { ok: true });
   }
 
   if (method === "POST" && rest === "/activities") {
     const { created, activityId, trip } = trips.addActivity(user.id, tripId, await body(req));
+    // a replayed clientId changes nothing, so it isn't a second "added"
+    note(created ? { activityId } : { activityId, event: "TRIP_DESTINATION_ADD_REPLAYED", message: "Retry of an add that already happened; nothing changed" });
     return json(res, created ? 201 : 200, { activityId, trip });
   }
   if (method === "PUT" && rest === "/start") return json(res, 200, trips.setStart(user.id, tripId, await body(req)));
@@ -315,7 +378,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   if (method === "PUT" && r) return json(res, 200, trips.setPlace(user.id, tripId, r[1], await body(req)));
   r = rest.match(/^\/activities\/([0-9a-f-]{36})(\/move)?$/);
   if (r) {
-    if (method === "PATCH" && !r[2]) return json(res, 200, trips.updateActivity(user.id, tripId, r[1], await body(req)));
+    if (method === "PATCH" && !r[2]) {
+      const input = await body(req);
+      // which fields changed, never their contents (notes can be personal)
+      const fields = ["title", "kind", "startMin", "durationMin", "notes", "meal"].filter((k) => input[k] !== undefined);
+      const timing = fields.some((k) => k === "startMin" || k === "durationMin");
+      note({ fields, ...(timing ? { event: "TRIP_SCHEDULE_MODIFIED", action: "change_time", message: "User changed a stop's time or length" } : {}) });
+      return json(res, 200, trips.updateActivity(user.id, tripId, r[1], input));
+    }
     if (method === "DELETE" && !r[2]) return json(res, 200, trips.deleteActivity(user.id, tripId, r[1]));
     if (method === "POST" && r[2]) return json(res, 200, trips.moveActivity(user.id, tripId, r[1], await body(req)));
   }
@@ -356,7 +426,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       const status = (err as { status?: number }).status;
       if (status === 429 || status === 503) return json(res, status, { configured: true, error: (err as Error).message, retry: status === 429 });
       const d = describeAiError(err);
-      if (d.status !== 499) console.warn("copilot:", err instanceof Error ? err.message : err);
+      if (d.status !== 499) log.warn("COPILOT_PROVIDER_ERROR", { tripId, action: "ask_copilot", status: "failure", errorCode: "AI_PROVIDER_ERROR", message: sanitize(err) });
       return json(res, d.status, { configured: true, error: d.error, retry: d.retry });
     }
   }
@@ -430,7 +500,7 @@ async function locateDestination(snap: TripSnapshot): Promise<void> {
       trips.setCenter(snap.id, { placeId: "demo:sydney", lat, lng });
     }
   } catch (err) {
-    console.warn("couldn't locate destination:", err instanceof Error ? err.message : err);
+    log.warn("TRIP_DESTINATION_LOOKUP_FAILED", { tripId: snap.id, action: "locate_destination", status: "failure", errorCode: "UPSTREAM_ERROR", message: sanitize(err) });
   }
 }
 
@@ -448,17 +518,169 @@ async function refreshStalePlaces(tripId: string): Promise<void> {
   }
 }
 
-const APP_PAGES = /^\/(login|privacy|credits|trips|trips\/[0-9a-f-]{36}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80})?$/;
+// The business event each API request stands for. Anything not listed (map
+// views, place searches, call signalling, polling) logs only when it fails,
+// so a live session reads as a list of what people did.
+type Route = { event: string; action: string; message: string };
+const ROUTES: [string, RegExp, Route][] = [
+  ["POST", /^\/api\/auth\/signup$/, { event: "USER_SIGNED_UP", action: "signup", message: "New account created and signed in" }],
+  ["POST", /^\/api\/auth\/login$/, { event: "USER_SESSION_CREATED", action: "login", message: "User signed in; new session started" }],
+  ["POST", /^\/api\/auth\/logout$/, { event: "USER_SESSION_ENDED", action: "logout", message: "User signed out" }],
+  ["POST", /^\/api\/trips$/, { event: "TRIP_CREATED", action: "create_trip", message: "User created a trip" }],
+  ["POST", /^\/api\/itineraries\/pub-[0-9a-f-]{36}\/copy$/, { event: "TRIP_FORKED", action: "use_template", message: "User forked a published trip into a new private trip" }],
+  ["POST", /^\/api\/itineraries\/[a-z0-9-]+\/copy$/, { event: "TRIP_CREATED", action: "copy_itinerary", message: "User created a trip from a curated itinerary" }],
+  ["PUT", /^\/api\/itineraries\/pub-[0-9a-f-]{36}\/reviews$/, { event: "REVIEW_UPDATED", action: "review", message: "User changed their review of a published trip" }],
+  ["DELETE", /^\/api\/itineraries\/pub-[0-9a-f-]{36}\/reviews\/[0-9a-f-]{36}$/, { event: "REVIEW_DELETED", action: "delete_review", message: "User deleted their review" }],
+  ["GET", /^\/api\/trips\/[0-9a-f-]{36}$/, { event: "TRIP_OPENED", action: "open_trip", message: "User opened the trip" }],
+  ["PATCH", /^\/api\/trips\/[0-9a-f-]{36}$/, { event: "TRIP_UPDATED", action: "update_trip", message: "Owner changed the trip's name, dates or settings" }],
+  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}$/, { event: "TRIP_DELETED", action: "delete_trip", message: "Owner deleted the trip" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/invite$/, { event: "INVITATION_CREATED", action: "create_invite_link", message: "Owner created a 24-hour invite link (any earlier link was revoked)" }],
+  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}\/invite$/, { event: "INVITATION_REVOKED", action: "revoke_invite_link", message: "Owner revoked the invite link" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/requests\/[0-9a-f-]{36}\/approve$/, { event: "COLLAB_REQUEST_APPROVED", action: "approve_request", message: "Owner approved a request to join" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/requests\/[0-9a-f-]{36}\/reject$/, { event: "COLLAB_REQUEST_REJECTED", action: "reject_request", message: "Owner rejected a request to join; no access granted" }],
+  ["PUT", /^\/api\/trips\/[0-9a-f-]{36}\/publication$/, { event: "TRIP_PUBLISHED", action: "publish_trip", message: "Owner published a snapshot of the trip" }],
+  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}\/publication$/, { event: "TRIP_UNPUBLISHED", action: "unpublish_trip", message: "Owner unpublished the trip; existing forks are unaffected" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/invitations$/, { event: "TRIP_MEMBER_INVITED", action: "invite_user", message: "Owner invited a user by username" }],
+  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}\/invitations\/[0-9a-f-]{36}$/, { event: "TRIP_INVITATION_CANCELLED", action: "cancel_invitation", message: "Owner cancelled an invitation" }],
+  ["GET", /^\/api\/invites\/[A-Za-z0-9_-]+$/, { event: "INVITATION_OPENED", action: "open_invite_link", message: "User opened an invite link" }],
+  ["POST", /^\/api\/invites\/[A-Za-z0-9_-]+\/(request|accept)$/, { event: "COLLAB_REQUEST_CREATED", action: "request_to_join", message: "User asked to join the trip through an invite link; waiting for the owner" }],
+  ["POST", /^\/api\/invitations\/[0-9a-f-]{36}\/accept$/, { event: "COLLAB_TRIP_JOINED", action: "accept_invitation", message: "User accepted an invitation and joined the trip" }],
+  ["POST", /^\/api\/invitations\/[0-9a-f-]{36}\/decline$/, { event: "TRIP_INVITATION_DECLINED", action: "decline_invitation", message: "User declined an invitation" }],
+  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}\/members\/[0-9a-f-]{36}$/, { event: "COLLAB_TRIP_LEFT", action: "remove_member", message: "A member left or was removed from the trip" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/activities$/, { event: "TRIP_DESTINATION_ADDED", action: "add_destination", message: "User added a destination to the trip" }],
+  ["PATCH", /^\/api\/trips\/[0-9a-f-]{36}\/activities\/[0-9a-f-]{36}$/, { event: "TRIP_DESTINATION_MODIFIED", action: "edit_destination", message: "User edited a destination's details" }],
+  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}\/activities\/[0-9a-f-]{36}$/, { event: "TRIP_DESTINATION_REMOVED", action: "remove_destination", message: "User removed a destination" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/activities\/[0-9a-f-]{36}\/move$/, { event: "TRIP_DESTINATION_REORDERED", action: "reorder_destination", message: "User moved a destination in the plan" }],
+  ["PUT", /^\/api\/trips\/[0-9a-f-]{36}\/activities\/[0-9a-f-]{36}\/place$/, { event: "TRIP_DESTINATION_MODIFIED", action: "change_place", message: "User pointed a stop at a different place" }],
+  ["PUT", /^\/api\/trips\/[0-9a-f-]{36}\/start$/, { event: "TRIP_START_CHANGED", action: "set_start", message: "User set the trip's starting point" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/routes$/, { event: "TRIP_ROUTE_CALCULATED", action: "calculate_route", message: "User calculated the route between two stops" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/segments\/[0-9a-f-]{36}\/mode$/, { event: "TRIP_ROUTE_MODE_SELECTED", action: "select_mode", message: "User chose a transport mode for a leg" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/proposals\/apply$/, { event: "TRIP_SCHEDULE_MODIFIED", action: "apply_proposal", message: "User applied a schedule fix" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/copilot$/, { event: "COPILOT_ASKED", action: "ask_copilot", message: "User asked the copilot about a day" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/call$/, { event: "CALL_INVITED", action: "start_call", message: "User started a voice call" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/call\/[0-9a-f-]{36}\/accept$/, { event: "CALL_ACCEPTED", action: "accept_call", message: "User accepted a voice call" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/call\/[0-9a-f-]{36}\/hangup$/, { event: "CALL_ENDED", action: "hang_up", message: "User hung up the voice call" }],
+];
 
-const server = createServer(async (req, res) => {
+const routeFor = (method: string, path: string): Route | undefined => ROUTES.find(([m, re]) => m === method && re.test(path))?.[2];
+
+const ERROR_CODES: Record<number, string> = {
+  400: "INVALID_INPUT",
+  401: "UNAUTHENTICATED",
+  403: "FORBIDDEN",
+  404: "NOT_FOUND",
+  409: "CONFLICT",
+  413: "PAYLOAD_TOO_LARGE",
+  415: "UNSUPPORTED_MEDIA_TYPE",
+  429: "RATE_LIMITED",
+  502: "UPSTREAM_ERROR",
+  503: "UNAVAILABLE",
+};
+
+// One line per API request worth telling: its business event when it worked,
+// or what went wrong when it didn't. 401/403/404 on a trip are "denied"
+// (non-members get the same 404 as a missing trip, so that's an attempt on
+// a trip the user can't touch); other 4xx are invalid operations; 5xx errors.
+function logRequest(method: string, path: string, status: number, started: number, error?: unknown): void {
+  try {
+    requestLine(method, path, status, started, error);
+  } finally {
+    flushAfter();
+  }
+}
+
+function requestLine(method: string, path: string, status: number, started: number, error?: unknown): void {
+  const route = routeFor(method, path);
+  const tripId = path.match(/^\/api\/trips\/([0-9a-f-]{36})/)?.[1] ?? null;
+  const publicationId = path.match(/^\/api\/itineraries\/(pub-[0-9a-f-]{36})/)?.[1];
+  const activityId = path.match(/\/activities\/([0-9a-f-]{36})/)?.[1];
+  const extra = notes();
+  const durationMs = Math.round(performance.now() - started);
+  const { event: _e, action: _a, message: _m, ...details } = extra;
+  const base = { tripId, activityId, publicationId, ...details, method, path: path.replace(/\/api\/invites\/[^/]+/, "/api/invites/[token]"), httpStatus: status, durationMs };
+  if (status < 400) {
+    // the same PUT creates a review (201) or edits the caller's own (200)
+    if (route?.event === "REVIEW_UPDATED" && status === 201) {
+      log.info("REVIEW_CREATED", { ...base, action: "review", message: "User reviewed a published trip", status: "success" });
+      return;
+    }
+    if (route) log.info(String(extra.event ?? route.event), { ...base, action: String(extra.action ?? route.action), message: String(extra.message ?? route.message), status: "success" });
+    return;
+  }
+  if (status === 499) return; // the browser gave up on its own request
+  const event = route ? String(extra.event ?? route.event) : "API_REQUEST";
+  const action = String(extra.action ?? route?.action ?? `${method} ${base.path}`);
+  const detail = sanitize(error instanceof Error ? error.message : (error ?? ""));
+  // 503 is a feature switched off (no Google or AI key): handled, said plainly to the user
+  if (status === 503) {
+    log.warn("FEATURE_UNAVAILABLE", { ...base, action, status: "failure", errorCode: "UNAVAILABLE", message: detail || "Feature not configured on this server", attemptedEvent: event });
+    return;
+  }
+  if (status >= 500) {
+    log.error("API_OPERATION_FAILED", { ...base, action, status: "failure", errorCode: ERROR_CODES[status] ?? "INTERNAL_ERROR", message: detail || "Server error", failedEvent: event });
+    return;
+  }
+  // "Trip not found." is what a non-member gets for a real trip (requireMember)
+  const denied = status === 401 || status === 403 || (status === 404 && tripId !== null && detail === "Trip not found.");
+  const isWrite = method !== "GET" && method !== "HEAD";
+  // a failed read that isn't about a trip (a stale invite link, an expired
+  // session polling) isn't worth a line unless it was a denied write
+  if (!route && !isWrite && !denied) return;
+  // every signed-out page load asks "who am I?" and is told 401; that's not an attempt
+  if (status === 401 && !isWrite && tripId === null) return;
+  log.warn(denied && isWrite ? "UNAUTHORIZED_MODIFICATION_ATTEMPT" : denied ? "ACCESS_DENIED" : "INVALID_TRIP_OPERATION", {
+    ...base,
+    action,
+    status: denied ? "denied" : "failure",
+    errorCode: ERROR_CODES[status] ?? `HTTP_${status}`,
+    message: detail || (status === 401 ? "Not signed in" : `Request refused (${status})`),
+    attemptedEvent: event,
+  });
+}
+
+const APP_PAGES =/^\/(login|privacy|credits|trips|trips\/[0-9a-f-]{36}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80})?$/;
+
+const server = createServer((req, res) => withRequest(shortId("req"), () => handle(req, res)));
+
+async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const { pathname } = url;
+  if (pathname.startsWith("/api/")) {
+    const started = performance.now();
+    let failure: unknown;
+    // a stream's "response" lasts as long as the stream; the hub logs those
+    const stream = pathname.endsWith("/events");
+    if (!stream) {
+      res.on("finish", () => logRequest(req.method ?? "GET", pathname, res.statusCode, started, failure));
+      // the browser went away before the reply was sent: a broadcast may still be waiting
+      res.on("close", () => {
+        if (!res.writableFinished) flushAfter();
+      });
+    }
+    try {
+      return await api(req, res, url);
+    } catch (err) {
+      failure = err;
+      respondError(res, err);
+      if (stream) {
+        const status = res.statusCode;
+        log.warn("REALTIME_CONNECTION_FAILED", {
+          tripId: pathname.match(/^\/api\/trips\/([0-9a-f-]{36})/)?.[1] ?? null,
+          action: "sse_connect",
+          status: status === 401 || status === 403 || status === 404 ? "denied" : "failure",
+          errorCode: ERROR_CODES[status] ?? "INTERNAL_ERROR",
+          httpStatus: status,
+          message: sanitize(err instanceof Error ? err.message : err),
+        });
+      }
+      return;
+    }
+  }
   try {
-    if (pathname.startsWith("/api/")) return await api(req, res, url);
     if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, "Method not allowed", "text/plain");
     if (pathname === "/readme") {
       res.writeHead(301, { location: "/readme/" });
-      return res.end();
+      return void res.end();
     }
     if (pathname === "/readme/") return send(res, 200, readmePage(), TYPES[".html"]);
     if (pathname.startsWith("/readme/docs/") && serveFile(res, "docs", pathname.slice(13))) return;
@@ -466,26 +688,49 @@ const server = createServer(async (req, res) => {
     if (serveFile(res, "public", pathname.slice(1))) return;
     send(res, 404, "Not found", "text/plain; charset=utf-8");
   } catch (err) {
-    if (res.headersSent) return void res.end();
-    if (err instanceof HttpError) return json(res, err.status, { error: err.message, ...err.details });
-    console.error(err);
-    json(res, 500, { error: "Something went wrong on our side." });
+    respondError(res, err);
   }
-});
+}
+
+function respondError(res: ServerResponse, err: unknown): void {
+  if (res.headersSent) return void res.end();
+  if (err instanceof HttpError) return json(res, err.status, { error: err.message, ...err.details });
+  // the full stack stays on the server, sanitised; the user gets a plain message
+  log.error("UNHANDLED_ERROR", { action: "request", status: "failure", errorCode: "INTERNAL_ERROR", message: sanitize(err), stack: err instanceof Error ? sanitize(err.stack, 2000) : undefined });
+  json(res, 500, { error: "Something went wrong on our side." });
+}
 
 server.listen(port, "0.0.0.0", () => {
-  console.log(`Wayline listening on http://localhost:${port}`);
   // which integrations are on; never the key values
   const on = (v: string | undefined) => (v ? "set" : "missing");
-  console.log(
-    `Google Maps: browser key ${on(process.env.GOOGLE_MAPS_BROWSER_KEY)}, server key ${on(process.env.GOOGLE_MAPS_SERVER_KEY)}, map id ${process.env.GOOGLE_MAPS_MAP_ID ? "set" : "DEMO_MAP_ID"}; AI ${on(process.env.ANTHROPIC_API_KEY)}; calls: TURN ${iceConfigured().turn ?? "missing"}, STUN ${iceConfigured().stun ? "set" : "missing"}`,
-  );
-  for (const w of mapsKeyWarnings()) console.warn(`Warning: ${w}`);
+  log.info("SERVER_STARTED", {
+    action: "start",
+    status: "success",
+    message: `Wayline listening on http://localhost:${port}`,
+    port,
+    googleBrowserKey: on(process.env.GOOGLE_MAPS_BROWSER_KEY),
+    googleServerKey: on(process.env.GOOGLE_MAPS_SERVER_KEY),
+    mapId: process.env.GOOGLE_MAPS_MAP_ID ? "set" : "DEMO_MAP_ID",
+    ai: on(process.env.ANTHROPIC_API_KEY),
+    turn: iceConfigured().turn ?? "missing",
+    stun: iceConfigured().stun ? "set" : "missing",
+  });
+  for (const w of mapsKeyWarnings()) log.warn("CONFIG_WARNING", { action: "start", status: "failure", errorCode: "CONFIG", message: w });
+});
+
+// Errors that escaped every handler: logged, never silently dropped.
+process.on("uncaughtException", (err) => {
+  log.error("UNCAUGHT_EXCEPTION", { action: "process", status: "failure", errorCode: "INTERNAL_ERROR", message: sanitize(err), stack: sanitize(err.stack, 2000) });
+  process.exit(1);
+});
+process.on("unhandledRejection", (err) => {
+  log.error("UNHANDLED_REJECTION", { action: "process", status: "failure", errorCode: "INTERNAL_ERROR", message: sanitize(err) });
 });
 
 // Fly stops the machine when nobody's around; close streams and the database cleanly.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    log.info("SERVER_STOPPING", { action: "stop", status: "success", message: `Shutting down on ${signal}` });
     calls.closeAll();
     hub.closeAll();
     server.close();

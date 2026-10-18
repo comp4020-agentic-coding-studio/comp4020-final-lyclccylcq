@@ -175,7 +175,7 @@ describe("inviting an existing account by username", () => {
     expect(sent.data.invitation).toMatchObject({ status: "pending", user: { id: guest.userId } });
     // the invitee's own stream says the list changed, with no trip content in it
     const note = await own.next((e) => e.event === "invitations" && e.data.pending === 1);
-    expect(note.data).toEqual({ pending: 1 });
+    expect(note.data).toEqual({ pending: 1, requests: 0 });
 
     expect((await guest.get(`/api/trips/${trip.id}`)).status).toBe(404); // not a member yet
     expect((await guest.get(`/api/trips/${trip.id}/events`)).status).toBe(404);
@@ -267,11 +267,11 @@ describe("inviting an existing account by username", () => {
     // turning the link off leaves the named invitation pending
     await owner.send("DELETE", `/api/trips/${trip.id}/invite`);
     expect((await guest.get("/api/invitations")).data.invitations.map((i: any) => i.id)).toEqual([sent.data.invitation.id]);
-    expect((await linkUser.send("POST", `/api/invites/${token}/accept`, {})).status).toBe(404);
+    expect((await linkUser.send("POST", `/api/invites/${token}/request`, {})).status).toBe(404);
     // cancelling a named invitation leaves a new link working
     const token2 = (await owner.send("POST", `/api/trips/${trip.id}/invite`, {})).data.token;
     await owner.send("DELETE", `/api/trips/${trip.id}/invitations/${sent.data.invitation.id}`);
-    expect((await linkUser.send("POST", `/api/invites/${token2}/accept`, {})).status).toBe(200);
+    expect((await linkUser.send("POST", `/api/invites/${token2}/request`, {})).status).toBe(201);
   });
 
   it("keeps a pending invitation through sign-out, and drops it with a deleted trip", async () => {

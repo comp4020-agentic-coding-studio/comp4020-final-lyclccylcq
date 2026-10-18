@@ -1,3 +1,4 @@
+import { log, sanitize } from "./log.ts";
 import { createHmac, randomUUID } from "node:crypto";
 import { HttpError } from "./errors.ts";
 
@@ -301,7 +302,7 @@ export async function iceServersFor(userId: string, env: NodeJS.ProcessEnv = pro
       }));
       return { iceServers: [...base, ...servers.filter((s) => s.urls.length)], relay: servers.some((s) => s.username), ttl };
     } catch (err) {
-      console.warn("TURN credentials unavailable:", err instanceof Error ? err.message : "error");
+      log.warn("CALL_TURN_UNAVAILABLE", { action: "mint_turn_credentials", status: "failure", errorCode: "UPSTREAM_ERROR", message: sanitize(err) });
       return { iceServers: base, relay: false, ttl: null };
     }
   }
