@@ -1,56 +1,95 @@
-# Process overview
+# Process overview — Crit 10
 
-_Rewritten at crit 9 to describe Wayline as it stands; it will be rewritten again at crit 10, not appended to._
+## From a crowded gym to one shared plan
 
-## From Virtual Gym to Wayline
+Wayline began as Virtual Gym, a pixel-art room where a real workout moved a character ([`a6f7c78...abe24a5`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/compare/a6f7c78...abe24a5)). The gym could show who was online, but another person's presence did not change what I could do. I struggled to explain why anyone would keep it open beside a conventional workout tracker.
 
-Until crit 8 this project was Virtual Gym, a shared pixel-art gym where your real workout moved your character ([`a6f7c78...abe24a5`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/compare/a6f7c78...abe24a5)). Others were visible, but nothing they did touched your session, and I couldn't justify why anyone would use it alongside the fitness apps they already have. Making it live wouldn't have fixed that: it would still have been people side by side, not acting on anything shared. So I pivoted to Wayline, a collaborative trip planner, where one person's change shapes everyone's day ([`6305228`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/6305228), documented in [`0953ec9`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/0953ec9)).
-## Stack, and why
+The pivot to a travel planner was a choice about interaction rather than technology: two people planning a day must act on the same decisions. I replaced the gym with a map and timeline around one shared itinerary ([`6305228`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/6305228); [`0953ec9`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/0953ec9)).
 
-Node 24's own `http` and built-in SQLite, TypeScript by type stripping, and hand-written ES modules with no build step ([decision record 1](docs/decisions/0001-plain-node-and-sqlite.md)). I kept this from the gym because the course machine is one small Fly instance with one volume, and a trip planner's data is small. The cost is hand-written routing and DOM code, and the gain is no runtime dependencies to audit or update. Real-time is server-sent events from an in-process hub ([ADR 0003](docs/decisions/0003-sse-snapshots-and-versioned-edits.md)): edits are ordinary requests, so the stream needs no protocol of its own and reuses cookie authorisation. That holds only while Fly runs one machine. Google Places and Routes are called only on the server and only on intent (a click, a button), because they're billed per request and their terms limit what may be stored.
+## Why this stack
 
-## How I work with the agent
+I kept Node 24's HTTP server, built-in SQLite, TypeScript run by type stripping, and a small client made from browser modules ([ADR 0001](docs/decisions/0001-plain-node-and-sqlite.md)).
 
-Each pass starts from a long prompt I write: what to build, what not to touch (keys, Fly secrets, unrelated features), what to verify, and that nothing is pushed or deployed without my approval. Before choices that change the product, the agent stops and asks. My answers become rules in `CLAUDE.md` in the same commit, so they hold in later sessions. Every UI change is checked in a real browser at 1920×1080 and 390×844, and every testable promise goes into `spec/`. For Crit 9 I also had a separate session audit the deployed site without trusting the build session's results.
+The course gives me one small Fly machine and one persistent volume. SQLite fits a few friends planning tens of stops, and avoiding a large framework leaves fewer moving parts. The costs are routes and DOM behaviour that I must maintain myself, and a single-machine assumption I cannot ignore.
 
-## What good means, and where it lives
+The later OpenAI integration introduced an SDK, so the initial "no dependencies" argument is no longer literally true ([`b20fc88`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b20fc8895863ef981768b88a3609030ff23ea226)).
 
-`README.md` argues what good means: planning by touching the map and timeline, one shared plan, truthful travel data, an AI that suggests while people decide, and private trips. `CLAUDE.md` turns that into rules, and `spec/` checks the testable parts: outsiders get 404, retried adds don't duplicate, stale edits are refused, changes reach another real browser within a second. Whether planning feels direct is judged, not tested.
+Google Places and Routes remain server-side and are fetched on demand: travel times should come from a real route, not something the model invents.
 
-The README's sources pull in two directions. Shirky, Sloan and Shneiderman support building for one small group, acted on directly. Fowler supports refusing stale edits. Local-first software argues for offline editing and automatic merging. I agree with its aim of never losing someone's work, but for a few people planning short fields together I chose one copy on the server and a visible choice instead. Figma's server authority is close to mine, except that it lets the last writer win.
+## From real-time to accountable collaboration
 
-## The multi-user decision
+Crit 9 asked whether edits could arrive together. I chose HTTP writes plus server-sent events, carrying whole-trip snapshots and increasing revisions ([ADR 0003](docs/decisions/0003-sse-snapshots-and-versioned-edits.md)).
 
-The decision I wrote down is what happens when two people change the same thing ([ADR 0003](docs/decisions/0003-sse-snapshots-and-versioned-edits.md)). The options were last-write-wins, optimistic versions, and automatic merging (CRDTs or operational transformation). Last-write-wins silently overwrites a collaborator, which breaks "one shared plan". Automatic merging is built for shared text, and a trip is short fields. So each edit carries the version it was based on. A stale one is refused with a 409, and the person chooses "Load their version" or "Save mine over theirs". The cost is a visible interruption where a merge might have been silent, and no offline editing.
+Polling would waste requests; WebSockets would introduce a second protocol for writes already handled by HTTP. Whole snapshots cost more bytes than diffs but let a reconnect recover from current state.
 
-Two further choices follow the same reasoning. The server decides order from times, so ordering never conflicts ([`3f27110`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3f27110)). Only the itinerary is shared live: someone else's change never moves your map, and where each person is looking is transient presence that is never saved ([`b4bb133`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b4bb133), [`3f27110`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3f27110)).
+An edit based on a stale version receives a 409, letting a person load the other edit or deliberately save over it. I rejected last-write-wins because quietly losing somebody's plan would contradict the product's purpose; automatic merging seemed excessive for short itinerary fields.
 
-## Corrections, and where they landed
+This was not correct merely because the browser appeared to work. A separate Crit 9 audit found that changing the starting point without a `baseVersion` bypassed a conflict check: the normal UI always supplied one, but a direct request could overwrite it.
 
-- **A gap review before the crit** ([`b4bb133`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b4bb133)) found three things the first build missed: a simultaneous start change silently replaced the other, a collaborator's edit reset everyone's map, and a route request reached a configuration check before the membership check. Version and access fixes have automated tests; map preservation was checked manually.
-- **A stray "false" in the UI** came from native DOM calls given a boolean. It was fixed at six call sites, and a spec check now fails on the pattern ([`a32c15b`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/a32c15b)).
-- **Reading versus scheduling.** I asked for a place's information to be kept apart from adding it, so nothing is shared until "Confirm & add" ([`19fbd1c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/19fbd1c)).
-- **The audit's find.** The server checked the start's version only when a request included it, so a request without it overwrote the start in production; only the editor, which always sends it, was protected. The field is now required. The new test failed against the old code with the audit's 200, and the rule is in `CLAUDE.md` ([`7278cfe`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/7278cfe)).
-- **Order by time.** Asked whether manual order or times should win, I chose times. That changed a README sentence and the product rules, and new tests caught the server answering in the old order ([`3f27110`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3f27110)).
+Requiring the field on the server, with a regression test, corrected the assumption ([`7278cfe`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/7278cfee5dd14cadd063479a29bf3774b0465841)).
 
-## Evidence
+The same period clarified what should *not* be shared: another person's edit updates my itinerary, not my map camera; the place their map is viewing is transient presence, never a saved stop ([`b4bb133`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b4bb133); [`3f27110`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/3f27110)).
 
-The checks pass locally and in CI: 110 tests at [`54c282e`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/54c282e). Earlier manual measurements on production put healthy sync at medians of 30–42 ms ([`c8b258c`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/c8b258c)). The independent audit of [`54c282e`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/54c282e), with two Chrome sessions on the live site, saw:
+Crit 10 raised a different question: could the server tell *which person* changed something, and whether they had the right?
 
-- 28–45 ms for adds, retimes, deletes, start changes and edits;
-- 409s with both resolutions working;
-- 404 after a collaborator was removed;
-- after a real network drop, recovery 2057 ms after the connection returned.
+My first instinct about a share link was too permissive. Anyone could forward it, so possession could not mean that the owner intended to invite that account.
 
-These are small samples, not guarantees. Details and screenshots are in [`docs/crit-9-notes.md`](docs/crit-9-notes.md).
+A 24-hour expiry reduces the lifetime of a leaked link but does not solve that identity problem. I therefore separated a link from permission: it allows a signed-in person to request access, and the owner approves or refuses that particular account.
 
-## Limitations
+Links are stored as hashes, expire after 24 hours, and old permanent links are disabled ([`1f973dd`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/1f973dda60f0d606893cb61ef8866be0b47bad77); [permissions](docs/permissions.md)).
 
-- Recovery after a production restart is untested.
-- Keeping your map still during others' edits, and the edge arrows, were checked by hand only.
-- My Trips photos cover template trips and those near a curated city.
-- There are no view-only links.
-- The AI copilot hasn't been run with a real key.
-- Nobody outside the project has planned a trip with it yet.
+The same change made roles explicit. The owner controls membership, overall trip settings, publishing and deletion. Collaborators can add stops and change only stops they created.
 
-Next time I would do two things earlier. First, I'd judge how much the screen shows: with the Google map in place, the editor felt busier, not clearer, and I expect to simplify what the map shows. Second, I'd decide how each new service's keys are stored before adding it, not afterwards. Wayline's keys ended up in a git-ignored `.env` and Fly secrets.
+Non-members cannot read a private trip, including its SSE stream; removing someone also closes their existing stream.
+
+These checks live in `src/permissions.ts`, not just in disabled buttons. This restricts some useful flexibility, but it gives an owner a defensible boundary rather than assuming that everybody who can see a plan can rewrite it ([`1f973dd`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/1f973dda60f0d606893cb61ef8866be0b47bad77); [`spec/permissions.test.ts`](spec/permissions.test.ts)).
+
+## Making behaviour visible
+
+For Crit 10 I asked for structured, server-side JSON logs that resolve identity from the existing session cookie; a separate anonymous identity system would only create disagreement between HTTP actions and SSE connections.
+
+The logger uses request context to attach a user, request ID and trip ID to meaningful actions.
+
+It distinguishes an added stop, an approval, a denied deletion and the broadcast caused by an edit.
+
+It deliberately omits rapid map-view updates and keep-alives: logging everything would bury the events I need to narrate.
+
+Tokens, cookies, notes and coordinates are excluded ([`1f973dd`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/1f973dda60f0d606893cb61ef8866be0b47bad77); [logging design](docs/logging.md)).
+
+The point is not a pretty dashboard; it is evidence I can follow from a person's click to the server's decision.
+
+## Keeping reuse separate from permission
+
+Publishing introduced another distinction.
+
+An owner can publish a read-only snapshot; another person using it creates an independent private fork, not membership of the original trip.
+
+Reviews attach to the publication, not its forks.
+
+This adds product scope beyond the Crit 10 minimum, but it prevents a public example from becoming a back door into somebody else's working plan ([`1f973dd`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/1f973dda60f0d606893cb61ef8866be0b47bad77)).
+
+The new AI planner follows the same principle: it drafts one day using user preferences and Google-backed candidates, previews exact changes, and applies only after confirmation and a fresh permission/version check ([`b20fc88`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/b20fc8895863ef981768b88a3609030ff23ea226); [AI design](docs/ai.md)). Real-API testing exposed two faults: a silent car trip where transit had no route, and no restaurants for a vegetarian ([`a005e90`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/a005e90)).
+
+## How I direct and check the agent
+
+I work through prompts that specify the behaviour, constraints, and what the agent must not change.
+
+After reviewing an implementation, I revise assumptions rather than treating a passing build as an answer.
+
+The forwarded-link problem is a case where the feature could work mechanically but the product rule was wrong.
+
+I carried the revised rule into `CLAUDE.md`, put its observable consequences into `spec/permissions.test.ts`, and documented the roles for a future reviewer.
+
+The README argues for one truthful shared plan; the agent rules constrain changes; the tests try to catch violations. These are three different jobs, not three copies of a feature list.
+
+The earlier Crit 9 production audit measured live sync and a network-drop recovery with two browsers ([`54c282e`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/54c282e5dee07c4efce667af0177be8cb9eaa10f); [audit notes](docs/crit-9-notes.md)).
+
+For Crit 10, the repository contains tests for the invite and permission lifecycle and a two-browser join-and-edit path. A scripted check on the deployed site confirmed an approved join, a refused deletion and an AI plan ([notes](docs/crit-10-notes.md)), but classmates have not yet exercised it.
+
+I still need to tail Fly logs beside two independent Chrome profiles and observe what happens when the second person attempts an owner-only action.
+
+Logs will help diagnose a failure; they cannot replace that test.
+
+My unresolved constraints are the one-machine SSE hub and SQLite budget counters, uncertain behaviour across production restarts, and AI cost controls that depend on provider-side limits as well as the app's own.
+
+The lesson from this iteration is that a convincing shared screen needs boundaries and instruments behind it.
