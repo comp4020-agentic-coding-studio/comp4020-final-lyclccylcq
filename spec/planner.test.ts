@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildDraft, type Candidate, chooseMode, hardConstraints, planInput, roomFor, searchTypes } from "../src/planner.ts";
+import { buildDraft, type Candidate, chooseMode, freeSlots, hardConstraints, missingMeals, planInput, roomFor, searchTypes, toCandidates } from "../src/planner.ts";
 import { DEFAULT_FOOD, DEFAULT_TRAVEL, type Effective } from "../src/preferences.ts";
 import type { Day } from "../src/trips.ts";
 import { addActivity, newTrip, share, signUp, startApp, stubProvider, text } from "./helpers.ts";
@@ -27,7 +27,7 @@ const day = (): Day => ({
   segments: [{ id: "s1", fromId: "opera", toId: "a", options: [route("WALK", 25), route("TRANSIT", 12, 2), route("DRIVE", 8)], selectedMode: "WALK", computedAt: 0, departKey: "", stale: false }] as never,
   analysis: { gaps: [], issues: [], proposals: [] } as never,
 });
-const cand = (id: string, kind: "food" | "attraction", priceLevel: string | null = null): Candidate => ({ placeId: id, name: `Place ${id}`, category: kind === "food" ? "Restaurant" : "Museum", lat: -33.87, lng: 151.2, kind, distanceKm: 0.4, priceLevel, source: "google" });
+const cand = (id: string, kind: "food" | "attraction", priceLevel: string | null = null): Candidate => ({ placeId: id, name: `Place ${id}`, category: kind === "food" ? "Restaurant" : "Museum", lat: -33.87, lng: 151.2, kind, distanceKm: 0.4, detourKm: 0.3, priceLevel, rating: 4.5, ratingCount: 800, source: "google" });
 
 describe("preferences shape the plan", () => {
   it("never sends allergy text to the model, only that a constraint exists", () => {
@@ -46,6 +46,14 @@ describe("preferences shape the plan", () => {
     expect(chooseMode(opts, prefs({ travel: { avoidModes: ["DRIVE"], maxWalkMin: 30 } }))).toBe("TRANSIT"); // 12 min beats a 25-min walk
     expect(chooseMode([route("WALK", 20), route("TRANSIT", 12, 3)] as never, prefs({ travel: { fewerTransfers: true } }))).toBe("WALK"); // 12 + 2 extra transfers × 10 > 20
     expect(chooseMode([route("DRIVE", 5)] as never, prefs({ travel: { avoidModes: ["DRIVE"] } }))).toBeNull();
+    // transit preferred, but Google has no transit route and the walk is long: still not a car, and the plan says why
+    const noTransit = [route("WALK", 107), { mode: "TRANSIT", status: "error", message: "none" }, route("DRIVE", 18)] as never;
+    expect(chooseMode(noTransit, prefs({ travel: { transport: "transit", maxWalkMin: 20 } }))).toBe("WALK");
+    expect(chooseMode(noTransit, prefs({ travel: { transport: "drive" } }))).toBe("DRIVE");
+    const d = day();
+    d.segments = [{ id: "sx", fromId: "a", toId: "b", options: noTransit, selectedMode: "DRIVE", computedAt: 0, departKey: "", stale: false }] as never;
+    const draft = buildDraft({ summary: "x", order: [], suggestions: [], caveats: [] }, d, prefs({ travel: { transport: "transit", maxWalkMin: 20 } }), []);
+    expect(draft.caveats[0]).toBe("Google found no public transport route from Gallery to Rocks, so this plan uses walking there.");
   });
 
   it("fits the number of suggestions to the pace", () => {
@@ -83,6 +91,43 @@ describe("preferences shape the plan", () => {
     expect(adds[0].warning).toMatch(/can't confirm allergens/);
     expect(draft.caveats.join(" ")).toMatch(/Ask each restaurant/);
     expect(draft.preferences.hard.join(" ")).toMatch(/Allergies \(peanuts\)/);
+  });
+
+  it("finds free time after Google travel, and meals the day spans with nowhere to eat", () => {
+    const d = day();
+    d.activities = [act("zoo", "Taronga Zoo", 540, { durationMin: 180 }), act("bondi", "Bondi Beach", 900, { durationMin: 120 })] as never;
+    d.segments = [{ id: "s", fromId: "zoo", toId: "bondi", options: [route("TRANSIT", 50)], selectedMode: "TRANSIT", computedAt: 0, departKey: "", stale: false }] as never;
+    // 12:00 zoo ends; 15:00 Bondi starts; 50 min of transit leaves 12:00–14:10 free
+    expect(freeSlots(d)).toEqual([{ afterActivityId: "zoo", from: 720, to: 850 }, { afterActivityId: "bondi", from: 1020, to: 1260 }]);
+    expect(missingMeals(d)).toEqual(["lunch"]);
+    d.activities.push(act("lunch", "Lunch", 750, { kind: "food" }) as never);
+    expect(missingMeals(d)).toEqual([]);
+  });
+
+  it("places a suggestion in free time that fits it, and leaves it untimed otherwise", () => {
+    const d = day();
+    d.activities = [act("zoo", "Taronga Zoo", 540, { durationMin: 180 }), act("bondi", "Bondi Beach", 780, { durationMin: 120 })] as never;
+    d.segments = [];
+    const draft = buildDraft(
+      { summary: "Lunch near the zoo.", order: [], suggestions: [{ placeId: "r1", afterActivityId: "zoo", reason: "rated 4.5 by 800 people, 0.3 km off the route" }], caveats: [] },
+      d,
+      prefs({ travel: { pace: "balanced" } }),
+      [cand("r1", "food")],
+    );
+    const add = draft.changes.find((c) => c.type === "add") as any;
+    expect(add).toMatchObject({ startMin: 720 }); // 12:00–13:00: a 60-min balanced meal just fits
+    const relaxed = buildDraft({ summary: "x", order: [], suggestions: [{ placeId: "r1", afterActivityId: "zoo", reason: "" }], caveats: [] }, d, prefs({ travel: { pace: "intensive" } }), [cand("r1", "food")]);
+    expect((relaxed.changes.find((c) => c.type === "add") as any).startMin).toBe(720); // a 45-min meal fits 12:00–13:00
+  });
+
+  it("ranks candidates by Google rating backed by reviews and closeness, and drops places already planned", () => {
+    const d = day();
+    const near = { lat: -33.857, lng: 151.215 };
+    const place = (id: string, rating: number | null, ratingCount: number | null, lat = near.lat) => ({ placeId: id, name: id, address: "", lat, lng: near.lng, category: "Restaurant", types: [], source: "google" as const, distanceKm: 0, rating, ratingCount, priceLevel: null });
+    const out = toCandidates([{ kind: "food", places: [place("few-reviews", 5, 3), place("solid", 4.6, 2400), place("p-opera", 4.9, 9000), place("far", 4.8, 3000, -33.95)] }], d, near);
+    expect(out.map((c) => c.placeId)).toEqual(["solid", "far", "few-reviews"]); // p-opera is already in the plan
+    expect(out[0]).toMatchObject({ rating: 4.6, ratingCount: 2400 });
+    expect(out[0].detourKm).toBeLessThan(1);
   });
 
   it("ignores an order that isn't exactly the untimed stops, and adds nothing when the pace has no room", () => {

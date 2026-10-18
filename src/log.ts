@@ -65,6 +65,9 @@ export function note(fields: Fields): void {
 
 export const notes = (): Fields => store.getStore()?.notes ?? {};
 
+// Field names that may hold a secret are dropped. Counts of model tokens
+// (inputTokens, outputTokens, tokensCounted) are usage numbers, not secrets.
+const USAGE_KEY = /^(input|output|reserved)Tokens$|^tokens(Counted|PerDay)$/;
 const SECRET_KEY = /pass(word)?|token|secret|cookie|authorization|api_?key|credential|sdp|candidate/i;
 const SECRET_TEXT: [RegExp, string][] = [
   [/AIza[0-9A-Za-z_-]{20,}/g, "[redacted-key]"],
@@ -98,7 +101,7 @@ function write(level: Level, event: string, fields: Fields): void {
     if (c) entry.requestId = c.requestId;
     for (const [k, v] of Object.entries(fields)) {
       if (k in entry && k !== "requestId") continue;
-      if (v === undefined || SECRET_KEY.test(k)) continue;
+      if (v === undefined || (SECRET_KEY.test(k) && !USAGE_KEY.test(k))) continue;
       entry[k] = v;
     }
     const line = `${JSON.stringify(entry)}\n`;

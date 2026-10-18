@@ -237,7 +237,8 @@ export type NearbyPlace = PlaceSummary & {
 
 // rich: the editor's map-click list, which also shows rating and a small
 // photo per place (Google's photo credit comes with it and must be shown).
-// withPrice: also Google's price level (the AI planner's candidates), never estimated
+// withPrice: also Google's price level, rating and review count (the AI
+// planner's candidates); never estimated
 export async function nearbyPlaces(center: LatLng, radiusM: number, type: string, { rich = false, withPrice = false } = {}): Promise<{ source: "google" | "demo"; places: NearbyPlace[] }> {
   const withDistance = (list: PlaceSummary[]) =>
     list.map((p) => ({ ...p, distanceKm: Math.round(haversineKm(center, p) * 10) / 10 })).sort((a, b) => a.distanceKm - b.distanceKm);
@@ -249,14 +250,20 @@ export async function nearbyPlaces(center: LatLng, radiusM: number, type: string
   const types = FOOD_TYPES.has(type) ? { includedPrimaryTypes: [type] } : { includedTypes: [type] };
   const data = await google(`${PLACES()}/v1/places:searchNearby`, {
     method: "POST",
-    fieldMask: (rich ? `${LIST_MASK},places.rating,places.userRatingCount,places.photos` : LIST_MASK) + (withPrice ? ",places.priceLevel" : ""),
+    fieldMask: (rich ? `${LIST_MASK},places.rating,places.userRatingCount,places.photos` : LIST_MASK) + (withPrice ? `,places.priceLevel${rich ? "" : ",places.rating,places.userRatingCount"}` : ""),
     body: { ...types, maxResultCount: rich ? 10 : 12, rankPreference: "POPULARITY", locationRestriction: circle(center, radiusM) },
   });
   // Google's popularity order is kept; distance is shown, not used to re-sort.
   const raw = (Array.isArray(data.places) ? data.places : []).filter((p: any) => Number.isFinite(Number(p.location?.latitude)));
   const places: NearbyPlace[] = raw.map((p: any) => {
     const s = toSummary(p);
-    return { ...s, distanceKm: Math.round(haversineKm(center, s) * 10) / 10, ...(withPrice ? { priceLevel: PRICE[p.priceLevel] ?? null } : {}) };
+    return {
+      ...s,
+      distanceKm: Math.round(haversineKm(center, s) * 10) / 10,
+      ...(withPrice
+        ? { priceLevel: PRICE[p.priceLevel] ?? null, rating: typeof p.rating === "number" ? p.rating : null, ratingCount: typeof p.userRatingCount === "number" ? p.userRatingCount : null }
+        : {}),
+    };
   });
   if (!rich) return { source: "google", places };
   await Promise.all(

@@ -444,7 +444,30 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     if (!planner.configured) return json(res, 503, { configured: false, error: "AI planning isn't available on this server. Planning by hand still works." });
     const prefs = preferences.effective(user.id, tripId);
     if (!prefs.confirmed) return json(res, 409, { code: "preferences", error: "Set your travel preferences first.", effective: prefs });
-    const centre = dayCentre(day, snap.center);
+    // Real travel times first: legs between consecutive routable stops that
+    // have no Google route yet are calculated through the ordinary
+    // (deduplicated, cached) route path, at most six per plan. A leg Google
+    // can't route stays "not calculated"; nothing is estimated.
+    const routable = (a: (typeof day.activities)[number]) => a.place?.source === "google" || (a.place?.source === "custom" && a.place.lat !== null);
+    const missing = googleConfigured()
+      ? day.activities.slice(0, -1).flatMap((a, i) => {
+          const b = day.activities[i + 1];
+          const seg = day.segments.find((s) => s.fromId === a.id && s.toId === b.id);
+          return routable(a) && routable(b) && (!seg || seg.stale) ? [[a.id, b.id]] : [];
+        }).slice(0, 6)
+      : [];
+    let routed = 0;
+    for (const [fromId, toId] of missing) {
+      try {
+        await calculateRoute(user, tripId, { fromId, toId });
+        routed++;
+      } catch {
+        // left uncalculated; the preview says so
+      }
+    }
+    const fresh = routed ? trips.view(user.id, tripId) : snap;
+    const planDay = fresh.days.find((d) => d.id === day.id) ?? day;
+    const centre = dayCentre(planDay, fresh.center);
     let candidates: Candidate[] = [];
     let candidateNote: string | null = null;
     if (!centre) candidateNote = "This day has no places on the map yet, so there's nothing nearby to suggest.";
@@ -452,7 +475,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     else {
       // one Places request per type, at most four; a failure leaves that type out rather than guessing
       const groups = await Promise.all(searchTypes(prefs).map(async (t) => ({ kind: t.kind, places: (await nearbyPlaces(centre, 2500, t.type, { withPrice: true }).catch(() => ({ places: [] }))).places })));
-      candidates = toCandidates(groups, day, centre);
+      candidates = toCandidates(groups, planDay, centre);
       if (!candidates.length) candidateNote = "Google found no new places near this day to suggest.";
     }
     const ac = new AbortController();
@@ -460,13 +483,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
       if (!res.writableEnded) ac.abort();
     });
     try {
-      const draft = await planner.plan({ userId: user.id, tripId, day, prefs, candidates });
+      const draft = await planner.plan({ userId: user.id, tripId, day: planDay, prefs, candidates });
       if (candidateNote) draft.caveats.unshift(candidateNote);
+      if (routed) draft.caveats.unshift(`Calculated ${routed} travel time${routed === 1 ? "" : "s"} with Google Maps for this plan.`);
+      if (missing.length > routed) draft.caveats.unshift(`${missing.length - routed} travel time${missing.length - routed === 1 ? "" : "s"} couldn't be calculated, so ${missing.length - routed === 1 ? "that leg isn't" : "those legs aren't"} planned around.`);
       const id = shortId("plan");
       const t = Date.now();
       for (const [k, v] of drafts) if (t - v.at > DRAFT_TTL_MS) drafts.delete(k);
       drafts.set(id, { userId: user.id, tripId, draft, at: t });
-      note({ dayId: day.id, changes: draft.changes.length });
+      note({ dayId: day.id, changes: draft.changes.length, routesCalculated: routed, candidates: candidates.length });
       return json(res, 200, { draftId: id, ...draft });
     } catch (err) {
       const status = (err as { status?: number }).status;
