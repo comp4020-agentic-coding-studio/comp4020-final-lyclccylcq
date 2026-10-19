@@ -12,7 +12,9 @@ const PHOTOS: Record<string, { src: string; w: number; h: number; alt: string; a
 
 describe("destination photos", () => {
   it("has a photo for every curated itinerary and destination", () => {
-    for (const t of CURATED) expect(PHOTOS[`tpl-${t.slug}`], t.slug).toBeTruthy();
+    // an itinerary may borrow its city's photo (SHARED_COVERS), never a missing one
+    const shared: Record<string, string> = JSON.parse(`{${src.slice(src.indexOf("export const SHARED_COVERS = {") + "export const SHARED_COVERS = {".length, src.indexOf("\n};", src.indexOf("SHARED_COVERS")))}}`.replace(/,\s*}$/, "}"));
+    for (const t of CURATED) expect(PHOTOS[`tpl-${t.slug}`] ?? PHOTOS[shared[`tpl-${t.slug}`]], t.slug).toBeTruthy();
     for (const d of DESTINATIONS) expect(PHOTOS[`dest-${d.id}`], d.id).toBeTruthy();
   });
 
@@ -40,5 +42,52 @@ describe("destination photos", () => {
       expect(await r.text(), bad).not.toMatch(/createServer|"devDependencies"/);
     }
     expect((await fetch(new URL("/credits", baseUrl))).status).toBe(200);
+  });
+});
+
+// The homepage hero's clips: licensed, credited, self-hosted, with a poster,
+// and served so a video player can ask for byte ranges.
+describe("hero video clips", async () => {
+  const vsrc = readFileSync("public/media.js", "utf8");
+  const start = vsrc.indexOf("export const HERO_CLIPS = [") + "export const HERO_CLIPS = ".length;
+  const CLIPS: { city: string; mp4: string; webm: string; poster: string; author: string | null; license: string; licenseUrl: string; page: string }[] = JSON.parse(vsrc.slice(start, vsrc.indexOf("\n];", start) + 2).replace(/,\s*]$/, "]"));
+
+  it("credits each clip with a free license and its Commons page, and ships every file", () => {
+    expect(CLIPS.length).toBeGreaterThan(0);
+    for (const c of CLIPS) {
+      expect(c.license, c.city).toMatch(/^(CC0|Public domain|CC BY(-SA)? \d\.\d( [A-Z]{2})?)$/); // a ported licence names its country
+      if (c.license !== "CC0" && c.license !== "Public domain") expect(c.author, c.city).toBeTruthy();
+      expect(c.licenseUrl, c.city).toMatch(/^https:\/\/creativecommons\.org\//);
+      expect(c.page, c.city).toMatch(/^https:\/\/commons\.wikimedia\.org\/wiki\/File:/);
+      for (const f of [c.mp4, c.webm, c.poster]) expect(existsSync(`public${f}`), f).toBe(true);
+    }
+  });
+
+  it("rotates the chosen places, starting with a bright still (October 2026)", () => {
+    // Seoul, Tokyo and Kyoto were replaced for low quality; their photos stay
+    expect(CLIPS.map((c) => c.city)).toEqual(["Sydney", "London", "Venice", "New York", "Landwasser Viaduct", "Paris", "Shanghai"]);
+    for (const gone of ["seoul", "tokyo", "kyoto"]) expect(existsSync(`public/video/hero-${gone}.mp4`), gone).toBe(false);
+  });
+
+  it("serves clips with byte ranges and a long cache, and nothing outside public/video", async () => {
+    const c = CLIPS[0];
+    const full = await fetch(new URL(c.mp4, baseUrl));
+    expect(full.status).toBe(200);
+    expect(full.headers.get("content-type")).toBe("video/mp4");
+    expect(full.headers.get("accept-ranges")).toBe("bytes");
+    expect(full.headers.get("cache-control")).toMatch(/max-age=\d+/);
+    const size = (await full.arrayBuffer()).byteLength;
+    const part = await fetch(new URL(c.mp4, baseUrl), { headers: { range: "bytes=0-99" } });
+    expect(part.status).toBe(206);
+    expect(part.headers.get("content-range")).toBe(`bytes 0-99/${size}`);
+    expect((await part.arrayBuffer()).byteLength).toBe(100);
+    const tail = await fetch(new URL(c.mp4, baseUrl), { headers: { range: "bytes=-10" } });
+    expect(tail.headers.get("content-range")).toBe(`bytes ${size - 10}-${size - 1}/${size}`);
+    expect((await fetch(new URL(c.mp4, baseUrl), { headers: { range: `bytes=${size}-` } })).status).toBe(416);
+    expect((await fetch(new URL(c.webm, baseUrl))).headers.get("content-type")).toBe("video/webm");
+    for (const bad of ["/video/../package.json", "/video/../src/server.ts", "/video/x/../../README.md"]) {
+      const r = await fetch(new URL(bad, baseUrl));
+      expect(await r.text(), bad).not.toMatch(/createServer|"devDependencies"/);
+    }
   });
 });

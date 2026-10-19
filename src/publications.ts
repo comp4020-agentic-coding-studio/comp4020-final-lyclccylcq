@@ -125,6 +125,10 @@ export function createPublications(db: DatabaseSync, trips: TripStore, now = () 
       ref: refOf(r, stops) ?? { lat: 0, lng: 0 },
       source: "user",
       featured: false,
+      // published trips stay out of the curated region browsing
+      destinationId: null,
+      country: null,
+      area: null,
       author: r.author_name === null || r.author_name === undefined ? "a former Wayline user" : String(r.author_name),
       cover: r.cover === null ? null : String(r.cover),
       rating: rating(String(r.id)),

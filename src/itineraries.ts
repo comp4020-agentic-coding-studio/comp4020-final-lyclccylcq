@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { CURATED, CURATED_VERSION, type Category, DESTINATIONS } from "./curated.ts";
+import { AREAS, CURATED, CURATED_VERSION, type Category, DESTINATIONS } from "./curated.ts";
 import { transaction } from "./db.ts";
 import { bad, notFound } from "./errors.ts";
 import { haversineKm, type LatLng } from "./geo.ts";
@@ -24,6 +24,10 @@ export type TemplateSummary = {
   source: "curated" | "user";
   featured: boolean;
   distanceKm?: number;
+  // the curated city it belongs to (nearest within 150 km), for browsing by region
+  destinationId: string | null;
+  country: string | null;
+  area: string | null;
 };
 
 export type TemplateStop = {
@@ -119,7 +123,14 @@ export function createItineraryStore(db: DatabaseSync, now = () => Date.now()) {
     return total;
   }
 
+  // the curated city an itinerary belongs to: the nearest within 150 km
+  function cityOf(ref: LatLng) {
+    const near = DESTINATIONS.map((d) => ({ d, km: haversineKm(d, ref) })).sort((a, b) => a.km - b.km)[0];
+    return near && near.km <= 150 ? near.d : null;
+  }
+
   function summary(r: Record<string, unknown>, stops = stopsOf(String(r.id))): TemplateSummary {
+    const city = cityOf({ lat: Number(r.ref_lat), lng: Number(r.ref_lng) });
     return {
       id: String(r.id),
       title: String(r.title),
@@ -132,6 +143,9 @@ export function createItineraryStore(db: DatabaseSync, now = () => Date.now()) {
       ref: { lat: Number(r.ref_lat), lng: Number(r.ref_lng) },
       source: r.source as "curated" | "user",
       featured: Number(r.featured) === 1,
+      destinationId: city?.id ?? null,
+      country: city?.country ?? null,
+      area: city?.area ?? null,
     };
   }
 
@@ -172,10 +186,15 @@ export function createItineraryStore(db: DatabaseSync, now = () => Date.now()) {
 
     destinations() {
       const all = publicRows().map((r) => summary(r));
-      return DESTINATIONS.map((d) => ({
-        ...d,
-        itineraries: all.filter((s) => haversineKm(d, s.ref) <= 150).length,
-      }));
+      return DESTINATIONS.map((d) => {
+        const mine = all.filter((s) => s.destinationId === d.id);
+        return { ...d, itineraries: mine.length, days: mine.length ? Math.max(...mine.map((s) => s.days)) : 0 };
+      });
+    },
+
+    // regions in display order, each with its countries, for the homepage filter
+    areas() {
+      return AREAS.map((area) => ({ area, countries: [...new Set(DESTINATIONS.filter((d) => d.area === area).map((d) => d.country))] }));
     },
 
     get(id: unknown): TemplateDetail {

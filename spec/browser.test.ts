@@ -204,14 +204,34 @@ describe.skipIf(!chromePath)("in a real browser", () => {
 // The homepage's discovery flow, end to end in a real browser.
 describe.skipIf(!chromePath)("homepage discovery in a real browser", () => {
   const cards = `[...document.querySelectorAll('#near .it-card:not(.skeleton) h3')].map(e => e.textContent)`;
+  const general = `[...document.querySelectorAll('#itineraries .it-card:not(.skeleton) h3')].map(e => e.textContent)`;
+
+  it("puts search and the map right under the hero, then photos, then ready-made trips", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1440, 900);
+    await page.geolocation(baseUrl, "denied");
+    await page.goto(new URL("/", baseUrl).href);
+    await page.waitFor(`${general}.length > 4 && document.querySelectorAll('.ps-tile').length > 0`);
+    const order = await page.eval<string[]>(`[...document.querySelector('main.home').children].filter(e => !e.hidden).map(e => e.id || e.className.split(' ')[0])`);
+    expect(order.slice(0, 4)).toEqual(["vh", "explore-map", "ps", "explore"]);
+    // the search sits in the map section, and the region filters sit with the cards they filter
+    expect(await page.eval(`Boolean(document.querySelector('#explore-map #dest-search') && document.querySelector('#explore .rx-tabs') && document.querySelector('#explore #itineraries'))`)).toBe(true);
+    // a region filters both the cities and the itineraries under it
+    await page.eval(`document.querySelector('.rx-tab[data-area="Europe"]').click()`);
+    await page.waitFor(`/Europe/.test(document.querySelector('#itineraries h3').textContent)`);
+    const areas = await page.eval<string[]>(`[...document.querySelectorAll('#itineraries .it-cover-dest')].map(e => e.textContent)`);
+    expect(areas.length).toBeGreaterThan(0);
+    expect(areas.every((d) => /Paris|London|Rome|Barcelona|Amsterdam/.test(d))).toBe(true);
+    expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  });
 
   it("uses the browser's location to recommend nearby itineraries, then previews one and comes back", async () => {
     const page = await browser!.newPage();
     await page.viewport(390, 844, true);
     await page.geolocation(baseUrl, { lat: -35.2835, lng: 149.1281 }); // central Canberra
     await page.goto(new URL("/", baseUrl).href);
-    await page.waitFor(`document.querySelector('.hero h1')?.textContent === 'Your next journey starts here.'`);
-    await page.waitFor(`${cards}.length > 4`); // general content before any location
+    await page.waitFor(`document.querySelector('.vh-title')?.textContent === 'Wayline'`);
+    await page.waitFor(`${general}.length > 4 && document.querySelector('#near').hidden`); // general content before any location
     await page.eval(`[...document.querySelectorAll('button')].find(b => b.textContent.includes('Use my location')).click()`);
     await page.waitFor(`document.querySelector('.chip-place') && ${cards}.length === 4`);
     expect(await page.eval(`document.querySelector('#near h2').textContent`)).toBe("Near you");
@@ -245,14 +265,18 @@ describe.skipIf(!chromePath)("homepage discovery in a real browser", () => {
     await page.waitFor(`/Tokyo/.test(document.querySelector('.chip-place')?.textContent ?? '') && ${cards}.length > 0`);
     const dest = await page.eval<string[]>(`[...document.querySelectorAll('#near .it-cover-dest')].map(e => e.textContent)`);
     expect(dest.every((d) => /Tokyo/.test(d))).toBe(true);
-  });
+    // the map below the search is now about the place, and offers a trip there
+    await page.waitFor(`/Plan a trip to Tokyo/.test(document.querySelector('#explore-map .xm-next')?.textContent ?? '') && /Tokyo/.test(document.querySelector('#explore-map .xm-note').textContent)`, 6000);
+    await page.eval(`[...document.querySelectorAll('#explore-map .xm-next button')].find(b => b.textContent.includes('Start a trip')).click()`);
+    await page.waitFor(`location.pathname === '/login'`); // signed out: sign in first, nothing created
+  }, 20_000);
 
   it("carries on without location when permission is denied, and doesn't ask again", async () => {
     const page = await browser!.newPage();
     await page.viewport(390, 844, true);
     await page.geolocation(baseUrl, "denied");
     await page.goto(new URL("/", baseUrl).href);
-    await page.waitFor(`${cards}.length > 4`);
+    await page.waitFor(`${general}.length > 4`);
     await page.eval(`window.__asks = 0; const g = navigator.geolocation.getCurrentPosition.bind(navigator.geolocation); navigator.geolocation.getCurrentPosition = (...a) => { window.__asks++; return g(...a); };`);
     const btn = `[...document.querySelectorAll('button')].find(b => b.textContent.includes('Use my location'))`;
     if (await page.eval<boolean>(`Boolean(${btn}) && !${btn}.hidden`)) {
@@ -261,7 +285,7 @@ describe.skipIf(!chromePath)("homepage discovery in a real browser", () => {
       if (await page.eval<boolean>(`Boolean(${btn}) && !${btn}.hidden`)) await page.eval(`${btn}.click()`);
     }
     expect(await page.eval<number>(`window.__asks`)).toBeLessThanOrEqual(1);
-    expect(await page.eval<number>(`${cards}.length`)).toBeGreaterThan(4); // general recommendations still shown
+    expect(await page.eval<number>(`${general}.length`)).toBeGreaterThan(4); // general recommendations still shown
     expect(await page.eval(`document.querySelector('#dest-search').disabled`)).toBe(false);
   });
 });
@@ -299,6 +323,7 @@ describe.skipIf(!chromePath)("explore places on the homepage map", () => {
 // First-visit location: offered, never forced, remembered, and kept apart from
 // the destination someone picks.
 describe.skipIf(!chromePath)("location on the homepage", () => {
+  const general = `[...document.querySelectorAll('#itineraries .it-card:not(.skeleton) h3')].map(e => e.textContent)`;
   const chip = `document.querySelector('.chip-place')?.textContent ?? ''`;
   const promptShown = `Boolean(document.querySelector('.geo-prompt') && !document.querySelector('.geo-prompt').hidden)`;
   const cards = `[...document.querySelectorAll('#near .it-card:not(.skeleton) h3')].map(e => e.textContent)`;
@@ -307,12 +332,12 @@ describe.skipIf(!chromePath)("location on the homepage", () => {
     const page = await browser!.newPage();
     await page.viewport(390, 844, true);
     await page.goto(new URL("/", baseUrl).href);
-    await page.waitFor(`${cards}.length > 4`);
+    await page.waitFor(`${general}.length > 4`);
     await page.waitFor(promptShown);
     await page.eval(`[...document.querySelectorAll('.geo-prompt button')].find(b => b.textContent === 'Not now').click()`);
     expect(await page.eval(promptShown)).toBe(false);
     await page.goto(new URL("/", baseUrl).href);
-    await page.waitFor(`${cards}.length > 4`);
+    await page.waitFor(`${general}.length > 4`);
     await sleep(300);
     expect(await page.eval(promptShown)).toBe(false);
     expect(await page.eval(`[...document.querySelectorAll('button')].some(b => b.textContent.includes('Use my location') && !b.hidden && b.offsetParent)`)).toBe(true);
@@ -335,7 +360,7 @@ describe.skipIf(!chromePath)("location on the homepage", () => {
     expect(await page.eval(promptShown)).toBe(false);
 
     // a destination takes over without touching the current location
-    await page.eval(`[...document.querySelectorAll('.dest-card')].find(b => b.textContent.includes('Tokyo')).click()`);
+    await page.eval(`document.querySelector('#city-tokyo .rx-go').click()`);
     await page.waitFor(`/Exploring: ?Tokyo/.test(${chip})`);
     await page.waitFor(`[...document.querySelectorAll('#near .it-cover-dest')].length > 0 && [...document.querySelectorAll('#near .it-cover-dest')].every(e => /Tokyo|Kamakura/.test(e.textContent))`);
     const stored = await page.eval<any>(`JSON.parse(localStorage.getItem('wayline.location'))`);
@@ -354,14 +379,14 @@ describe.skipIf(!chromePath)("location on the homepage", () => {
     const page = await browser!.newPage();
     await page.viewport(1920, 1080);
     await page.goto(new URL("/", baseUrl).href);
-    await page.waitFor(`${cards}.length > 4 && document.querySelectorAll('.dest-card').length > 0`);
+    await page.waitFor(`${general}.length > 4 && document.querySelectorAll('.rx-card').length > 0`);
     await page.eval(`document.querySelectorAll('img.cover-img').forEach(i => (i.loading = 'eager'))`);
     await page.waitFor(`[...document.querySelectorAll('img.cover-img')].every(i => i.complete)`, 8000);
     const broken = await page.eval<number>(`[...document.querySelectorAll('img.cover-img')].filter(i => !i.naturalWidth).length`);
     expect(broken).toBe(0);
-    expect(await page.eval<number>(`document.querySelectorAll('#near .it-cover.has-photo .cover-credit a[href*="commons.wikimedia.org"]').length`)).toBe(await page.eval<number>(`document.querySelectorAll('#near .it-cover.has-photo').length`));
-    await page.eval(`document.querySelector('#near .it-cover .cover-img').src = '/img/covers/no-such-photo.jpg'`);
-    await page.waitFor(`!document.querySelector('#near .it-card .it-cover > img') || document.querySelectorAll('#near .it-cover > img').length < document.querySelectorAll('#near .it-cover').length`);
+    expect(await page.eval<number>(`document.querySelectorAll('#itineraries .it-cover.has-photo .cover-credit a[href*="commons.wikimedia.org"]').length`)).toBe(await page.eval<number>(`document.querySelectorAll('#itineraries .it-cover.has-photo').length`));
+    await page.eval(`document.querySelector('#itineraries .it-cover .cover-img').src = '/img/covers/no-such-photo.jpg'`);
+    await page.waitFor(`!document.querySelector('#itineraries .it-card .it-cover > img') || document.querySelectorAll('#itineraries .it-cover > img').length < document.querySelectorAll('#itineraries .it-cover').length`);
     expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
   });
 });

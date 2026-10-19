@@ -24,3 +24,6 @@ mise.local.toml
 
 # the local databases (production keeps them on the Fly volume at /data)
 data/
+
+# raw media downloads before resizing (the credits live in docs/media.md)
+.media-staging/

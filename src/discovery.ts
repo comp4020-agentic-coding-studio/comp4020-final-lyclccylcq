@@ -96,7 +96,7 @@ export function createDiscovery(deps: { itineraries: ItineraryStore; trips: Trip
       return ok({ itineraries: itineraries.featured({ category: parseCategory(p.get("category")), limit: parseBounded(p.get("limit"), "limit", 1, 20, 6) }) });
     }
     if (method === "GET" && path === "/api/itineraries/destinations") {
-      return ok({ destinations: itineraries.destinations() });
+      return ok({ destinations: itineraries.destinations(), areas: itineraries.areas() });
     }
     if (method === "GET" && path === "/api/itineraries/nearby") {
       const origin = parseLatLng(p.get("lat"), p.get("lng"));

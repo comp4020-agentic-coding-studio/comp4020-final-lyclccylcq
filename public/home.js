@@ -1,4 +1,5 @@
 import { createExploreMap } from "/explore-map.js";
+import { photoStream, streamItems, videoHero } from "/media.js";
 import { coverImg, photoCredit, photoFor } from "/photos.js";
 import { placeDialog } from "/places.js";
 import { api, dur, fmtRange, h, icon, km, relTime, uid } from "/ui.js";
@@ -97,6 +98,9 @@ export function renderHome(app, ctx) {
     active: -1,
     aborter: null,
     timer: null,
+    area: sessionStorage.getItem?.("wayline.area") ?? "all", // region filter, kept for this tab
+    country: null,
+    showAll: false, // "All destinations": every itinerary, not just the featured
   };
   const geoChoice = () => store.get(GEO_KEY);
   const geoDenied = () => geoChoice() === "denied";
@@ -137,35 +141,33 @@ export function renderHome(app, ctx) {
     ),
   );
 
-  const hero = h(
-    "section",
-    { class: "hero" },
+  // the cinematic hero: inspiration and two ways in, nothing to fill in
+  const hero = videoHero({
+    title: "Wayline",
+    tagline: "Plan together. Travel better.",
+    fallbackKey: "dest-paris",
+    actions: [
+      h("button", { class: "btn btn-primary btn-lg", type: "button", onclick: () => (me ? ctx.createTrip() : navigate("/login?next=/")) }, "Start planning"),
+      h("button", { class: "btn btn-ghost-light btn-lg", type: "button", onclick: () => regions.scrollIntoView({ behavior: "smooth" }) }, "Explore trips"),
+    ],
+  });
+
+  // search a destination or use your location: where nearby ideas come from
+  const finder = h(
+    "div",
+    { class: "finder" },
     h(
-      "div",
-      { class: "hero-inner" },
-      h("p", { class: "eyebrow" }, "Plan together, travel well"),
-      h("h1", {}, "Your next journey starts here."),
-      h("p", { class: "lede" }, "Find ready-made routes near you or wherever you're headed, preview them on the map, then copy one into a trip you plan with friends in real time."),
-      h(
-        "form",
-        { class: "hero-search", role: "search", onsubmit: (e) => { e.preventDefault(); pick(S.active >= 0 ? S.active : 0); } },
-        h("label", { for: "dest-search", class: "sr-only" }, "Search a destination"),
-        icon("search"),
-        input,
-        h("button", { class: "btn btn-primary", type: "submit" }, "Explore"),
-        list,
-      ),
-      geoPrompt,
-      h("div", { class: "hero-actions" }, geoBtn, placeChip),
-      status,
+      "form",
+      { class: "hero-search", role: "search", onsubmit: (e) => { e.preventDefault(); pick(S.active >= 0 ? S.active : 0); } },
+      h("label", { for: "dest-search", class: "sr-only" }, "Search a destination"),
+      icon("search"),
+      input,
+      h("button", { class: "btn btn-primary", type: "submit" }, "Explore"),
+      list,
     ),
-    h("div", { class: "hero-art-postcards", "aria-hidden": "true" }, [
-      ["Sydney", "Harbour walk", "cover-city-highlights", 200, "tpl-sydney-harbour-highlights"],
-      ["Canberra", "Lookouts", "cover-nature-outdoors", 140, "tpl-canberra-lookouts-gardens"],
-      ["Tokyo", "Asakusa", "cover-food-culture", 20, "tpl-tokyo-asakusa-ueno"],
-    ].map(([city, label, cls, hu, key], i) =>
-      h("div", { class: `postcard pc-${i} ${cls}${photoFor(key) ? " has-photo" : ""}`, style: `--hue:${hu}` }, coverImg(photoFor(key), { eager: true, decorative: true }), h("b", {}, city), h("span", {}, label)),
-    )),
+    geoPrompt,
+    h("div", { class: "hero-actions" }, geoBtn, placeChip),
+    status,
   );
 
   input.addEventListener("input", () => {
@@ -208,7 +210,7 @@ export function renderHome(app, ctx) {
     list.hidden = false;
     input.setAttribute("aria-expanded", "true");
     if (!S.suggestions.length) {
-      list.replaceChildren(h("li", { class: "suggest-empty" }, S.source === "demo" ? "Without Google configured, only Canberra, Sydney and Tokyo can be searched." : "No matching destinations."));
+      list.replaceChildren(h("li", { class: "suggest-empty" }, S.source === "demo" ? "Without Google configured, only Canberra, Sydney and Tokyo can be searched. The cities under Explore ready-made trips work too." : "No matching destinations."));
       return;
     }
     list.replaceChildren(
@@ -242,7 +244,8 @@ export function renderHome(app, ctx) {
       input.value = "";
       setDestination({ label: s.secondary ? `${s.main}, ${s.secondary.split(",").pop().trim()}` : s.main, lat: p.lat, lng: p.lng });
       status.textContent = "";
-      near.scrollIntoView({ behavior: "smooth", block: "start" });
+      // the map below the search moves there and lists its places
+      explore.el.querySelector(".xm-grid").scrollIntoView({ behavior: "smooth", block: "nearest" });
     } catch (err) {
       status.textContent = err.message;
     }
@@ -377,7 +380,8 @@ export function renderHome(app, ctx) {
   const nearSub = h("p", { class: "section-sub" });
   const chips = h("div", { class: "cat-chips", role: "group", "aria-label": "Filter by category" });
   const nearGrid = h("div", { class: "it-grid", "aria-live": "polite" });
-  const near = h("section", { class: "home-section", id: "near" }, h("div", { class: "section-head" }, h("div", {}, nearTitle, nearSub)), chips, nearGrid);
+  // ranked by the chosen place; with none, the region browser below stands in
+  const near = h("section", { class: "home-section near", id: "near" }, h("div", { class: "section-head" }, h("div", {}, nearTitle, nearSub)), chips, nearGrid);
 
   function renderChips() {
     chips.replaceChildren(
@@ -397,6 +401,7 @@ export function renderHome(app, ctx) {
     nearSub.textContent = S.place
       ? `Curated itineraries ranked by distance from ${S.place.source === "location" ? "where you are" : S.place.label}.`
       : "Use your location or search a destination to see itineraries near you. Meanwhile, here are all of Wayline's curated routes.";
+    near.hidden = !S.place;
     nearGrid.replaceChildren(...skeletons());
     try {
       if (!S.place) {
@@ -428,7 +433,7 @@ export function renderHome(app, ctx) {
       "div",
       { class: "empty-inline wide" },
       h("h3", {}, `Wayline doesn't have itineraries near ${S.place.label} yet`),
-      h("p", { class: "muted" }, "Curated routes currently cover Canberra, Sydney and Tokyo. Below are individual places nearby, not complete itineraries."),
+      h("p", { class: "muted" }, "Curated routes cover a set of cities across Europe, North America, East Asia and Oceania (see Explore ready-made trips). Below are individual places nearby, not complete itineraries."),
     );
     nearGrid.replaceChildren(intro);
     try {
@@ -468,46 +473,175 @@ export function renderHome(app, ctx) {
     }
   }
 
-  // --- the map ---
-  const explore = createExploreMap(ctx);
+  // what the region browser, the photo stream and the map's quick picks show
+  let D = { destinations: [], areas: [], itineraries: [] };
 
-  // --- explore destinations ---
-  const destGrid = h("div", { class: "dest-grid" });
-  const exploreDest = h(
+  // --- the map, with the destination search above it ---
+  const explore = createExploreMap(ctx, { finder, actions: placeActions, ideas: quickPicks });
+
+  // before anything is chosen: a few of Wayline's cities, one click each
+  // (the same as picking it in search; no Google request until the map moves)
+  function quickPicks() {
+    if (!D.destinations.length) return "";
+    return h(
+      "div",
+      {},
+      h("p", { class: "xm-ideas-title" }, "Or start with a city"),
+      h("div", { class: "xm-ideas" }, D.destinations.slice(0, 12).map((d) => h("button", { type: "button", class: "cat-chip", onclick: () => setDestination({ label: d.name, lat: d.lat, lng: d.lng }) }, d.name))),
+    );
+  }
+
+  // what to do with a chosen place: plan a trip there, or see what's ready-made
+  function placeActions(origin) {
+    const name = origin.source === "location" ? null : origin.label;
+    return h(
+      "div",
+      { class: "xm-next" },
+      h("p", { class: "xm-next-title" }, name ? `Plan a trip to ${name}` : "Plan a trip near you"),
+      h(
+        "div",
+        { class: "xm-next-actions" },
+        h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => ctx.createTrip(name ?? "") }, icon("plus"), "Start a trip"),
+        h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => near.scrollIntoView({ behavior: "smooth" }) }, "Ready-made itineraries"),
+      ),
+    );
+  }
+
+  // --- explore by region ---
+  // Global browsing by region and country, separate from "near you" (which
+  // only ever uses a place the visitor chose or a location they shared).
+  const AREA_ALL = "all";
+  const regionTabs = h("div", { class: "rx-tabs", role: "tablist", "aria-label": "Regions" });
+  const countryTabs = h("div", { class: "rx-countries", role: "group", "aria-label": "Countries", hidden: true });
+  const destGrid = h("div", { class: "rx-grid", "aria-live": "polite" });
+  const regions = h(
     "section",
-    { class: "home-section", id: "explore" },
-    h("div", { class: "section-head" }, h("div", {}, h("h2", {}, "Explore destinations"), h("p", { class: "section-sub" }, "Pick a city to see its itineraries, wherever you are now. Or search any city above."))),
+    { class: "home-section rx", id: "explore" },
+    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, "Curated by Wayline"), h("h2", {}, "Explore ready-made trips"), h("p", { class: "section-sub" }, "Itineraries the Wayline team wrote, by region. Open a city to see its routes, or preview one and copy it into your own trip."))),
+    h("div", { class: "rx-filters" }, regionTabs, countryTabs),
     destGrid,
   );
-  api("/api/itineraries/destinations")
-    .then(({ destinations }) =>
-      destGrid.replaceChildren(
-        ...destinations.map((d) => {
-          const photo = photoFor(`dest-${d.id ?? d.name.toLowerCase()}`);
-          return h(
-            "button",
-            { type: "button", class: `dest-card${photo ? " has-photo" : ""}`, style: `--hue:${hue(d.name)}`, onclick: () => { setDestination({ label: d.name, lat: d.lat, lng: d.lng }); near.scrollIntoView({ behavior: "smooth" }); } },
-            coverImg(photo, { decorative: true }),
-            h("span", { class: "dest-name" }, d.name),
-            h("span", { class: "dest-region" }, d.region),
-            h("span", { class: "dest-count" }, `${d.itineraries} itineraries`),
-          );
-        }),
+
+  const visibleDests = () => D.destinations.filter((d) => (S.area === AREA_ALL || d.area === S.area) && (!S.country || d.country === S.country));
+
+  function renderRegions() {
+    const tab = (value, label) =>
+      h("button", { type: "button", role: "tab", class: `rx-tab${S.area === value ? " on" : ""}`, "aria-selected": String(S.area === value), "data-area": value, onclick: () => setArea(value) }, label);
+    regionTabs.replaceChildren(tab(AREA_ALL, "All destinations"), ...D.areas.map((a) => tab(a.area, a.area)));
+    // a country filter only where a region has more than one country
+    const countries = D.areas.find((a) => a.area === S.area)?.countries ?? [];
+    countryTabs.hidden = countries.length < 2;
+    countryTabs.replaceChildren(
+      ...(countries.length < 2
+        ? []
+        : [null, ...countries].map((c) => h("button", { type: "button", class: `cat-chip${S.country === c ? " on" : ""}`, "aria-pressed": String(S.country === c), "data-country": c ?? "", onclick: () => { S.country = c; renderRegions(); renderStream(); renderFeatured(); } }, c ?? "All"))),
+    );
+    const list = visibleDests();
+    destGrid.replaceChildren(...(list.length ? list.map(destCard) : [h("p", { class: "muted" }, "No destinations here yet.")]));
+  }
+
+  function setArea(value) {
+    S.area = value;
+    S.country = null;
+    try { sessionStorage.setItem("wayline.area", value); } catch {}
+    renderRegions();
+    renderStream();
+    renderFeatured();
+  }
+
+  // a city: its photo, name, country, how long its itineraries run, and a way in
+  function destCard(d) {
+    const photo = photoFor(`dest-${d.id}`);
+    return h(
+      "article",
+      { class: "rx-card", id: `city-${d.id}`, "data-dest": d.id },
+      // the credit's links sit beside the button, not inside it
+      h(
+        "div",
+        { class: "rx-media" },
+        h("button", { type: "button", class: `rx-photo${photo ? " has-photo" : ""}`, style: `--hue:${hue(d.name)}`, "aria-label": `Show itineraries for ${d.name}`, onclick: () => openCity(d) }, coverImg(photo, { decorative: true })),
+        photoCredit(photo, { short: true }),
       ),
-    )
+      h(
+        "div",
+        { class: "rx-body" },
+        h("p", { class: "rx-country" }, d.country),
+        h("h3", {}, d.name),
+        h("p", { class: "rx-blurb" }, d.blurb),
+        h(
+          "p",
+          { class: "rx-meta" },
+          `${d.itineraries} ${d.itineraries === 1 ? "itinerary" : "itineraries"}`,
+          d.days ? ` · up to ${d.days} ${d.days === 1 ? "day" : "days"}` : "",
+        ),
+        h("button", { class: "linklike rx-go", type: "button", onclick: () => openCity(d) }, "See itineraries →"),
+      ),
+    );
+  }
+
+  // Opening a city shows its itineraries in the ideas list (like searching
+  // it). It changes only the chosen destination, never the visitor's location.
+  function openCity(d) {
+    setDestination({ label: d.name, lat: d.lat, lng: d.lng });
+    near.scrollIntoView({ behavior: "smooth" });
+  }
+
+  api("/api/itineraries/destinations")
+    .then(({ destinations, areas }) => {
+      D = { ...D, destinations, areas: areas ?? [] };
+      if (S.area !== AREA_ALL && !D.areas.some((a) => a.area === S.area)) S.area = AREA_ALL;
+      renderRegions();
+      renderStream();
+      explore.refresh();
+    })
     .catch((err) => destGrid.replaceChildren(h("p", { class: "form-error" }, err.message)));
 
-  // --- featured ---
-  const featGrid = h("div", { class: "it-grid" }, ...skeletons());
-  const featured = h(
-    "section",
-    { class: "home-section" },
-    h("div", { class: "section-head" }, h("div", {}, h("h2", {}, "Featured itineraries"), h("p", { class: "section-sub" }, "Hand-picked sample routes from the Wayline team."))),
-    featGrid,
-  );
-  api("/api/itineraries/featured?limit=4")
-    .then(({ itineraries }) => featGrid.replaceChildren(...itineraries.map((t) => itineraryCard(t, ctx))))
+  // --- travel photo stream ---
+  const streamHead = h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, "Travel stream"), h("h2", {}, "Moments from the road"), h("p", { class: "section-sub" }, "Every photo opens a real destination or itinerary.")));
+  const stream = photoStream([], { onCity: openCity, navigate });
+  const streamSection = h("section", { class: "ps", "aria-labelledby": "ps-h" }, h("div", { class: "home-section ps-head" }, streamHead), stream.el);
+  streamHead.querySelector("h2").id = "ps-h";
+  function renderStream() {
+    // Follows what the visitor picked (region, then country), never the
+    // hero's clips. Too few photos for a country: its region's; too few for
+    // the region: everywhere, so the row never looks empty.
+    const all = streamItems(D.destinations, D.itineraries);
+    const inArea = S.area === AREA_ALL ? all : all.filter((x) => x.dest.area === S.area);
+    const inCountry = S.country ? inArea.filter((x) => x.dest.country === S.country) : inArea;
+    stream.render(inCountry.length >= 4 ? inCountry : inArea.length >= 4 ? inArea : all);
+  }
+  api("/api/itineraries")
+    .then(({ itineraries }) => {
+      D = { ...D, itineraries };
+      renderStream();
+      renderFeatured();
+    })
+    .catch(() => {});
+
+  // --- itineraries for the region (under its cities, same filters) ---
+  // "All destinations": the featured ones, with a way to see every one. A
+  // region or country: every itinerary there. Never ranked by popularity.
+  const featTitle = h("h3", { class: "rx-sub" });
+  const featGrid = h("div", { class: "it-grid", "aria-live": "polite" }, ...skeletons());
+  const featMore = h("button", { class: "btn btn-ghost btn-sm", type: "button", hidden: true, onclick: () => { S.showAll = true; renderFeatured(); } }, "Show all itineraries");
+  const featured = h("div", { class: "rx-its", id: "itineraries" }, featTitle, featGrid, featMore);
+  let featuredIds = null;
+  api("/api/itineraries/featured?limit=8")
+    .then(({ itineraries }) => {
+      featuredIds = itineraries.map((t) => t.id);
+      renderFeatured();
+    })
     .catch((err) => featGrid.replaceChildren(h("p", { class: "form-error" }, err.message)));
+  function renderFeatured() {
+    if (!featuredIds || !D.itineraries.length) return;
+    const where = S.country ?? (S.area === AREA_ALL ? null : S.area);
+    const inPlace = D.itineraries.filter((t) => t.source !== "user" && (S.area === AREA_ALL || t.area === S.area) && (!S.country || t.country === S.country));
+    const list = where || S.showAll ? inPlace : featuredIds.map((id) => D.itineraries.find((t) => t.id === id)).filter(Boolean);
+    featTitle.textContent = where ? `Itineraries in ${where}` : S.showAll ? "All itineraries" : "Featured itineraries";
+    featGrid.replaceChildren(...(list.length ? list.map((t) => itineraryCard(t, ctx)) : [h("p", { class: "muted" }, "No itineraries here yet.")]));
+    featMore.hidden = Boolean(where || S.showAll) || inPlace.length <= list.length;
+    featMore.textContent = `Show all ${inPlace.length} itineraries`;
+  }
 
   // --- my trips ---
   const tripsBox = h("div", { class: "mini-trips" });
@@ -559,7 +693,9 @@ export function renderHome(app, ctx) {
     })
     .catch(() => {});
 
-  app.replaceChildren(ctx.topbar("home"), h("main", { class: "home" }, hero, explore.el, near, exploreDest, sharedSection, featured, myTrips), ctx.footer());
+  regions.append(featured);
+  // search first, then inspiration, then ready-made trips (near the chosen place, then by region)
+  app.replaceChildren(ctx.topbar("home"), h("main", { class: "home" }, hero.el, explore.el, streamSection, near, regions, sharedSection, myTrips), ctx.footer());
 
   S.place = activePlace();
   renderChips();
@@ -583,12 +719,15 @@ export function renderHome(app, ctx) {
     renderPrompt();
     renderPlaceChip();
   });
-  if (location.hash === "#explore") requestAnimationFrame(() => exploreDest.scrollIntoView());
-  if (location.hash === "#near") requestAnimationFrame(() => near.scrollIntoView());
+  if (location.hash === "#explore") requestAnimationFrame(() => regions.scrollIntoView());
+  if (location.hash === "#explore-map") requestAnimationFrame(() => explore.el.scrollIntoView());
+  // back from a preview: the list it came from (nearby when a place is chosen)
+  if (location.hash === "#near") requestAnimationFrame(() => (near.hidden ? regions : near).scrollIntoView());
 
   return () => {
     clearTimeout(S.timer);
     S.aborter?.abort();
     explore.destroy();
+    hero.destroy();
   };
 }

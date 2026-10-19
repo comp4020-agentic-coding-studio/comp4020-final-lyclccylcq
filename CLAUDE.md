@@ -64,6 +64,25 @@ contradict the README, stop and ask. Don't quietly change the product.
 - The homepage is public: anyone can browse curated itineraries, search
   destinations and preview. Trips, copying an itinerary and invites need an
   account.
+- Homepage order (October 2026 redesign, search first): video hero; "Where
+  would you like to go?" (destination search, the location offer and the
+  explore map, right under the hero); the photo stream; "Near you" / "Ideas
+  for …" (only once a place is chosen); "Explore ready-made trips" (region
+  tabs and country chips directly above the cities and itineraries they
+  filter); shared by travellers; My Trips. Nothing goes between the hero and
+  the map. Picking a destination keeps the page at the map, which moves
+  there and offers "Start a trip" (the new-trip form with the destination
+  filled in). Regions and countries come from the curated destinations
+  (`DESTINATIONS` in `src/curated.ts`, `areas()` in `src/itineraries.ts`);
+  published trips carry no region and never appear there. Opening a
+  destination card, a city photo or a quick pick sets the *destination*,
+  never the current location.
+- The hero and photo stream are decoration over a page that works without
+  them (`public/media.js`, `docs/media.md`): the poster shows first, video
+  never plays with reduced motion or Save-Data and pauses off screen, one
+  `<video>` decodes at a time, the stream's drift only runs on wide
+  hover-capable screens without reduced motion. Clips are self-hosted from
+  `public/video/`, served with byte ranges.
 - Curated itineraries are Wayline's own templates (`itinerary_templates`,
   `src/curated.ts`), labelled "Curated by Wayline". Never present them as
   user-generated, and never add ratings, view counts or popularity numbers to
@@ -102,10 +121,12 @@ contradict the README, stop and ask. Don't quietly change the product.
   places load on a map click (one request per category per click, reused when
   switching back); routes load when a route button is pressed. Public
   Google-backed endpoints are rate-limited per IP.
-- Cover photos for curated itineraries and destinations are freely licensed
-  Wikimedia Commons files, resized into `public/img/covers/` and listed in
-  `public/photos.js` with author, license and source page. Every one is
-  credited on its card or on `/credits`. Never hotlink or scrape images. A
+- Cover photos for curated itineraries and destinations, and the hero's
+  video clips, are freely licensed Wikimedia Commons files, resized into
+  `public/img/covers/` (clips into `public/video/`) and listed in
+  `public/photos.js` / `public/media.js` with author, license and source page
+  (`docs/media.md`). An itinerary without its own photo borrows its city's
+  (`SHARED_COVERS`). Every one is credited on its card or on `/credits`. Never hotlink or scrape images. A
   missing photo falls back to the gradient, never a broken image. My Trips
   cards use the same photos (`cover` from `trips.list`): the curated
   itinerary a trip was copied from (`dest_place_id` `tpl:`), else the curated
@@ -361,8 +382,8 @@ contradict the README, stop and ask. Don't quietly change the product.
   (erasable syntax only: no `enum`, no parameter properties, imports end in
   `.ts`). Client is hand-written HTML/CSS/JS modules in `public/` with no build
   step: `app.js` (routing, nav, auth, dashboard, join), `home.js` (the
-  discovery homepage), `preview.js` (itinerary preview), `places.js` (place
-  inspector), `editor.js` (the trip workspace), `map.js` (Google map or
+  discovery homepage), `media.js` (its video hero and photo stream),
+  `preview.js` (itinerary preview), `places.js` (place inspector), `editor.js` (the trip workspace), `map.js` (Google map or
   labelled schematic), `ui.js` (helpers). Server-side Google calls live only
   in `src/google.ts`, behind `src/discovery.ts` and the trip routes.
   **Add no runtime dependency without asking.** The one runtime dependency is

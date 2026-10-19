@@ -5,6 +5,8 @@ import { api, decodePolyline, dur, h, icon, km } from "/ui.js";
 // "Explore places": an interactive map of real places around the discovery
 // location. Individual places, never itineraries. Every Google call happens
 // on a click (a category, a search, a place, a route), never on render.
+// The homepage puts its destination search above the map (`finder`) and
+// supplies what to do with a chosen destination (`actions`).
 
 const CATEGORIES = [
   ["tourist_attraction", "Attractions"],
@@ -21,7 +23,7 @@ const MODES = [
   ["DRIVE", "Drive", "drive"],
 ];
 
-export function createExploreMap(ctx) {
+export function createExploreMap(ctx, { finder = null, actions = null, ideas = null } = {}) {
   const S = {
     origin: null, // { label, lat, lng, source }
     type: null,
@@ -39,12 +41,14 @@ export function createExploreMap(ctx) {
 
   const mapHost = h("div", { class: "map-host" });
   const side = h("aside", { class: "xm-side", "aria-live": "polite" });
-  const sub = h("p", { class: "section-sub" });
+  const sub = h("p", { class: "section-sub xm-note" });
   const el = h(
     "section",
     { class: "home-section", id: "explore-map" },
-    h("div", { class: "section-head" }, h("div", {}, h("h2", {}, "Explore places on the map"), sub)),
+    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, "Plan a trip"), h("h2", {}, "Where would you like to go?"), h("p", { class: "section-sub xm-lede" }, "Search a destination and start planning your trip."))),
+    finder,
     h("div", { class: "xm-grid" }, h("div", { class: "xm-map" }, mapHost), side),
+    sub,
   );
 
   createMap(mapHost, {
@@ -141,15 +145,24 @@ export function createExploreMap(ctx) {
   function render() {
     sub.textContent = S.origin
       ? `Places around ${S.origin.source === "location" ? "your location" : S.origin.label}${S.source === "demo" ? " (demo data: Google isn't configured)" : ", from Google Maps"}. These are individual places, not itineraries.`
-      : "Use your location or search a destination above, then browse attractions, restaurants and more around it.";
+      : "Search a destination (or use your location), then browse attractions, restaurants and more around it on the map.";
     paintMap();
     if (!S.origin) {
-      side.replaceChildren(h("div", { class: "empty-inline" }, h("p", {}, "Choose where to explore first: press “Use my location” or search a destination above.")));
+      side.replaceChildren(
+        h(
+          "div",
+          { class: "xm-start" },
+          h("p", { class: "xm-start-title" }, "Start with a place"),
+          h("p", { class: "muted small" }, "Search a city above. The map moves there and shows attractions, restaurants and more to add to a trip. No location needed."),
+          ideas?.() ?? "",
+        ),
+      );
       return;
     }
     if (S.selected) return side.replaceChildren(placePanel());
     const input = h("input", { type: "search", name: "q", placeholder: S.origin.source === "location" ? "Search places near you" : `Search places in ${S.origin.label}`, maxlength: 120, value: S.query, "aria-label": "Search places in this area" });
     side.replaceChildren(
+      actions?.(S.origin) ?? "",
       h("div", { class: "cat-chips xm-cats", role: "group", "aria-label": "Place type" }, CATEGORIES.map(([t, label]) => h("button", { type: "button", class: `cat-chip${S.type === t ? " on" : ""}`, "aria-pressed": String(S.type === t), onclick: () => showType(t) }, label))),
       h("form", { class: "xm-search", role: "search", onsubmit: (e) => { e.preventDefault(); search(input.value.trim()); } }, input, h("button", { class: "btn btn-dark btn-sm", type: "submit" }, "Search")),
       resultsList(),
@@ -254,6 +267,8 @@ export function createExploreMap(ctx) {
   render();
   return {
     el,
+    // the homepage's destinations arrived: redraw the panel's quick picks
+    refresh: () => !S.origin && render(),
     setOrigin(origin) {
       const changed = !S.origin || !origin || S.origin.lat !== origin.lat || S.origin.lng !== origin.lng;
       S.origin = origin;

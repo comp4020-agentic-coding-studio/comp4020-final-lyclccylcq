@@ -27,7 +27,7 @@ describe("itinerary recommendations", () => {
   });
 
   it("returns nothing for a point far from every itinerary", async () => {
-    const r = await nobody.get("/api/itineraries/nearby?lat=48.8566&lng=2.3522"); // Paris
+    const r = await nobody.get("/api/itineraries/nearby?lat=-1.2921&lng=36.8219"); // Nairobi: no curated city near
     expect(r.status).toBe(200);
     expect(r.data.itineraries).toEqual([]);
   });
@@ -64,7 +64,42 @@ describe("itinerary recommendations", () => {
     expect(f.data.itineraries.length).toBeGreaterThan(0);
     expect(f.data.itineraries.every((t: any) => t.featured && t.source === "curated")).toBe(true);
     const d = await nobody.get("/api/itineraries/destinations");
-    expect(d.data.destinations.map((x: any) => x.name)).toEqual(["Canberra", "Sydney", "Tokyo"]);
+    const names = d.data.destinations.map((x: any) => x.name);
+    expect(names).toEqual(expect.arrayContaining(["Canberra", "Sydney", "Tokyo", "Paris", "London", "New York", "Seoul", "Shanghai", "Melbourne"]));
+    // every destination says where it is, and has at least one itinerary
+    for (const x of d.data.destinations) {
+      expect(x).toMatchObject({ country: expect.any(String), area: expect.stringMatching(/^(Europe|North America|East Asia|Oceania)$/) });
+      expect(x.itineraries, x.name).toBeGreaterThan(0);
+    }
+    // regions in order, each listing its countries
+    expect(d.data.areas.map((a: any) => a.area)).toEqual(["Europe", "North America", "East Asia", "Oceania"]);
+    expect(d.data.areas.find((a: any) => a.area === "East Asia").countries.sort()).toEqual(["China", "Japan", "South Korea"]);
+  });
+
+  it("tags each curated itinerary with its city, country and region, for browsing", async () => {
+    const all = (await nobody.get("/api/itineraries")).data.itineraries;
+    expect(all.length).toBeGreaterThanOrEqual(25);
+    expect(new Set(all.map((t: any) => t.id)).size).toBe(all.length); // unique ids
+    expect(all.every((t: any) => t.source === "curated")).toBe(true); // published trips aren't mixed in
+    const seoul = all.find((t: any) => t.id === "tpl-seoul-palaces-markets");
+    expect(seoul).toMatchObject({ destinationId: "seoul", country: "South Korea", area: "East Asia", days: 2 });
+    // the old cities keep their ids and land in the right region
+    expect(all.find((t: any) => t.id === "tpl-tokyo-asakusa-ueno")).toMatchObject({ destinationId: "tokyo", area: "East Asia" });
+    expect(all.find((t: any) => t.id === "tpl-canberra-weekend")).toMatchObject({ destinationId: "canberra", area: "Oceania" });
+  });
+
+  it("copies a new city's two-day itinerary into a private trip, with its own time zone", async () => {
+    const c = await signUp(baseUrl);
+    const r = await c.send("POST", "/api/itineraries/tpl-paris-classic-weekend/copy", { startDate: "2026-12-05" });
+    expect(r.status).toBe(201);
+    expect(r.data).toMatchObject({ title: "Paris: The Classic Weekend", destination: "Paris", timezone: "Europe/Paris", startDate: "2026-12-05", endDate: "2026-12-06" });
+    expect(r.data.days).toHaveLength(2);
+    expect(r.data.members).toEqual([expect.objectContaining({ id: c.userId, role: "owner" })]);
+    // no invented place ids: unmatched stops stay curated approximations
+    for (const a of r.data.days.flatMap((d: any) => d.activities)) {
+      expect(["google", "curated"]).toContain(a.place.source);
+      if (a.place.source === "curated") expect(a.place.placeId.startsWith("tpl:")).toBe(true);
+    }
   });
 
   it("describes each itinerary with ordered stops and no invented Google data", async () => {
@@ -119,7 +154,8 @@ describe("Google-backed discovery without a key", () => {
     expect(near.data.source).toBe("demo");
     expect(near.data.places.every((p: any) => p.distanceKm <= 5)).toBe(true);
     expect((await nobody.get("/api/geo/reverse?lat=-35.30&lng=149.12")).data).toEqual({ label: "Near Canberra", source: "approximate" });
-    expect((await nobody.get("/api/geo/reverse?lat=48.85&lng=2.35")).data).toEqual({ label: "Your location", source: "approximate" });
+    expect((await nobody.get("/api/geo/reverse?lat=48.85&lng=2.35")).data).toEqual({ label: "Near Paris", source: "approximate" }); // a curated city now
+    expect((await nobody.get("/api/geo/reverse?lat=-1.29&lng=36.82")).data).toEqual({ label: "Your location", source: "approximate" }); // far from all of them
     const route = await nobody.send("POST", "/api/routes", { origin: { lat: -33.86, lng: 151.21 }, destination: { lat: -33.85, lng: 151.2 }, mode: "WALK" });
     expect(route.status).toBe(503);
     expect(route.data.durationSec).toBeUndefined();

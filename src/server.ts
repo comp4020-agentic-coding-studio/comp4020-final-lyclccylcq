@@ -99,6 +99,8 @@ const TYPES: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".webp": "image/webp",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
 };
 
 const BASE_HEADERS = {
@@ -115,15 +117,36 @@ function send(res: ServerResponse, status: number, body: string | Buffer, type: 
 const json = (res: ServerResponse, status: number, data: unknown, headers: Record<string, string | string[]> = {}): void =>
   send(res, status, JSON.stringify(data), "application/json; charset=utf-8", headers);
 
-// Files only by a plain name (no slashes, no dots up front), so nothing
-// outside the folder can be asked for.
-function serveFile(res: ServerResponse, dir: string, name: string): boolean {
-  if (!/^(img\/covers\/)?[\w-][\w.-]*$/.test(name)) return false;
+// Files only by a plain name (no slashes, no dots up front), under one of two
+// known folders at most, so nothing outside them can be asked for.
+function serveFile(res: ServerResponse, dir: string, name: string, range?: string): boolean {
+  if (!/^((img\/covers|video)\/)?[\w-][\w.-]*$/.test(name)) return false;
   const path = join(dir, name);
   if (!existsSync(path)) return false;
-  // photos don't change in place (a new photo gets a new name), so browsers may keep them
-  const cache: Record<string, string> = name.startsWith("img/") ? { "cache-control": "public, max-age=604800" } : {};
-  send(res, 200, readFileSync(path), TYPES[extname(name)] ?? "application/octet-stream", cache);
+  // media doesn't change in place (a new file gets a new name), so browsers may keep it
+  const media = name.startsWith("img/") || name.startsWith("video/");
+  const cache: Record<string, string> = media ? { "cache-control": "public, max-age=604800" } : {};
+  const type = TYPES[extname(name)] ?? "application/octet-stream";
+  const body = readFileSync(path);
+  // video players ask for byte ranges (Safari won't play without them)
+  if (name.startsWith("video/")) {
+    const m = range?.match(/^bytes=(\d*)-(\d*)$/);
+    if (m && (m[1] || m[2])) {
+      const size = body.length;
+      const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]));
+      const end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+      if (start > end || start >= size) {
+        res.writeHead(416, { ...BASE_HEADERS, "content-range": `bytes */${size}` });
+        return void res.end(), true;
+      }
+      res.writeHead(206, { ...BASE_HEADERS, ...cache, "content-type": type, "accept-ranges": "bytes", "content-range": `bytes ${start}-${end}/${size}`, "content-length": String(end - start + 1) });
+      res.end(body.subarray(start, end + 1));
+      return true;
+    }
+    send(res, 200, body, type, { ...cache, "accept-ranges": "bytes" });
+    return true;
+  }
+  send(res, 200, body, type, cache);
   return true;
 }
 
@@ -899,7 +922,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     if (pathname === "/readme/") return send(res, 200, readmePage(), TYPES[".html"]);
     if (pathname.startsWith("/readme/docs/") && serveFile(res, "docs", pathname.slice(13))) return;
     if (APP_PAGES.test(pathname)) return void serveFile(res, "public", "index.html");
-    if (serveFile(res, "public", pathname.slice(1))) return;
+    if (serveFile(res, "public", pathname.slice(1), req.headers.range)) return;
     send(res, 404, "Not found", "text/plain; charset=utf-8");
   } catch (err) {
     respondError(res, err);

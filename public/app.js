@@ -1,5 +1,6 @@
 import { openEditor } from "/editor.js";
 import { renderHome } from "/home.js";
+import { HERO_CLIPS } from "/media.js";
 import { coverImg, PHOTOS, photoFor } from "/photos.js";
 import { renderPreview } from "/preview.js";
 import { api, ApiError, avatar, fill, fmtRange, h, icon, openDialog, relTime, toast } from "/ui.js";
@@ -61,8 +62,9 @@ async function route() {
 
 const ctx = () => ({ me: state.me, config: state.config, navigate, signOut, topbar, footer, createTrip });
 
-function createTrip() {
-  if (state.me) newTripDialog();
+// destination: a place picked on the homepage, filled in (still editable)
+function createTrip(destination = "") {
+  if (state.me) newTripDialog(typeof destination === "string" ? destination : "");
   else navigate(`/login?next=${encodeURIComponent("/trips?new=1")}`);
 }
 
@@ -81,7 +83,7 @@ function topbar(active = "") {
     h(
       "nav",
       { class: "topbar-nav", "aria-label": "Main" },
-      h("a", { href: "/#explore", "data-link": true, class: active === "home" ? "on" : "" }, "Explore"),
+      h("a", { href: "/#explore-map", "data-link": true, class: active === "home" ? "on" : "" }, "Explore"),
       tripsLink,
       h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: createTrip }, icon("plus"), h("span", { class: "hide-xs" }, "Create Trip")),
       state.me
@@ -107,7 +109,7 @@ function footer() {
       { "aria-label": "Legal and about" },
       h("a", { href: "/readme/" }, "About"),
       h("a", { href: "/privacy", "data-link": true }, "Privacy"),
-      h("a", { href: "/credits", "data-link": true }, "Photo credits"),
+      h("a", { href: "/credits", "data-link": true }, "Photo & video credits"),
       h("a", { href: "https://maps.google.com/help/terms_maps/", target: "_blank", rel: "noopener" }, "Google Maps Terms"),
       h("a", { href: "https://policies.google.com/privacy", target: "_blank", rel: "noopener" }, "Google Privacy Policy"),
     ),
@@ -190,8 +192,17 @@ function renderCredits() {
     h(
       "main",
       { class: "readme" },
-      h("h1", {}, "Photo credits"),
-      h("p", {}, "The destination photos on Wayline come from Wikimedia Commons. Each is shown resized, under the license named below. Place photos inside place details come from Google Maps and are credited where they appear."),
+      h("h1", {}, "Photo and video credits"),
+      h("p", {}, "The destination photos and the homepage video clips on Wayline come from Wikimedia Commons. Each is shown resized (clips are also shortened and silent), under the license named below. Place photos inside place details come from Google Maps and are credited where they appear."),
+      h("h2", {}, "Videos"),
+      h(
+        "ul",
+        { class: "credits-list" },
+        HERO_CLIPS.map((c) =>
+          h("li", {}, h("strong", {}, `${c.city}, ${c.country}`), " · ", ext(c.page, c.author ?? "Wikimedia Commons"), " · ", ext(c.licenseUrl, c.license, "noopener license")),
+        ),
+      ),
+      h("h2", {}, "Photos"),
       h(
         "ul",
         { class: "credits-list" },
@@ -550,7 +561,7 @@ async function renderDashboard() {
 
 const hue = (s) => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
 
-function newTripDialog() {
+function newTripDialog(destination = "") {
   const today = new Date();
   const iso = (d) => d.toISOString().slice(0, 10);
   const start = new Date(today.getTime() + 14 * 86_400_000);
@@ -563,7 +574,7 @@ function newTripDialog() {
     { method: "dialog", class: "stack" },
     h("h2", {}, "New trip"),
     h("label", { class: "field" }, h("span", {}, "Trip name"), h("input", { name: "title", required: true, maxlength: 80, placeholder: "Tokyo Autumn Trip" })),
-    h("label", { class: "field" }, h("span", {}, "Destination"), h("input", { name: "destination", required: true, maxlength: 120, placeholder: "Tokyo, Japan" })),
+    h("label", { class: "field" }, h("span", {}, "Destination"), h("input", { name: "destination", required: true, maxlength: 120, placeholder: "Tokyo, Japan", value: destination })),
     h(
       "div",
       { class: "row-2" },
