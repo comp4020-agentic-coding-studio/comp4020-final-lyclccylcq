@@ -28,6 +28,7 @@ function day(over: { notes?: string } = {}): Day {
     activities,
     segments,
     fingerprint: `fp-${over.notes ?? ""}`,
+    review: { span: null, stops: 2, meals: [], notes: [] },
     analysis: analyseDay(
       activities.map((a) => ({ id: a.id, title: a.title, startMin: a.startMin, durationMin: a.durationMin, placeId: a.place.placeId })),
       segments,

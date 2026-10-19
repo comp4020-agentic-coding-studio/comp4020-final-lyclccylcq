@@ -134,13 +134,13 @@ describe.skipIf(!chromePath)("voice calls in two real browsers", () => {
     await a.waitFor(`Number(document.querySelector('[data-call=level-peer]').dataset.level) > 0.003`, 4000);
     if (SHOTS) await a.screenshot(`${SHOTS}/call-desktop-connected.png`);
 
-    // An edit arrives as a snapshot; the copilot opens; nothing touches the call.
+    // An edit arrives as a snapshot; the planning assistant opens; nothing touches the call.
     const before = await inPage(a, "GET", `/api/trips/${trip.id}`);
     const audioId = await a.eval<string>(`(window.__audioEl = document.querySelector('audio.call-audio'), 'ok')`);
     expect(audioId).toBe("ok");
     await inPage(b, "POST", `/api/trips/${trip.id}/activities`, { clientId: `Museum-${Math.random()}`, dayId: trip.days[0].id, title: "Museum", kind: "attraction", startMin: 900, durationMin: 60 });
     await a.waitFor(`[...document.querySelectorAll('.timeline .stop h3')].some(e => e.textContent === 'Museum')`, 4000);
-    await a.eval(`[...document.querySelectorAll('.trip-bar button')].find(b => b.textContent.includes('Copilot')).click()`);
+    await a.eval(`[...document.querySelectorAll('.trip-bar button')].find(b => b.textContent.includes('Assistant')).click()`);
     await a.waitFor(`document.querySelector('.workspace.with-copilot')`, 2000);
     await sleep(300);
     expect(await a.eval<number>(`Math.max(0, ...[...document.querySelectorAll('.pane-copilot .proposal')].map(e => e.getBoundingClientRect().height))`)).toBeLessThan(400);
@@ -287,14 +287,14 @@ describe.skipIf(!chromePath)("voice calls in two real browsers", () => {
     const r = await a.eval<{ card: DOMRect; tabs: DOMRect; hang: DOMRect; mute: DOMRect; vw: number; sw: number }>(
       `(() => ({ card: document.querySelector('.call-card').getBoundingClientRect().toJSON(), tabs: document.querySelector('.mobile-tabs').getBoundingClientRect().toJSON(), hang: document.querySelector('[data-call=hangup]').getBoundingClientRect().toJSON(), mute: document.querySelector('[data-call=mute]').getBoundingClientRect().toJSON(), vw: innerWidth, sw: document.documentElement.scrollWidth }))()`,
     );
-    expect(r.card.bottom).toBeLessThanOrEqual(r.tabs.top + 1); // above the Map/Plan/Copilot tabs
+    expect(r.card.bottom).toBeLessThanOrEqual(r.tabs.top + 1); // above the Map/Plan/Assistant tabs
     expect(r.card.left).toBeGreaterThanOrEqual(0);
     expect(r.card.right).toBeLessThanOrEqual(r.vw);
     expect(r.hang.height).toBeGreaterThanOrEqual(44);
     expect(r.mute.height).toBeGreaterThanOrEqual(44);
     expect(r.sw).toBeLessThanOrEqual(390);
     if (SHOTS) await a.screenshot(`${SHOTS}/call-phone-connected.png`);
-    for (const t of ["Map", "Copilot", "Plan"]) {
+    for (const t of ["Map", "Assistant", "Plan"]) {
       await a.eval(`[...document.querySelectorAll('.mobile-tabs button')].find(b => b.textContent.includes(${JSON.stringify(t)})).click()`);
       await sleep(150);
       expect(await a.eval<string>(phase)).toBe("connected");

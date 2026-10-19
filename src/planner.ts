@@ -336,3 +336,151 @@ export function createPlanner(provider: AiProvider | null, opts: { usage: AiUsag
     },
   };
 }
+
+// --- Focused actions: Find Places to Eat and Explore Nearby ----------------
+// No model call: Google finds the places, these rules rank and place them.
+// Each result is a draft with one "add" per suggestion, applied one at a time.
+
+export type Spot = { lat: number; lng: number };
+const stopAt = (day: Day, id: string | null) => {
+  const a = id ? day.activities.find((x) => x.id === id) : undefined;
+  return a?.place?.lat != null && a.place.lng != null ? { lat: a.place.lat, lng: a.place.lng } : null;
+};
+const minutesOf = (km: number | null) => (km === null ? null : Math.max(1, Math.round((km * 1.3) / 4.8 * 60))); // a walking estimate from straight-line km, labelled as such
+
+// Where to search for a meal: the stops on each side of where it would go,
+// and the midpoint between them, never the whole day's centre.
+export function mealSearchPoints(day: Day, gap: { afterId: string | null; beforeId: string | null }): Spot[] {
+  const a = stopAt(day, gap.afterId);
+  const b = stopAt(day, gap.beforeId);
+  const pts = [a, b].filter((x): x is Spot => x !== null);
+  if (a && b) pts.push({ lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 });
+  return pts;
+}
+
+// Extra distance to visit c between a and b, versus going straight (km, straight-line).
+export function detourKm(c: Spot, a: Spot | null, b: Spot | null): number | null {
+  if (a && b) return Math.max(0, Math.round((haversineKm(a, c) + haversineKm(c, b) - haversineKm(a, b)) * 10) / 10);
+  const one = a ?? b;
+  return one ? Math.round(haversineKm(one, c) * 2 * 10) / 10 : null; // there and back
+}
+
+export type Pick = { candidate: Candidate; detourKm: number | null; detourMin: number | null; labels: string[]; score: number };
+
+// Ranks candidates for one spot in the route. Labels appear only when the
+// data supports them: "Smallest detour" for the least extra distance, "Highly
+// rated" for the best rating backed by at least 100 reviews, "Matches your
+// cuisines" when Google's category names one of the chosen cuisines.
+export function rankFor(candidates: Candidate[], a: Spot | null, b: Spot | null, p: Effective, limit = 3): Pick[] {
+  const cuisineWords: Record<string, string[]> = { japanese: ["japanese", "ramen", "sushi", "izakaya", "udon", "soba", "tempura", "yakitori"], chinese: ["chinese", "dim sum", "dumpling"], korean: ["korean"], thai: ["thai"], vietnamese: ["vietnamese", "pho"], indian: ["indian", "curry"], italian: ["italian", "pizza", "pasta"], french: ["french", "bistro"], mexican: ["mexican", "taco"], middle_eastern: ["middle eastern", "lebanese", "turkish"], seafood: ["seafood", "fish"], cafe: ["cafe", "café", "coffee"], local: [] };
+  const matches = (c: Candidate) => p.food.cuisines.some((k) => (cuisineWords[k] ?? [k]).some((w) => `${c.name} ${c.category ?? ""}`.toLowerCase().includes(w)));
+  const priceOk = (c: Candidate) => {
+    const want = p.food.price === "any" ? p.travel.budget : p.food.price;
+    if (want === "any" || !c.priceLevel) return true;
+    const n = c.priceLevel.length; // "$".."$$$$"
+    return want === "budget" ? n <= 2 : want === "moderate" ? n <= 3 : n >= 2;
+  };
+  const picks = candidates.map((c) => {
+    const d = detourKm(c, a, b);
+    const reviews = Math.min(1, Math.log10((c.ratingCount ?? 0) + 1) / 3);
+    const score = (c.rating ?? 3.5) * reviews - (d ?? 2) * 0.6 + (matches(c) ? 0.5 : 0) - (priceOk(c) ? 0 : 1);
+    return { candidate: c, detourKm: d, detourMin: minutesOf(d), labels: [] as string[], score };
+  });
+  const top = picks.sort((x, y) => y.score - x.score).slice(0, limit);
+  const minDetour = Math.min(...top.map((x) => x.detourKm ?? Infinity));
+  const rated = top.filter((x) => (x.candidate.ratingCount ?? 0) >= 100 && x.candidate.rating !== null);
+  const bestRated = rated.length ? Math.max(...rated.map((x) => x.candidate.rating as number)) : null;
+  for (const x of top) {
+    if (x.detourKm !== null && x.detourKm === minDetour && top.length > 1) x.labels.push("Smallest detour");
+    if (bestRated !== null && x.candidate.rating === bestRated && (x.candidate.ratingCount ?? 0) >= 100) x.labels.push("Highly rated");
+    if (matches(x.candidate)) x.labels.push("Matches your cuisines");
+  }
+  return top;
+}
+
+export type ActionDraft = PlanDraft & { action: "eat" | "nearby"; meal?: string | null; picks: (Pick & { changeId: string })[] };
+
+// One change id per suggestion, so a single one can be applied.
+export const changeId = (c: PlanChange): string =>
+  c.type === "add" ? `add:${c.candidate.placeId}` : c.type === "move" ? `move:${c.activityId}` : `mode:${c.segmentId}`;
+
+export function eatDraft(day: Day, p: Effective, gap: { meal: string; afterId: string | null; beforeId: string | null; usual: number; from: number; to: number }, candidates: Candidate[]): ActionDraft {
+  const a = stopAt(day, gap.afterId);
+  const b = stopAt(day, gap.beforeId);
+  const picks = rankFor(candidates.filter((c) => c.kind === "food"), a, b, p);
+  const after = gap.afterId ? day.activities.find((x) => x.id === gap.afterId) : undefined;
+  const before = gap.beforeId ? day.activities.find((x) => x.id === gap.beforeId) : undefined;
+  const dur = MEAL_MIN[p.travel.pace];
+  const diet = Boolean(p.food.allergies) || p.food.diets.length > 0;
+  const changes: PlanChange[] = picks.map((x) => {
+    // a time inside the free gap and the meal's range, nearest the usual time; untimed if nothing fits
+    const earliest = Math.max(gap.from, after && after.startMin !== null ? after.startMin + after.durationMin + (x.detourMin ?? 0) / 2 : gap.from);
+    const latest = Math.min(gap.to, before && before.startMin !== null ? before.startMin - dur - (x.detourMin ?? 0) / 2 : gap.to) ;
+    const startMin = latest >= earliest ? Math.round(Math.min(latest, Math.max(earliest, gap.usual)) / 5) * 5 : null;
+    return {
+      type: "add",
+      clientId: `ai:${createHash("sha256").update(`${day.id}|${x.candidate.placeId}|${day.fingerprint}`).digest("hex").slice(0, 32)}`,
+      candidate: { ...x.candidate, detourKm: x.detourKm },
+      kind: "food",
+      startMin: startMin !== null && startMin + dur <= 23 * 60 + 59 ? startMin : null,
+      durationMin: dur,
+      meal: gap.meal,
+      reason: x.labels.join(" · "),
+      warning: diet ? "Google can't confirm allergens or dietary suitability. Check with the restaurant before you go." : null,
+    };
+  });
+  const caveats = ["Distances and detours are straight-line estimates; calculate the route once it's in the plan.", "Opening hours for your visit date aren't checked here; open the place to see Google's hours."];
+  if (diet) caveats.push("Allergy and dietary information isn't verified by Google. Ask each restaurant directly.");
+  return {
+    action: "eat",
+    meal: gap.meal,
+    dayId: day.id,
+    basedOn: day.fingerprint,
+    summary: picks.length ? "" : "Google found no restaurants near this part of the route.",
+    changes,
+    caveats,
+    preferences: { used: { ...p.travel, food: { cuisines: p.food.cuisines, price: p.food.price, hasDiet: diet } }, hard: hardConstraints(p) },
+    picks: picks.map((x, i) => ({ ...x, changeId: changeId(changes[i]) })),
+  };
+}
+
+export function nearbyDraft(day: Day, p: Effective, candidates: Candidate[]): ActionDraft {
+  const slots = freeSlots(day);
+  const dur = VISIT_MIN[p.travel.pace];
+  const fit = slots.filter((s) => s.to - s.from >= dur);
+  const changes: PlanChange[] = [];
+  const picks: Pick[] = [];
+  const used = new Set<string>();
+  for (const slot of fit.slice(0, 3)) {
+    const after = day.activities.find((x) => x.id === slot.afterActivityId);
+    const a = stopAt(day, slot.afterActivityId);
+    const i = after ? day.activities.indexOf(after) : -1;
+    const b = i >= 0 ? stopAt(day, day.activities[i + 1]?.id ?? null) : null;
+    const best = rankFor(candidates.filter((c) => c.kind === "attraction" && !used.has(c.placeId)), a, b, p, 1)[0];
+    if (!best) continue;
+    used.add(best.candidate.placeId);
+    picks.push({ ...best, labels: [...best.labels, `Fits ${hhmm(slot.from)}–${hhmm(slot.to)}`] });
+    changes.push({
+      type: "add",
+      clientId: `ai:${createHash("sha256").update(`${day.id}|${best.candidate.placeId}|${day.fingerprint}`).digest("hex").slice(0, 32)}`,
+      candidate: { ...best.candidate, detourKm: best.detourKm },
+      kind: "attraction",
+      startMin: Math.round((slot.from + (best.detourMin ?? 0) / 2) / 5) * 5,
+      durationMin: dur,
+      meal: null,
+      reason: picks.at(-1)!.labels.join(" · "),
+      warning: null,
+    });
+  }
+  const caveats = ["Distances are straight-line estimates; calculate the route once it's in the plan.", "Opening hours aren't checked here; open the place to see Google's hours."];
+  return {
+    action: "nearby",
+    dayId: day.id,
+    basedOn: day.fingerprint,
+    summary: fit.length ? (picks.length ? "" : "Google found nothing new near your free time.") : `No free time of ${dur} min or more between timed stops for a ${p.travel.pace} pace.`,
+    changes,
+    caveats,
+    preferences: { used: { ...p.travel, food: { cuisines: p.food.cuisines, price: p.food.price, hasDiet: false } }, hard: hardConstraints(p) },
+    picks: picks.map((x, i) => ({ ...x, changeId: changeId(changes[i]) })),
+  };
+}

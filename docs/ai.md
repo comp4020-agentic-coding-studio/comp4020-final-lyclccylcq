@@ -17,7 +17,13 @@ gateway later means changing that one module.
 
 - **Copilot** (`src/copilot.ts`): reviews a day and answers questions about it.
   It recommends among fixes the app calculated itself; it can't change the plan.
-- **Plan with AI** (`src/planner.ts`): drafts one day.
+- **The planning assistant** (the editor's right panel, October 2026). The
+  day's status comes from plain rules in `src/review.ts` (no model call).
+  "Find places to eat" and "Explore nearby" are Google search plus ranking
+  in `src/planner.ts` (`eatDraft`, `nearbyDraft`): no model call, so they
+  cost nothing against the AI limits. "Optimize my day" is the model call
+  described below. Any suggestion can be applied on its own.
+- **Optimize my day** (`src/planner.ts`): drafts one day.
   1. The server collects verified facts: the day's stops, Google routes already
      calculated for it, and up to 12 Google places near the day (one Places
      request per type, at most four types, chosen from the person's interests

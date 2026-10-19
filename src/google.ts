@@ -560,13 +560,17 @@ export async function computeRoute(origin: Waypoint, destination: Waypoint, mode
 
 // All three modes for a trip's consecutive stops, in parallel. Each mode's
 // outcome stands on its own. Geometry isn't kept for trip segments.
-export async function computeRouteOptions(origin: Waypoint, destination: Waypoint, departure: Date | null, now = Date.now()): Promise<RouteOption[]> {
+// assumed: when the earlier stop has no time, transit is looked up for this
+// stand-in departure (midday on the trip's date) instead of not at all, and
+// the option says so; walking and driving don't depend on the time.
+export async function computeRouteOptions(origin: Waypoint, destination: Waypoint, departure: Date | null, now = Date.now(), assumed: { at: Date; label: string } | null = null): Promise<RouteOption[]> {
   const one = async (mode: Mode): Promise<RouteOption> => {
-    if (mode === "TRANSIT" && !departure) {
+    if (mode === "TRANSIT" && !departure && !assumed) {
       return { mode, status: "error", message: "Give the earlier stop a start time to look up transit departures." };
     }
-    const { polyline: _drop, ...rest } = await computeRoute(origin, destination, mode, departure, now);
-    return rest;
+    const at = mode === "TRANSIT" && !departure && assumed ? assumed.at : departure;
+    const { polyline: _drop, ...rest } = await computeRoute(origin, destination, mode, at, now);
+    return mode === "TRANSIT" && !departure && assumed ? { ...rest, assumedDeparture: assumed.label } : rest;
   };
   return Promise.all((["WALK", "TRANSIT", "DRIVE"] as Mode[]).map(one));
 }

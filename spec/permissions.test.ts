@@ -343,6 +343,9 @@ describe("publishing, forking and reviews", () => {
     expect((await anon(baseUrl).get(`/api/itineraries/${pubId}`)).data.rating).toEqual({ average: 5, count: 2 });
     // a fork brings no reviews with it
     const fork = (await r1.send("POST", `/api/itineraries/${pubId}/copy`, { startDate: "2027-01-10" })).data;
-    expect(JSON.stringify(fork)).not.toMatch(/review|rating/i);
+    // no trip reviews or rating come along (each day's own "review" is the day's quality check, not these)
+    expect(fork).not.toHaveProperty("reviews");
+    expect(fork).not.toHaveProperty("rating");
+    expect(JSON.stringify(fork)).not.toMatch(/"reviews"|"rating"|"myReview"/);
   });
 });

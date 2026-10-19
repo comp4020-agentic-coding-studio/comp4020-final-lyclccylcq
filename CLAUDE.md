@@ -182,6 +182,21 @@ contradict the README, stop and ask. Don't quietly change the product.
   in `ai_usage`. No per-user quotas (a course demo); user ids are for logs.
   `src/ai.ts` is the only code that talks to the provider; keep it that way so
   a gateway can replace it.
+- **The planning assistant, not a chatbot** (October 2026). The editor's
+  right panel shows the day's status from plain rules (`src/review.ts`:
+  missing meals from the trip's own meal times and assigned meals, long
+  walks, legs with no route, long gaps, a crowded day; no model call) and
+  three actions: "Optimize my day" (one model call), "Find places to eat"
+  and "Explore nearby" (Google search and rules only, no model call).
+  Restaurants are searched where the meal goes on the route
+  (`mealSearchPoints`), never the day's centre, and ranked by detour, Google
+  rating backed by reviews, and preference; labels appear only when the data
+  supports them. Each suggestion can be previewed (dashed on the timeline,
+  a marker on the map, never saved) and applied on its own (`changeIds`).
+  The chat UI isn't shown; `/copilot` stays on the server.
+- Transport modes each show their state and why (available, excluded,
+  no route from Google, needs a time, lookup failed). Google's Routes API
+  returns no transit in Japan; say so, never substitute a mode.
 - "Plan with AI" (`src/planner.ts`, October 2026) drafts an order for the
   untimed stops, travel modes, and a few Google places near the day, using
   the person's preferences (`src/preferences.ts`). Same rules as the

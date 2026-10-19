@@ -6,6 +6,7 @@ import { transaction } from "./db.ts";
 import { haversineKm } from "./geo.ts";
 import { bad, HttpError, notFound } from "./errors.ts";
 import { type Action, authorize, authorizeActivity, type Role } from "./permissions.ts";
+import { type DayReview, reviewDay } from "./review.ts";
 import type { TemplateDetail } from "./itineraries.ts";
 import {
   analyseDay,
@@ -72,7 +73,7 @@ export type Segment = {
 // fingerprint: what the day's analysis (and a copilot answer about it)
 // depends on. Proposals are applied only against the fingerprint they were
 // previewed with.
-export type Day = { id: string; date: string; activities: Activity[]; segments: Segment[]; analysis: DayAnalysis; fingerprint: string };
+export type Day = { id: string; date: string; activities: Activity[]; segments: Segment[]; analysis: DayAnalysis; review: DayReview; fingerprint: string };
 
 export type TripSnapshot = {
   id: string;
@@ -389,6 +390,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       .map((r) => ({ id: String(r.id), displayName: String(r.display_name), role: r.role as Role }));
 
     const segRows = q("select * from transport_segments where trip_id = ?").all(tripId);
+    const mealTimes = t.meal_times ? (JSON.parse(String(t.meal_times)) as MealTimes) : DEFAULT_MEAL_TIMES;
     const days: Day[] = q("select id, date from trip_days where trip_id = ? order by date").all(tripId).map((d) => {
       const date = String(d.date);
       const activities = dayActivities(String(d.id));
@@ -419,7 +421,12 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         a: activities.map((a) => [a.id, a.title, a.kind, a.startMin, a.durationMin, a.notes, a.meal, a.role, a.place?.placeId ?? null, a.version]),
         s: segments.map((s) => [s.id, s.fromId, s.toId, s.selectedMode, s.stale, s.departKey, s.computedAt]),
       });
-      return { id: String(d.id), date, activities, segments, analysis: analyseDay(plain, segs), fingerprint: fp };
+      const review = reviewDay(
+        activities.map((a) => ({ id: a.id, title: a.title, kind: a.kind, role: a.role, meal: a.meal, startMin: a.startMin, durationMin: a.durationMin, hasPlace: a.place !== null })),
+        segments,
+        mealTimes,
+      );
+      return { id: String(d.id), date, activities, segments, analysis: analyseDay(plain, segs), review, fingerprint: fp };
     });
 
     const fresh = t.dest_cached_at !== null && now() - Number(t.dest_cached_at) < CACHE_MS;
@@ -440,7 +447,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         : null,
       publication: publicationOf(tripId, Number(t.rev)),
       members,
-      mealTimes: t.meal_times ? (JSON.parse(String(t.meal_times)) as MealTimes) : DEFAULT_MEAL_TIMES,
+      mealTimes,
       days,
     };
   }

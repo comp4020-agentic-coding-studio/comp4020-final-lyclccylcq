@@ -34,6 +34,8 @@ export type RouteOption = {
   steps?: RouteStep[];
   message?: string;
   polyline?: string;
+  // transit looked up for an assumed time (the earlier stop has none)
+  assumedDeparture?: string;
 };
 
 export type DayActivity = {
