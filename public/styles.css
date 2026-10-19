@@ -1184,3 +1184,14 @@ textarea { resize: vertical; }
 .pa-card-link:hover { border-color: color-mix(in srgb, var(--coral) 40%, var(--ed-line)); }
 .pa-card-link.open { border-color: var(--ink-2); background: var(--ed-soft); }
 .pa-card-link:focus-visible { outline: 3px solid color-mix(in srgb, var(--sea) 55%, transparent); outline-offset: 2px; }
+/* opening hours on suggestions and in the scheduling card */
+.pa-hours { font-size: 12.5px; font-weight: 700; }
+.pa-hours-confirmed { color: var(--ok, #2f7d55); }
+.pa-hours-unverified, .pa-hours-unknown { color: var(--warn); }
+.pa-hours-problem { margin-top: 6px; padding: 8px 10px; border-radius: 10px; background: var(--warn-bg); display: flex; flex-direction: column; gap: 6px; }
+.pa-dur select { padding: 4px 6px; font-size: 13px; border-radius: 8px; border: 1px solid var(--ed-line, var(--line)); background: var(--surface); }
+.schedule-hours { font-size: 13px; padding: 8px 10px; border-radius: 10px; }
+.schedule-hours.is-ok { background: var(--ok-bg, #e9f4ee); color: var(--ok, #2f7d55); }
+.schedule-hours.is-unsure { background: var(--warn-bg); color: var(--warn); }
+.schedule-hours.is-bad { background: var(--danger-bg); color: var(--danger); }
+.schedule-hours .linklike { font-weight: 800; text-decoration: underline; }

@@ -193,7 +193,54 @@ describe("find places to eat and explore nearby (no model call)", () => {
     }
     expect(new Set(draft.picks.map((p) => p.changeId)).size).toBe(2);
     expect(draft.picks[0].changeId).toBe(changeId(adds[0]));
-    expect(draft.caveats.join(" ")).toMatch(/Opening hours/);
+    expect(draft.caveats.join(" ")).toMatch(/30 minutes before closing/);
+  });
+
+  // Opening hours in the suggestions: the whole meal and a 30-minute buffer
+  // before closing, inside one opening period, on the trip's date.
+  const pd = (d: number, oh: number, om: number, ch: number, cm: number) => ({ open: { day: d, hour: oh, minute: om }, close: { day: d, hour: ch, minute: cm } });
+  const every = (oh: number, om: number, ch: number, cm: number) => ({ regular: [0, 1, 2, 3, 4, 5, 6].map((d) => pd(d, oh, om, ch, cm)), current: null, kitchen: null, specialDates: [] });
+
+  it("leaves out a restaurant closing at 21:00 when dinner can only start at 20:30, and keeps one open late", () => {
+    const d = tokyo();
+    // dinner can only start after 20:00 (Shibuya 19:15–20:00); the night walk is
+    // at 23:00, leaving room for the 46-min walk on to it
+    (d.activities as any[])[2].startMin = 19 * 60 + 15;
+    (d.activities as any[])[3].startMin = 23 * 60;
+    d.review = reviewDay(d.activities.map((a: any) => ({ ...a, hasPlace: true })), [], DEFAULT_MEAL_TIMES);
+    const gap = { ...d.review.meals[0], from: 17 * 60 + 30, to: 23 * 60 };
+    const closes9 = { ...food("closes-at-9", 35.6600, 139.7010, 4.8, 3000), hours: every(11, 0, 21, 0) };
+    const late = { ...food("open-late", 35.6610, 139.7012, 4.2, 600), hours: every(17, 0, 23, 59) };
+    const draft = eatDraft(d, prefs(), gap, [closes9, late]);
+    expect((draft.changes as any[]).map((c) => c.candidate.placeId)).toEqual(["open-late"]); // the better-rated one doesn't fit
+    expect(draft.caveats[0]).toMatch(/1 nearby place was left out/);
+  });
+
+  it("schedules dinner at 19:00 at a place closing at 21:00, never later than 19:15", () => {
+    const d = tokyo();
+    const shut9 = { ...food("closes-at-9", 35.6723, 139.7053, 4.4, 900), hours: every(11, 0, 21, 0) };
+    const c = eatDraft(d, prefs(), d.review.meals[0], [shut9]).changes[0] as any;
+    expect(c.durationMin).toBe(75); // dinner's default length
+    expect(c.startMin + c.durationMin + 30).toBeLessThanOrEqual(21 * 60);
+    expect(c.hours).toBe("unverified"); // weekly hours only: not confirmed for that date
+  });
+
+  it("marks unknown hours instead of treating them as confirmed", () => {
+    const d = tokyo();
+    const c = eatDraft(d, prefs(), d.review.meals[0], [food("no-hours", 35.6723, 139.7053, 4.4, 900)]).changes[0] as any;
+    expect(c.hours).toBe("unknown");
+    expect(c.warning).toMatch(/no opening hours/i);
+  });
+
+  it("finds no time when travel to the restaurant eats the gap, and says so rather than squeezing it in", () => {
+    const d = tokyo();
+    // Shibuya ends 17:45, the walk starts at 18:30: 45 min, too short for a 75-min dinner with travel
+    (d.activities as any[])[3].startMin = 18 * 60 + 30;
+    d.review = reviewDay(d.activities.map((a: any) => ({ ...a, hasPlace: true })), [], DEFAULT_MEAL_TIMES);
+    const gap = d.review.meals[0] ?? { meal: "dinner", afterId: "shibuya", beforeId: "shinjuku", usual: 1110, from: 1050, to: 1260 };
+    const draft = eatDraft(d, prefs(), gap, [{ ...food("near", 35.6600, 139.7010, 4.5, 800), hours: every(11, 0, 23, 0) }]);
+    expect(draft.changes).toEqual([]);
+    expect(draft.summary).toMatch(/only 45 min between Shibuya Crossing and Shinjuku night walk, not enough for a 75-minute dinner/);
   });
 
   it("explores nearby only in free time long enough for the pace", () => {
@@ -345,7 +392,9 @@ describe("eat suggestions end to end, applied one at a time", () => {
       res.writeHead(200, { "content-type": "application/json" });
       if (req.url?.includes("searchNearby")) {
         const c = body.locationRestriction.circle.center;
-        const mk = (i: number, rating: number, n: number) => ({ id: `ChIJ_food_${i}_${String(c.latitude).slice(-4)}`, displayName: { text: `Dinner place ${i}` }, location: { latitude: c.latitude + i * 0.001, longitude: c.longitude }, primaryTypeDisplayName: { text: "Japanese Restaurant" }, types: ["restaurant"], rating, userRatingCount: n, priceLevel: "PRICE_LEVEL_MODERATE" });
+        // places 1 and 2 close at 21:00 every day (Google's period shape); 3 has no hours
+        const until9 = { periods: [0, 1, 2, 3, 4, 5, 6].map((d) => ({ open: { day: d, hour: 11, minute: 0 }, close: { day: d, hour: 21, minute: 0 } })) };
+        const mk = (i: number, rating: number, n: number) => ({ id: `ChIJ_food_${i}_${String(c.latitude).slice(-4)}`, displayName: { text: `Dinner place ${i}` }, location: { latitude: c.latitude + i * 0.001, longitude: c.longitude }, primaryTypeDisplayName: { text: "Japanese Restaurant" }, types: ["restaurant"], rating, userRatingCount: n, priceLevel: "PRICE_LEVEL_MODERATE", ...(i < 3 ? { regularOpeningHours: until9 } : {}) });
         return res.end(JSON.stringify({ places: [mk(1, 4.4, 900), mk(2, 4.6, 1500), mk(3, 4.1, 200)] }));
       }
       if (req.url?.includes("computeRoutes")) return res.end(JSON.stringify({ routes: [{ duration: "900s", distanceMeters: 1200 }] }));
@@ -396,8 +445,68 @@ describe("eat suggestions end to end, applied one at a time", () => {
     expect(titles.indexOf(one.candidate.name)).toBe(titles.indexOf("Shibuya") + 1);
     expect(titles.at(-1)).toBe("Shinjuku walk");
     expect(applied.data.days[0].review.meals).toEqual([]);
+    // the opening hours went along: weekly hours only, so not confirmed for the date
+    expect(eat.data.changes.find((x: any) => x.candidate.placeId.startsWith("ChIJ_food_1"))?.hours ?? "unverified").toMatch(/unverified|confirmed/);
     // the draft is used up; a second apply of another suggestion is refused
     expect((await c.send("POST", `/api/trips/${trip.id}/plan/apply`, { draftId: eat.data.draftId, changeIds: [eat.data.changes[1].id] })).status).toBe(410);
+  });
+});
+
+describe("applying a restaurant re-checks its opening hours", () => {
+  let google: import("node:http").Server;
+  let app: Awaited<ReturnType<typeof startApp>>;
+  beforeAll(async () => {
+    const { createServer } = await import("node:http");
+    google = createServer(async (req, res) => {
+      let raw = "";
+      for await (const c of req) raw += c;
+      const body = raw ? JSON.parse(raw) : {};
+      res.writeHead(200, { "content-type": "application/json" });
+      if (req.url?.includes("searchNearby")) {
+        const c = body.locationRestriction.circle.center;
+        const until9 = { periods: [0, 1, 2, 3, 4, 5, 6].map((d) => ({ open: { day: d, hour: 11, minute: 0 }, close: { day: d, hour: 21, minute: 0 } })) };
+        return res.end(JSON.stringify({ places: [{ id: `ChIJ_closes_at_nine_${String(c.latitude).slice(-4)}`, displayName: { text: "Closes at nine" }, location: { latitude: c.latitude + 0.0005, longitude: c.longitude }, primaryTypeDisplayName: { text: "Restaurant" }, types: ["restaurant"], rating: 4.5, userRatingCount: 800, regularOpeningHours: until9 }] }));
+      }
+      if (req.url?.includes("computeRoutes")) return res.end(JSON.stringify({ routes: [{ duration: "600s", distanceMeters: 800 }] }));
+      res.end("{}");
+    });
+    await new Promise<void>((r) => google.listen(0, "127.0.0.1", () => r()));
+    const g = `http://127.0.0.1:${(google.address() as import("node:net").AddressInfo).port}`;
+    app = await startApp({ GOOGLE_MAPS_SERVER_KEY: "mock-google", GOOGLE_PLACES_BASE_URL: g, GOOGLE_ROUTES_BASE_URL: g });
+  });
+  afterAll(async () => {
+    google.close();
+    await app.stop();
+  });
+
+  it("refuses a changed time that runs past closing, writes nothing, and applies the checked time", async () => {
+    const c = await signUp(app.url);
+    await c.send("PUT", "/api/me/preferences", { food: {}, travel: {} });
+    const trip = (await c.send("POST", "/api/trips", { title: "Tokyo", destination: "Tokyo", startDate: "2026-10-25", endDate: "2026-10-25", timezone: "Asia/Tokyo" })).data;
+    const at = (lat: number, lng: number, i: number) => ({ placeId: `ChIJ_stop_${i}_zzzzzzzz`, source: "google", lat, lng });
+    for (const [i, [title, start, dur, lat, lng]] of ([["Senso-ji", 540, 90, 35.7148, 139.7967], ["Lunch", 760, 60, 35.7101, 139.8107], ["Shibuya", 1020, 45, 35.6595, 139.7005], ["Late walk", 1290, 30, 35.6600, 139.7008]] as const).entries()) {
+      await c.send("POST", `/api/trips/${trip.id}/activities`, { clientId: `hr-${i}-xxxxxx`, dayId: trip.days[0].id, title, kind: title === "Lunch" ? "food" : "attraction", startMin: start, durationMin: dur, place: at(lat, lng, i) });
+    }
+    const dayId = (await c.get(`/api/trips/${trip.id}`)).data.days[0].id;
+    const eat = await c.send("POST", `/api/trips/${trip.id}/plan`, { dayId, action: "eat", meal: "dinner" });
+    expect(eat.status).toBe(200);
+    const sug = eat.data.changes[0];
+    expect(sug.startMin + sug.durationMin + 30).toBeLessThanOrEqual(21 * 60); // the suggestion itself fits
+    // the person moves it to 20:30: refused, nothing written
+    const late = await c.send("POST", `/api/trips/${trip.id}/plan/apply`, { draftId: eat.data.draftId, changeIds: [sug.id], edits: { [sug.id]: { startMin: 20 * 60 + 30 } } });
+    expect(late.status).toBe(409);
+    expect(late.data).toMatchObject({ code: "hours", latestStart: 19 * 60 + 15 });
+    expect(late.data.error).toMatch(/closes at 21:00/);
+    // a longer meal at the suggested time can also run past closing
+    const long = await c.send("POST", `/api/trips/${trip.id}/plan/apply`, { draftId: eat.data.draftId, changeIds: [sug.id], edits: { [sug.id]: { durationMin: 300 } } });
+    expect(long.status).toBe(409);
+    expect((await c.get(`/api/trips/${trip.id}`)).data.days[0].activities).toHaveLength(4);
+    // the checked time applies, in order between the stops
+    const ok = await c.send("POST", `/api/trips/${trip.id}/plan/apply`, { draftId: eat.data.draftId, changeIds: [sug.id] });
+    expect(ok.status).toBe(200);
+    const titles = ok.data.days[0].activities.map((a: any) => a.title);
+    expect(titles).toEqual(["Senso-ji", "Lunch", "Shibuya", "Closes at nine", "Late walk"]);
+    expect(ok.data.days[0].activities[3]).toMatchObject({ meal: "dinner", durationMin: 75 });
   });
 });
 

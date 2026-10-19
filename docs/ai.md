@@ -38,6 +38,22 @@ gateway later means changing that one module.
      the day changed (409) or the person lacks the right (a collaborator can
      add stops but not reorder the owner's or choose modes: 403).
 
+### Opening hours
+
+Every restaurant suggestion (Find places to eat, Optimize my day, and the
+model's picks) must fit the restaurant's hours on the trip's date for the
+whole meal plus 30 minutes before closing, inside one opening period, so a
+midday break ends it and a place open past midnight carries on (`src/hours.ts`;
+the browser's copy is `public/hours.js`). Meal lengths default to 75 min for
+dinner, 60 for lunch and brunch, 45 for breakfast and afternoon tea, and can be
+changed. Google's dated hours (about the next 7 days, special days included)
+count as confirmed; usual weekly hours are shown as unconfirmed for that date;
+no hours are never treated as open. Kitchen hours, when Google lists them,
+stand in for last orders; Wayline never invents one. The server re-checks
+when a suggestion is applied, with any edited time or length, and refuses a
+time the hours rule out (409, with the latest start that fits) rather than
+saving it.
+
 ### Hard constraints and soft preferences
 
 | Hard (enforced in code; never broken) | Soft (steer the model) |

@@ -5,6 +5,7 @@ import { HttpError } from "./errors.ts";
 import { haversineKm, type LatLng } from "./geo.ts";
 import type { NearbyPlace } from "./google.ts";
 import type { Effective } from "./preferences.ts";
+import { bestStart, clock, type GHours, hoursOn, MEAL_DURATION_MIN, mealFits } from "./hours.ts";
 import { hhmm, type Mode, travelMinutes } from "./schedule.ts";
 import type { Day } from "./trips.ts";
 
@@ -34,7 +35,7 @@ const MAX_STOPS: Record<Effective["travel"]["pace"], number> = { relaxed: 4, bal
 // detourKm: straight-line distance from the nearest stop already planned (a
 // rough measure, labelled as such; a real route is calculated only once the
 // place is in the plan). rating and ratingCount are Google's, or null.
-export type Candidate = { placeId: string; name: string; category: string | null; lat: number; lng: number; kind: "food" | "attraction"; distanceKm: number; detourKm: number | null; priceLevel: string | null; rating: number | null; ratingCount: number | null; source: string };
+export type Candidate = { placeId: string; name: string; category: string | null; lat: number; lng: number; kind: "food" | "attraction"; distanceKm: number; detourKm: number | null; priceLevel: string | null; rating: number | null; ratingCount: number | null; source: string; hours?: GHours | null };
 
 // Free time between timed stops (after travel Google calculated, when known).
 export type FreeSlot = { afterActivityId: string; from: number; to: number };
@@ -76,7 +77,7 @@ export function missingMeals(day: Day): ("lunch" | "dinner")[] {
 export type PlanChange =
   | { type: "move"; activityId: string; title: string; toIndex: number }
   | { type: "mode"; segmentId: string; from: string; to: Mode; fromMode: Mode | null }
-  | { type: "add"; clientId: string; candidate: Candidate; kind: "food" | "attraction"; startMin: number | null; durationMin: number; meal: string | null; reason: string; warning: string | null };
+  | { type: "add"; clientId: string; candidate: Candidate; kind: "food" | "attraction"; startMin: number | null; durationMin: number; meal: string | null; reason: string; warning: string | null; hours?: "confirmed" | "unverified" | "unknown"; hoursNote?: string | null };
 
 export type PlanDraft = {
   dayId: string;
@@ -163,7 +164,7 @@ export function toCandidates(groups: { kind: "food" | "attraction"; places: Near
       out.push({
         placeId: p.placeId, name: p.name, category: p.category, lat: p.lat, lng: p.lng, kind: g.kind,
         distanceKm: Math.round(haversineKm(centre, p) * 10) / 10, detourKm: detour,
-        priceLevel: p.priceLevel ?? null, rating: p.rating ?? null, ratingCount: p.ratingCount ?? null, source: p.source,
+        priceLevel: p.priceLevel ?? null, rating: p.rating ?? null, ratingCount: p.ratingCount ?? null, source: p.source, hours: p.hours ?? null,
       });
     }
   }
@@ -252,6 +253,7 @@ export function buildDraft(raw: unknown, day: Day, p: Effective, candidates: Can
   const untimed = day.activities.filter((a) => a.role !== "start" && a.startMin === null);
   const changes: PlanChange[] = [];
   const modeNotes: string[] = [];
+  const hourNotes: string[] = [];
 
   // 1. order: a permutation of the untimed stops, applied after the timed ones
   const order = (Array.isArray(r.order) ? r.order : []).map(String);
@@ -287,13 +289,41 @@ export function buildDraft(raw: unknown, day: Day, p: Effective, candidates: Can
     if (!c || used.has(c.placeId) || (s.afterActivityId && !ids.has(String(s.afterActivityId)))) continue;
     used.add(c.placeId);
     const food = c.kind === "food";
-    const durationMin = food ? MEAL_MIN[p.travel.pace] : VISIT_MIN[p.travel.pace];
-    // a time only where the visit fits in free time after that stop (Google
-    // travel already taken off); otherwise it's added without a time
-    const slot = after ? freeSlots(day).find((x) => x.afterActivityId === after.id && x.to - x.from >= durationMin && !takenSlots.has(x.afterActivityId)) : undefined;
-    const startMin = slot ? slot.from : null;
-    if (slot) takenSlots.add(slot.afterActivityId);
-    const meal = food && startMin !== null ? (startMin < 10 * 60 ? "breakfast" : startMin < 15 * 60 ? "lunch" : startMin >= 17 * 60 ? "dinner" : null) : null;
+    let durationMin = food ? MEAL_MIN[p.travel.pace] : VISIT_MIN[p.travel.pace];
+    let startMin: number | null;
+    let meal: string | null = null;
+    let hoursInfo: { hours?: MealSlot["hours"]; hoursNote?: string | null; hoursWarning?: string | null } = {};
+    if (food && day.review.meals.length) {
+      // a restaurant gets the same check as Find places to eat: the missing
+      // meal's slot, travel either side, and its hours that day with a buffer
+      const gap = day.review.meals.find((g) => g.afterId === after?.id) ?? day.review.meals[0];
+      const a = stopAt(day, gap.afterId);
+      const b = stopAt(day, gap.beforeId);
+      const fit = fitMeal(day, gap, c, a ? (minutesOf(haversineKm(a, c)) ?? 0) : 0, b ? (minutesOf(haversineKm(c, b)) ?? 0) : 0);
+      if (!fit) {
+        hourNotes.push(`${c.name} was left out: it isn't open long enough for ${gap.meal} at a time that fits your day.`);
+        continue;
+      }
+      startMin = fit.startMin;
+      durationMin = fit.durationMin;
+      meal = gap.meal;
+      hoursInfo = { hours: fit.hours, hoursNote: fit.note, hoursWarning: fit.hours !== "confirmed" ? fit.note : null };
+    } else {
+      // a time only where the visit fits in free time after that stop (Google
+      // travel already taken off); otherwise it's added without a time
+      const slot = after ? freeSlots(day).find((x) => x.afterActivityId === after.id && x.to - x.from >= durationMin && !takenSlots.has(x.afterActivityId)) : undefined;
+      startMin = slot ? slot.from : null;
+      if (slot) takenSlots.add(slot.afterActivityId);
+      if (food && startMin !== null) {
+        // no missing meal to fit: still never a time the restaurant's hours rule out
+        const f = mealFits(hoursOn(c.hours ?? null, day.date), startMin, durationMin);
+        if (!f.ok) {
+          hourNotes.push(`${c.name} was left out: ${f.message}`);
+          continue;
+        }
+      }
+      meal = food && startMin !== null ? (startMin < 10 * 60 ? "breakfast" : startMin < 15 * 60 ? "lunch" : startMin >= 17 * 60 ? "dinner" : null) : null;
+    }
     changes.push({
       type: "add",
       clientId: `ai:${createHash("sha256").update(`${day.id}|${c.placeId}|${day.fingerprint}`).digest("hex").slice(0, 32)}`,
@@ -303,11 +333,13 @@ export function buildDraft(raw: unknown, day: Day, p: Effective, candidates: Can
       durationMin,
       meal,
       reason: clip(s.reason, PLAN_LIMITS.reason),
-      warning: food && diet ? "Google can't confirm allergens or dietary suitability. Check with the restaurant before you go." : null,
+      warning: [hoursInfo.hoursWarning ?? null, food && diet ? "Google can't confirm allergens or dietary suitability. Check with the restaurant before you go." : null].filter(Boolean).join(" ") || null,
+      hours: hoursInfo.hours,
+      hoursNote: hoursInfo.hoursNote ?? null,
     });
   }
 
-  const caveats = [...modeNotes, ...(Array.isArray(r.caveats) ? r.caveats : []).map((c) => clip(c, 240)).filter(Boolean).slice(0, 3)];
+  const caveats = [...modeNotes, ...hourNotes, ...(Array.isArray(r.caveats) ? r.caveats : []).map((c) => clip(c, 240)).filter(Boolean).slice(0, 3)];
   if (diet && !caveats.some((c) => /restaurant/i.test(c))) caveats.push("Allergy and dietary information isn't verified by Google. Ask each restaurant directly.");
   return {
     dayId: day.id,
@@ -404,43 +436,100 @@ export type ActionDraft = PlanDraft & { action: "eat" | "nearby"; meal?: string 
 export const changeId = (c: PlanChange): string =>
   c.type === "add" ? `add:${c.candidate.placeId}` : c.type === "move" ? `move:${c.activityId}` : `mode:${c.segmentId}`;
 
+// The meal's slot, as fitted to one restaurant: when to arrive so the meal fits
+// the free time around it (with travel to and from it) and the restaurant's
+// hours on that date, with the meal's length and a buffer before closing.
+export type MealSlot = { startMin: number | null; durationMin: number; hours: "confirmed" | "unverified" | "unknown"; closesAt: number | null; note: string | null };
+
+export function fitMeal(
+  day: Day,
+  gap: { meal: string; afterId: string | null; beforeId: string | null; usual: number; from: number; to: number },
+  c: Candidate,
+  travelInMin: number,
+  travelOutMin: number,
+  durationMin = MEAL_DURATION_MIN[gap.meal] ?? 60,
+): MealSlot | null {
+  const after = gap.afterId ? day.activities.find((x) => x.id === gap.afterId) : undefined;
+  const before = gap.beforeId ? day.activities.find((x) => x.id === gap.beforeId) : undefined;
+  // arrive after the previous stop ends plus the trip there; leave in time to reach the next one
+  const earliest = Math.max(gap.from, after && after.startMin !== null ? after.startMin + after.durationMin + travelInMin : gap.from);
+  const latest = Math.min(gap.to, before && before.startMin !== null ? before.startMin - travelOutMin - durationMin : gap.to - durationMin);
+  if (latest < earliest) return null; // not enough time between the stops
+  const day_ = hoursOn(c.hours ?? null, day.date);
+  const start = bestStart(day_, earliest, latest, durationMin, gap.usual);
+  if (start === null) return null; // confirmed or weekly hours leave no fitting time
+  const fit = mealFits(day_, start, durationMin);
+  const hours = day_.basis === "dated" ? "confirmed" : day_.basis === "regular" ? "unverified" : "unknown";
+  const closes = fit.closesAt;
+  const note =
+    hours === "unknown"
+      ? "Google has no opening hours for this place. Check before you go."
+      : hours === "unverified"
+        ? `Usual hours${closes !== null && closes < 2 * 1440 ? ` (closes ${clock(closes)})` : ""}; Google hasn't confirmed them for this date.${day_.special ? " It's a special day for this place." : ""}`
+        : closes !== null && closes < 2 * 1440 ? `Open that day until ${clock(closes)}.` : null;
+  return { startMin: start, durationMin, hours, closesAt: closes, note };
+}
+
 export function eatDraft(day: Day, p: Effective, gap: { meal: string; afterId: string | null; beforeId: string | null; usual: number; from: number; to: number }, candidates: Candidate[]): ActionDraft {
   const a = stopAt(day, gap.afterId);
   const b = stopAt(day, gap.beforeId);
-  const picks = rankFor(candidates.filter((c) => c.kind === "food"), a, b, p);
+  const ranked = rankFor(candidates.filter((c) => c.kind === "food"), a, b, p, 12);
+  const diet = Boolean(p.food.allergies) || p.food.diets.length > 0;
+  // Each candidate gets a time that fits both the route and its hours. Ones
+  // whose hours leave no time are left out; ones Google has no hours for are
+  // kept but say so. Confirmed fits come before unverified ones.
+  const fitted = ranked
+    .map((x) => {
+      const there = x.candidate.detourKm === null ? 0 : Math.round(minutesOf((a ? haversineKm(a, x.candidate) : 0)) ?? 0);
+      const back = Math.round(minutesOf(b ? haversineKm(x.candidate, b) : 0) ?? 0);
+      return { x, slot: fitMeal(day, gap, x.candidate, a ? there : 0, b ? back : 0) };
+    })
+    .filter((f): f is { x: Pick; slot: MealSlot } => f.slot !== null);
+  const order = { confirmed: 0, unverified: 1, unknown: 2 } as const;
+  const top = [...fitted].sort((m, n) => order[m.slot.hours] - order[n.slot.hours] || n.x.score - m.x.score).slice(0, 3);
+  const dropped = ranked.length - fitted.length;
+  // was it the day (no room between the stops, whatever the hours) or the hours?
   const after = gap.afterId ? day.activities.find((x) => x.id === gap.afterId) : undefined;
   const before = gap.beforeId ? day.activities.find((x) => x.id === gap.beforeId) : undefined;
-  const dur = MEAL_MIN[p.travel.pace];
-  const diet = Boolean(p.food.allergies) || p.food.diets.length > 0;
-  const changes: PlanChange[] = picks.map((x) => {
-    // a time inside the free gap and the meal's range, nearest the usual time; untimed if nothing fits
-    const earliest = Math.max(gap.from, after && after.startMin !== null ? after.startMin + after.durationMin + (x.detourMin ?? 0) / 2 : gap.from);
-    const latest = Math.min(gap.to, before && before.startMin !== null ? before.startMin - dur - (x.detourMin ?? 0) / 2 : gap.to) ;
-    const startMin = latest >= earliest ? Math.round(Math.min(latest, Math.max(earliest, gap.usual)) / 5) * 5 : null;
-    return {
-      type: "add",
-      clientId: `ai:${createHash("sha256").update(`${day.id}|${x.candidate.placeId}|${day.fingerprint}`).digest("hex").slice(0, 32)}`,
-      candidate: { ...x.candidate, detourKm: x.detourKm },
-      kind: "food",
-      startMin: startMin !== null && startMin + dur <= 23 * 60 + 59 ? startMin : null,
-      durationMin: dur,
-      meal: gap.meal,
-      reason: x.labels.join(" · "),
-      warning: diet ? "Google can't confirm allergens or dietary suitability. Check with the restaurant before you go." : null,
-    };
-  });
-  const caveats = ["Distances and detours are straight-line estimates; calculate the route once it's in the plan.", "Opening hours for your visit date aren't checked here; open the place to see Google's hours."];
+  const dur = MEAL_DURATION_MIN[gap.meal] ?? 60;
+  const room = Math.min(gap.to, before?.startMin ?? gap.to) - Math.max(gap.from, after && after.startMin !== null ? after.startMin + after.durationMin : gap.from);
+  const noRoom = room < dur;
+  const changes: PlanChange[] = top.map(({ x, slot }) => ({
+    type: "add",
+    clientId: `ai:${createHash("sha256").update(`${day.id}|${x.candidate.placeId}|${day.fingerprint}`).digest("hex").slice(0, 32)}`,
+    candidate: { ...x.candidate, detourKm: x.detourKm },
+    kind: "food",
+    startMin: slot.startMin,
+    durationMin: slot.durationMin,
+    meal: gap.meal,
+    reason: [...x.labels, slot.hours === "confirmed" ? "Open then" : null].filter(Boolean).join(" · "),
+    warning: [slot.hours !== "confirmed" ? slot.note : null, diet ? "Google can't confirm allergens or dietary suitability. Check with the restaurant before you go." : null].filter(Boolean).join(" ") || null,
+    hours: slot.hours,
+    hoursNote: slot.note,
+  }));
+  const caveats = [
+    "Times allow the meal plus 30 minutes before closing. Closing time isn't a last-order time unless Google lists kitchen hours.",
+    "Travel to and from each place is a straight-line walking estimate; calculate the route once it's in the plan.",
+  ];
+  if (dropped > 0 && !noRoom) caveats.unshift(`${dropped} nearby place${dropped === 1 ? " was" : "s were"} left out: closed, or not open long enough for the meal, at the times that fit your day.`);
   if (diet) caveats.push("Allergy and dietary information isn't verified by Google. Ask each restaurant directly.");
+  const word = gap.meal.replace("_", " ");
   return {
     action: "eat",
     meal: gap.meal,
     dayId: day.id,
     basedOn: day.fingerprint,
-    summary: picks.length ? "" : "Google found no restaurants near this part of the route.",
+    summary: top.length
+      ? ""
+      : noRoom && after && before
+        ? `There's only ${Math.max(0, room)} min between ${after.title} and ${before.title}, not enough for a ${dur}-minute ${word} and the walk there. Move a stop or shorten one to make room.`
+        : ranked.length
+          ? `None of the nearby restaurants is open long enough for ${word} in the time your day leaves (${hhmm(gap.from)}–${hhmm(gap.to)}). Try another meal time, or move a stop to make room.`
+          : "Google found no restaurants near this part of the route.",
     changes,
     caveats,
     preferences: { used: { ...p.travel, food: { cuisines: p.food.cuisines, price: p.food.price, hasDiet: diet } }, hard: hardConstraints(p) },
-    picks: picks.map((x, i) => ({ ...x, changeId: changeId(changes[i]) })),
+    picks: top.map(({ x }, i) => ({ ...x, changeId: changeId(changes[i]) })),
   };
 }
 

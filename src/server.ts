@@ -10,6 +10,7 @@ import { openDb } from "./db.ts";
 import { HttpError } from "./errors.ts";
 import { createDiscovery } from "./discovery.ts";
 import { computeRouteOptions, DEMO_PLACES, googleConfigured, mapsKeyWarnings, nearbyPlaces, placeDetails, searchPlaces } from "./google.ts";
+import { clock as clockOf, hoursOn, mealFits } from "./hours.ts";
 import { type Candidate, changeId, createPlanner, dayCentre, eatDraft, freeSlots, mealSearchPoints, nearbyDraft, type PlanDraft, searchTypes, toCandidates } from "./planner.ts";
 import { createPreferences } from "./preferences.ts";
 import { createItineraryStore } from "./itineraries.ts";
@@ -562,8 +563,28 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     }
     const d = entry.draft;
     const wanted = Array.isArray(input.changeIds) ? new Set(input.changeIds.filter((x): x is string => typeof x === "string")) : null;
-    const chosen = wanted ? d.changes.filter((c) => wanted.has(changeId(c))) : d.changes;
-    if (!chosen.length) throw new HttpError(400, "Choose at least one suggestion to apply.");
+    const picked = wanted ? d.changes.filter((c) => wanted.has(changeId(c))) : d.changes;
+    if (!picked.length) throw new HttpError(400, "Choose at least one suggestion to apply.");
+    // a person may change a suggestion's time or length before adding it; the
+    // hours check below then runs on what's actually being saved
+    const edits = input.edits && typeof input.edits === "object" ? (input.edits as Record<string, { startMin?: unknown; durationMin?: unknown }>) : {};
+    const chosen = picked.map((c) => {
+      const e = edits[changeId(c)];
+      if (c.type !== "add" || !e) return c;
+      const startMin = e.startMin === null ? null : Number.isInteger(e.startMin) ? (e.startMin as number) : c.startMin;
+      const durationMin = Number.isInteger(e.durationMin) && (e.durationMin as number) >= 5 && (e.durationMin as number) <= 600 ? (e.durationMin as number) : c.durationMin;
+      return { ...c, startMin, durationMin };
+    });
+    // Every restaurant is re-checked against its opening hours on the trip's
+    // date before anything is written, whichever action made it (eat,
+    // optimize). A time its known hours rule out is refused for review, never
+    // applied quietly.
+    const tripDay = trips.view(user.id, tripId).days.find((x) => x.id === d.dayId);
+    for (const c of chosen) {
+      if (c.type !== "add" || c.kind !== "food" || c.startMin === null || !tripDay) continue;
+      const fit = mealFits(hoursOn(c.candidate.hours ?? null, tripDay.date), c.startMin, c.durationMin);
+      if (!fit.ok) throw new HttpError(409, `${c.candidate.name}: ${fit.message}${fit.latestStart !== null ? ` The latest start that fits is ${clockOf(fit.latestStart)}.` : ""}`, { code: "hours", changeId: changeId(c), latestStart: fit.latestStart });
+    }
     const snap = trips.applyPlan(user.id, tripId, {
       dayId: d.dayId,
       basedOn: d.basedOn,

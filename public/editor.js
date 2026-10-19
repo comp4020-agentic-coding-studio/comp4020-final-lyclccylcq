@@ -1,3 +1,4 @@
+import { CLOSING_BUFFER_MIN, clock, hoursOn, mealFits } from "/hours.js";
 import { createMap } from "/map.js";
 import { createVoice } from "/voice.js";
 import {
@@ -61,6 +62,8 @@ export async function openEditor(root, tripId, ctx) {
     confirming: null, // proposal key awaiting "Confirm change"
   };
   let voice = null;
+  S.mealEdits = {}; // a suggestion's time or length, changed before adding
+  S.hoursProblem = null; // an hours refusal from the server, shown on its card
   api("/api/me/preferences").then((r) => { S.prefs = r.preferences; renderTimeline(); }).catch(() => {});
   const params = new URLSearchParams(location.search);
   if (params.has("new")) history.replaceState(history.state, "", location.pathname);
@@ -923,6 +926,13 @@ export async function openEditor(root, tripId, ctx) {
   // a map click would (pickPlace), using the place id Google returned. On a
   // phone the map is behind another tab, so show it. Opening the place that's
   // already open and loaded makes no new request. Nothing is added.
+  // the assistant's current suggestion for a place, if it made one
+  function suggestionFor(placeId) {
+    const v = S.plan;
+    if (!v?.draft || v.dayId !== day()?.id) return null;
+    return v.draft.changes.find((c) => c.type === "add" && c.candidate.placeId === placeId) ?? null;
+  }
+
   function openSuggestedPlace(g) {
     if (S.starting) return;
     if (isPhone()) setTab("map");
@@ -1130,7 +1140,7 @@ export async function openEditor(root, tripId, ctx) {
               )
             : h(
               "button",
-              { class: "btn btn-primary add-to-trip", type: "button", disabled: Boolean(p.pending), onclick: () => scheduleCard({ title: p.name, kind: guessKind(p.types), types: p.types, place: { placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng } }) },
+              { class: "btn btn-primary add-to-trip", type: "button", disabled: Boolean(p.pending), onclick: () => scheduleCard({ title: p.name, kind: guessKind(p.types), types: p.types, place: { placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng }, hours: S.placeDetails?.hours ?? suggestionFor(p.placeId)?.candidate.hours ?? null, preset: suggestionFor(p.placeId) }) },
               icon("plus"),
               visits.length ? "Add another visit" : "Add to Itinerary",
             ),
@@ -1142,7 +1152,10 @@ export async function openEditor(root, tripId, ctx) {
   // The scheduling card: a small dialog over the place card. Nothing is
   // shared until "Confirm & add"; Cancel leaves the plan and the place card as
   // they were. custom: a spot picked on the map, so the name is editable.
-  function scheduleCard({ title, kind, place, types = [], custom = false }) {
+  // hours: Google's structured opening hours, when known (warnings only; the
+  // server never trusts them from here). preset: a time, length and meal a
+  // planning-assistant suggestion already checked against those hours.
+  function scheduleCard({ title, kind, place, types = [], custom = false, hours = null, preset = null }) {
     const days = S.trip.days;
     const current = day();
     const clientId = uid();
@@ -1166,6 +1179,7 @@ export async function openEditor(root, tripId, ctx) {
     const prevOf = (d) => [...(d?.activities ?? [])].filter((a) => a.startMin !== null).sort((a, b) => a.startMin + a.durationMin - (b.startMin + b.durationMin)).pop() ?? null;
     const error = h("p", { class: "form-error", role: "alert", hidden: true });
     const hint = h("p", { class: "muted small schedule-hint" });
+    const hoursNote = h("div", { class: "schedule-hours", role: "status", "aria-live": "polite", hidden: true });
     const form = h(
       "form",
       { method: "dialog", class: "stack" },
@@ -1182,6 +1196,7 @@ export async function openEditor(root, tripId, ctx) {
         h("label", { class: "field" }, h("span", {}, "Visit length (min)"), h("input", { name: "duration", type: "number", min: 5, max: 1440, step: 5, required: true, value: KIND_DURATION[kind] ?? 60 })),
       ),
       hint,
+      hoursNote,
       h("label", { class: "field" }, h("span", {}, "Notes (optional)"), h("textarea", { name: "notes", rows: 2, maxlength: 2000, placeholder: "Book ahead, what to try, who's coming…" })),
       error,
       h(
@@ -1234,8 +1249,45 @@ export async function openEditor(root, tripId, ctx) {
     if (dining) {
       const t = parseTime(form.start.value);
       const fits = Object.entries(S.trip.mealTimes).find(([, r]) => t >= r.from && t < r.to);
-      pickMeal(fits ? fits[0] : null);
+      pickMeal(preset?.meal ?? (fits ? fits[0] : null));
     }
+    // a suggestion's checked time and length win over the general guess
+    if (preset) {
+      if (preset.startMin !== null) form.start.value = hhmm(preset.startMin);
+      if (preset.durationMin) form.duration.value = String(preset.durationMin);
+      hint.textContent = "Suggested by the planning assistant: fits the time around your other stops and the opening hours shown below. Change anything you like.";
+    }
+    // Every change of time, length or day is checked against Google's opening
+    // hours for that date. A warning, never a silent change: the time stays
+    // what the person chose, with a one-click way to the latest that fits.
+    const checkHours = () => {
+      if (!hours || !dining) return void (hoursNote.hidden = true);
+      const date = days.find((x) => x.id === form.dayId.value)?.date;
+      const start = parseTime(form.start.value);
+      const length = Number(form.duration.value);
+      if (!date || !Number.isFinite(start) || !(length > 0)) return void (hoursNote.hidden = true);
+      const day = hoursOn(hours, date);
+      const fit = mealFits(day, start, length);
+      hoursNote.hidden = false;
+      hoursNote.className = `schedule-hours ${fit.ok ? (day.basis === "dated" ? "is-ok" : "is-unsure") : "is-bad"}`;
+      if (fit.ok) {
+        const closes = fit.closesAt !== null && fit.closesAt < 2 * 1440 ? ` (closes ${clock(fit.closesAt)})` : "";
+        fill(hoursNote, day.basis === "dated" ? `Open for the whole meal${closes}, with ${CLOSING_BUFFER_MIN} min to spare.` : `Fits its usual hours${closes}, but Google hasn't confirmed them for this date.${day.special ? " It's a special day here." : ""}`);
+        return;
+      }
+      fill(
+        hoursNote,
+        h("strong", {}, fit.reason === "too_late" ? "This meal may finish too late." : fit.reason === "kitchen" ? "The kitchen may be closed." : "It may be closed then."),
+        " ",
+        fit.message,
+        fit.latestStart !== null &&
+          h("button", { class: "linklike", type: "button", onclick: () => { form.start.value = hhmm(fit.latestStart); checkHours(); } }, ` Use ${hhmm(fit.latestStart)}`),
+        day.basis !== "dated" && h("span", { class: "muted" }, " (usual hours; not confirmed for this date)"),
+      );
+    };
+    for (const f of [form.start, form.duration, form.dayId]) f.addEventListener("input", checkHours);
+    form.dayId.addEventListener("change", checkHours);
+    checkHours();
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const btn = form.querySelector("[type=submit]");
@@ -1849,17 +1901,46 @@ export async function openEditor(root, tripId, ctx) {
           }
         },
       },
-      h("div", { class: "pa-card-top" }, h("h4", {}, g.name), c.startMin !== null && h("span", { class: "pa-time" }, hhmm(c.startMin))),
+      h("div", { class: "pa-card-top" }, h("h4", {}, g.name), (S.mealEdits[c.id]?.startMin ?? c.startMin) !== null && h("span", { class: "pa-time" }, hhmm(S.mealEdits[c.id]?.startMin ?? c.startMin))),
       h("p", { class: "pa-facts" }, facts),
       extra && h("p", { class: "pa-facts" }, extra),
       pick?.labels?.length > 0 && h("p", { class: "pa-labels" }, pick.labels.map((l) => h("span", { class: "pa-label" }, l))),
+      c.hours && h("p", { class: `pa-hours pa-hours-${c.hours}`, "data-hours": c.hours }, c.hours === "confirmed" ? (c.hoursNote ?? "Open then") : c.hours === "unverified" ? "Hours not confirmed for this date" : "No opening hours from Google"),
       c.warning && h("p", { class: "small leg-warn", "data-warning": "diet" }, c.warning),
+      S.hoursProblem?.changeId === c.id &&
+        h(
+          "div",
+          { class: "pa-hours-problem", role: "alert", onclick: (e) => e.stopPropagation() },
+          h("p", { class: "small" }, h("strong", {}, "This doesn't fit its opening hours. "), S.hoursProblem.message),
+          h(
+            "div",
+            { class: "row-actions" },
+            S.hoursProblem.latestStart !== null && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.mealEdits[c.id] = { ...(S.mealEdits[c.id] ?? {}), startMin: S.hoursProblem.latestStart }; S.hoursProblem = null; renderCopilot(); } }, `Use ${hhmm(S.hoursProblem.latestStart)}`),
+            h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.hoursProblem = null; renderCopilot(); } }, "Another restaurant"),
+            h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => openSuggestedPlace(g) }, "Opening hours"),
+          ),
+        ),
       !stale &&
         h(
           "div",
           // the card's own click opens the place; these buttons don't
           { class: "pa-card-actions", onclick: (e) => e.stopPropagation(), onkeydown: (e) => e.stopPropagation() },
           h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.previewId = previewing ? null : c.id; renderCopilot(); renderMap(); renderTimeline(); map.focus({ lat: g.lat, lng: g.lng }); } }, previewing ? "Hide preview" : "Preview"),
+          c.kind === "food" &&
+            h(
+              "label",
+              { class: "pa-dur" },
+              h("span", { class: "sr-only" }, "Meal length"),
+              h(
+                "select",
+                {
+                  "aria-label": "Meal length",
+                  "data-meal-length": c.id,
+                  onchange: (e) => { S.mealEdits[c.id] = { ...(S.mealEdits[c.id] ?? {}), durationMin: Number(e.target.value) }; S.hoursProblem = null; renderCopilot(); },
+                },
+                [30, 45, 60, 75, 90, 120].map((m) => h("option", { value: m, selected: (S.mealEdits[c.id]?.durationMin ?? c.durationMin) === m }, `${m} min`)),
+              ),
+            ),
           h("button", { class: "btn btn-primary btn-sm", type: "button", "data-plan-action": "apply-one", onclick: (e) => applyChanges(d, draft, [c.id], e.currentTarget) }, "Add"),
         ),
     );
@@ -1890,11 +1971,20 @@ export async function openEditor(root, tripId, ctx) {
   async function applyChanges(d, draft, ids, btn) {
     if (btn) btn.disabled = true;
     try {
-      applySnapshot(await api(`${base}/plan/apply`, { method: "POST", body: { draftId: draft.draftId, ...(ids ? { changeIds: ids } : {}) } }));
+      const edits = Object.fromEntries((ids ?? draft.changes.map((x) => x.id)).filter((id) => S.mealEdits[id]).map((id) => [id, S.mealEdits[id]]));
+      applySnapshot(await api(`${base}/plan/apply`, { method: "POST", body: { draftId: draft.draftId, ...(ids ? { changeIds: ids } : {}), ...(Object.keys(edits).length ? { edits } : {}) } }));
       toast(ids?.length === 1 ? "Added to the plan for everyone on the trip." : "Plan applied for everyone on the trip.");
       S.plan = null;
       S.previewId = null;
+      S.mealEdits = {};
+      S.hoursProblem = null;
     } catch (err) {
+      if (err.status === 409 && err.data?.code === "hours") {
+        // nothing was applied; show why on that card and let the person choose
+        S.hoursProblem = { changeId: err.data.changeId, message: err.message.replace(/^[^:]+: /, ""), latestStart: err.data.latestStart ?? null };
+        if (btn) btn.disabled = false;
+        return void renderCopilot();
+      }
       S.plan = { ...S.plan, error: err.status === 409 ? "The day changed since these suggestions were made, so nothing was applied." : err.message };
     }
     renderCopilot();

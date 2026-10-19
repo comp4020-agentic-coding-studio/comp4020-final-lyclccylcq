@@ -1,5 +1,6 @@
 import { log, sanitize } from "./log.ts";
 import { DESTINATIONS } from "./curated.ts";
+import { type GHours, hoursFromGoogle } from "./hours.ts";
 import { HttpError } from "./errors.ts";
 import { haversineKm, type LatLng } from "./geo.ts";
 import type { Mode, RouteOption, RouteStep, TransitStep } from "./schedule.ts";
@@ -233,6 +234,7 @@ export type NearbyPlace = PlaceSummary & {
   ratingCount?: number | null;
   thumb?: { uri: string; credit: string[] } | null;
   priceLevel?: string | null;
+  hours?: GHours | null;
 };
 
 // rich: the editor's map-click list, which also shows rating and a small
@@ -250,7 +252,11 @@ export async function nearbyPlaces(center: LatLng, radiusM: number, type: string
   const types = FOOD_TYPES.has(type) ? { includedPrimaryTypes: [type] } : { includedTypes: [type] };
   const data = await google(`${PLACES()}/v1/places:searchNearby`, {
     method: "POST",
-    fieldMask: (rich ? `${LIST_MASK},places.rating,places.userRatingCount,places.photos` : LIST_MASK) + (withPrice ? `,places.priceLevel${rich ? "" : ",places.rating,places.userRatingCount"}` : ""),
+    // withPrice adds the planner's fields in the same request: price, rating,
+    // and structured opening hours (regular, dated current, kitchen)
+    fieldMask:
+      (rich ? `${LIST_MASK},places.rating,places.userRatingCount,places.photos` : LIST_MASK) +
+      (withPrice ? `,places.priceLevel${rich ? "" : ",places.rating,places.userRatingCount"},places.regularOpeningHours.periods,places.currentOpeningHours.periods,places.currentOpeningHours.specialDays,places.regularSecondaryOpeningHours` : ""),
     body: { ...types, maxResultCount: rich ? 10 : 12, rankPreference: "POPULARITY", locationRestriction: circle(center, radiusM) },
   });
   // Google's popularity order is kept; distance is shown, not used to re-sort.
@@ -261,7 +267,7 @@ export async function nearbyPlaces(center: LatLng, radiusM: number, type: string
       ...s,
       distanceKm: Math.round(haversineKm(center, s) * 10) / 10,
       ...(withPrice
-        ? { priceLevel: PRICE[p.priceLevel] ?? null, rating: typeof p.rating === "number" ? p.rating : null, ratingCount: typeof p.userRatingCount === "number" ? p.userRatingCount : null }
+        ? { priceLevel: PRICE[p.priceLevel] ?? null, rating: typeof p.rating === "number" ? p.rating : null, ratingCount: typeof p.userRatingCount === "number" ? p.userRatingCount : null, hours: hoursFromGoogle(p) }
         : {}),
     };
   });
@@ -334,6 +340,7 @@ export type PlaceReview = {
 };
 
 export type PlaceGuide = PlaceDetails & {
+  hours: GHours | null; // structured periods, for checking a planned visit (src/hours.ts)
   summary: string | null; // Google's editorial summary, when it has one
   website: string | null;
   price: string | null;
@@ -375,14 +382,14 @@ const photoRef = (p: any) => ({
 export async function placeGuide(placeId: string): Promise<PlaceGuide> {
   const demo = DEMO_PLACES.find((p) => p.placeId === placeId);
   if (demo) {
-    return { ...demo, rating: null, ratingCount: null, openingHours: null, openNow: null, googleMapsUri: null, photo: null, summary: null, website: null, price: null, features: [], photos: [], reviews: [] };
+    return { ...demo, rating: null, ratingCount: null, openingHours: null, openNow: null, googleMapsUri: null, photo: null, hours: null, summary: null, website: null, price: null, features: [], photos: [], reviews: [] };
   }
   if (!validPlaceId(placeId)) throw new HttpError(400, "That isn't a place id.");
   const data = await google(`${PLACES()}/v1/places/${encodeURIComponent(placeId)}`, {
     method: "GET",
     fieldMask: [
       "id,displayName,formattedAddress,location,primaryTypeDisplayName,types,rating,userRatingCount",
-      "regularOpeningHours.weekdayDescriptions,currentOpeningHours.openNow,googleMapsUri,photos",
+      "regularOpeningHours.weekdayDescriptions,regularOpeningHours.periods,currentOpeningHours.openNow,currentOpeningHours.periods,currentOpeningHours.specialDays,regularSecondaryOpeningHours,googleMapsUri,photos",
       "editorialSummary,websiteUri,priceLevel,reviews",
       FEATURES.map(([f]) => f).join(","),
     ].join(","),
@@ -405,6 +412,7 @@ export async function placeGuide(placeId: string): Promise<PlaceGuide> {
     rating: typeof data.rating === "number" ? data.rating : null,
     ratingCount: typeof data.userRatingCount === "number" ? data.userRatingCount : null,
     openingHours: data.regularOpeningHours?.weekdayDescriptions ?? null,
+    hours: hoursFromGoogle(data),
     openNow: typeof data.currentOpeningHours?.openNow === "boolean" ? data.currentOpeningHours.openNow : null,
     googleMapsUri: data.googleMapsUri ?? null,
     photo: photos[0] ?? null,
