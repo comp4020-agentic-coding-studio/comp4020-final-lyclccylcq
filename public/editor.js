@@ -1,5 +1,4 @@
 import { createMap } from "/map.js";
-import { placeDialog } from "/places.js";
 import { createVoice } from "/voice.js";
 import {
   api,
@@ -920,6 +919,29 @@ export async function openEditor(root, tripId, ctx) {
     }
   }
 
+  // A suggestion from the planning assistant: open its Google place exactly as
+  // a map click would (pickPlace), using the place id Google returned. On a
+  // phone the map is behind another tab, so show it. Opening the place that's
+  // already open and loaded makes no new request. Nothing is added.
+  function openSuggestedPlace(g) {
+    if (S.starting) return;
+    if (isPhone()) setTab("map");
+    S.explore = null;
+    S.results = [];
+    if (S.previewId) {
+      // the preview's marker and the place's marker share one slot on the map
+      S.previewId = null;
+      renderTimeline();
+    }
+    if (S.place?.placeId === g.placeId && S.placeDetails && !S.placeDetails.error) {
+      renderSearch();
+      renderCopilot();
+      return void map.focus({ lat: g.lat, lng: g.lng });
+    }
+    pickPlace({ placeId: g.placeId, name: g.name, lat: g.lat, lng: g.lng, source: g.source === "demo" ? "demo" : "google", category: g.category, types: [], pending: true });
+    renderCopilot(); // after S.place is set, so the opened card is marked
+  }
+
   // every stop already planned at this place, on any day
   const visitsOf = (placeId) =>
     S.trip.days.flatMap((d, di) => d.activities.filter((a) => a.place?.placeId === placeId).map((a) => ({ a, day: di + 1 })));
@@ -1806,9 +1828,27 @@ export async function openEditor(root, tripId, ctx) {
     const previewing = S.previewId === c.id;
     const facts = [g.category, g.rating != null ? `★ ${g.rating.toFixed(1)}${g.ratingCount != null ? ` (${g.ratingCount.toLocaleString()})` : ""}` : "No Google rating", g.priceLevel].filter(Boolean).join(" · ");
     const extra = pick?.detourMin != null ? `about ${pick.detourMin} min extra walking (straight-line estimate)` : null;
+    const open = S.place?.placeId === g.placeId;
+    // the whole card opens the place in the editor's own place card, the same
+    // one a click on the map opens (details, photos, Add to Itinerary)
+    const openPlace = () => openSuggestedPlace(g);
     return h(
       "article",
-      { class: `pa-card${previewing ? " previewing" : ""}`, "data-change": c.id },
+      {
+        class: `pa-card pa-card-link${previewing ? " previewing" : ""}${open ? " open" : ""}`,
+        "data-change": c.id,
+        role: "button",
+        tabindex: 0,
+        "aria-label": `Show ${g.name} on the map`,
+        "aria-current": open ? "true" : null,
+        onclick: openPlace,
+        onkeydown: (e) => {
+          if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+            e.preventDefault();
+            openPlace();
+          }
+        },
+      },
       h("div", { class: "pa-card-top" }, h("h4", {}, g.name), c.startMin !== null && h("span", { class: "pa-time" }, hhmm(c.startMin))),
       h("p", { class: "pa-facts" }, facts),
       extra && h("p", { class: "pa-facts" }, extra),
@@ -1817,9 +1857,9 @@ export async function openEditor(root, tripId, ctx) {
       !stale &&
         h(
           "div",
-          { class: "pa-card-actions" },
+          // the card's own click opens the place; these buttons don't
+          { class: "pa-card-actions", onclick: (e) => e.stopPropagation(), onkeydown: (e) => e.stopPropagation() },
           h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.previewId = previewing ? null : c.id; renderCopilot(); renderMap(); renderTimeline(); map.focus({ lat: g.lat, lng: g.lng }); } }, previewing ? "Hide preview" : "Preview"),
-          h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => placeDialog({ placeId: g.placeId, name: g.name, lat: g.lat, lng: g.lng, source: "google" }, ctx) }, "Details"),
           h("button", { class: "btn btn-primary btn-sm", type: "button", "data-plan-action": "apply-one", onclick: (e) => applyChanges(d, draft, [c.id], e.currentTarget) }, "Add"),
         ),
     );
