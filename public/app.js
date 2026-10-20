@@ -1,5 +1,6 @@
 import { openEditor } from "/editor.js";
 import { renderHome } from "/home.js";
+import { CREDITS as JOURNEY_CREDITS } from "/journey.js";
 import { HERO_CLIPS } from "/media.js";
 import { coverImg, PHOTOS, photoFor } from "/photos.js";
 import { renderPreview } from "/preview.js";
@@ -38,6 +39,11 @@ async function route() {
   if (itinerary) return void (cleanup = await renderPreview(app, itinerary[1], ctx()));
   if (path === "/privacy") return renderPrivacy();
   if (path === "/credits") return renderCredits();
+  if (path === "/experiments/pixel-train") {
+    // experimental, unlinked: loaded only when someone opens this address
+    const { renderPixelTrain } = await import("/pixel-train.js");
+    return void (cleanup = renderPixelTrain(app, ctx()));
+  }
   if (path === "/login") return state.me ? navigate(next || "/", { replace: true }) : renderAuth(next);
 
   // everything else needs an account
@@ -193,7 +199,11 @@ function renderCredits() {
       "main",
       { class: "readme" },
       h("h1", {}, "Photo and video credits"),
-      h("p", {}, "The destination photos and the homepage video clips on Wayline come from Wikimedia Commons. Each is shown resized (clips are also shortened and silent), under the license named below. Place photos inside place details come from Google Maps and are credited where they appear."),
+      h("p", {}, "The destination photos, journey scenery and video clips on Wayline come from Wikimedia Commons. Photos are resized, cropped and gently colour-graded; clips are shortened and silent. Each is used under the license named below. Place photos inside place details come from Google Maps and are credited where they appear."),
+      h("h2", {}, "Journey window"),
+      h("ul", { class: "credits-list" }, JOURNEY_CREDITS.map((c) =>
+        h("li", {}, h("strong", {}, c.title), " · ", ext(c.page, c.author), " · ", ext(c.licenseUrl, c.license, "noopener license")),
+      )),
       h("h2", {}, "Videos"),
       h(
         "ul",

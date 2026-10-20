@@ -1,5 +1,6 @@
 import { createExploreMap } from "/explore-map.js";
-import { photoStream, streamItems, videoHero } from "/media.js";
+import { journeyHero } from "/journey-hero.js";
+import { photoStream, streamItems } from "/media.js";
 import { coverImg, photoCredit, photoFor } from "/photos.js";
 import { placeDialog } from "/places.js";
 import { api, dur, fmtRange, h, icon, km, relTime, uid } from "/ui.js";
@@ -141,15 +142,15 @@ export function renderHome(app, ctx) {
     ),
   );
 
-  // the cinematic hero: inspiration and two ways in, nothing to fill in
-  const hero = videoHero({
-    title: "Wayline",
-    tagline: "Plan together. Travel better.",
-    fallbackKey: "dest-paris",
-    actions: [
-      h("button", { class: "btn btn-primary btn-lg", type: "button", onclick: () => (me ? ctx.createTrip() : navigate("/login?next=/")) }, "Start planning"),
-      h("button", { class: "btn btn-ghost-light btn-lg", type: "button", onclick: () => regions.scrollIntoView({ behavior: "smooth" }) }, "Explore trips"),
-    ],
+  // the journey hero: a window travelling through five destinations, and
+  // two ways in, nothing to fill in. A destination without a curated trip
+  // is shown on the map below instead.
+  const hero = journeyHero({
+    start: () => (me ? ctx.createTrip() : navigate("/login?next=/")),
+    onSearch: (place) => {
+      setDestination(place);
+      explore.el.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    },
   });
 
   // search a destination or use your location: where nearby ideas come from
@@ -603,7 +604,7 @@ export function renderHome(app, ctx) {
   streamHead.querySelector("h2").id = "ps-h";
   function renderStream() {
     // Follows what the visitor picked (region, then country), never the
-    // hero's clips. Too few photos for a country: its region's; too few for
+    // hero's scenes. Too few photos for a country: its region's; too few for
     // the region: everywhere, so the row never looks empty.
     const all = streamItems(D.destinations, D.itineraries);
     const inArea = S.area === AREA_ALL ? all : all.filter((x) => x.dest.area === S.area);

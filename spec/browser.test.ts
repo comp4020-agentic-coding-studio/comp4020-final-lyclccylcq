@@ -213,7 +213,7 @@ describe.skipIf(!chromePath)("homepage discovery in a real browser", () => {
     await page.goto(new URL("/", baseUrl).href);
     await page.waitFor(`${general}.length > 4 && document.querySelectorAll('.ps-tile').length > 0`);
     const order = await page.eval<string[]>(`[...document.querySelector('main.home').children].filter(e => !e.hidden).map(e => e.id || e.className.split(' ')[0])`);
-    expect(order.slice(0, 4)).toEqual(["vh", "explore-map", "ps", "explore"]);
+    expect(order.slice(0, 4)).toEqual(["jh", "explore-map", "ps", "explore"]);
     // the search sits in the map section, and the region filters sit with the cards they filter
     expect(await page.eval(`Boolean(document.querySelector('#explore-map #dest-search') && document.querySelector('#explore .rx-tabs') && document.querySelector('#explore #itineraries'))`)).toBe(true);
     // a region filters both the cities and the itineraries under it
@@ -230,7 +230,7 @@ describe.skipIf(!chromePath)("homepage discovery in a real browser", () => {
     await page.viewport(390, 844, true);
     await page.geolocation(baseUrl, { lat: -35.2835, lng: 149.1281 }); // central Canberra
     await page.goto(new URL("/", baseUrl).href);
-    await page.waitFor(`document.querySelector('.vh-title')?.textContent === 'Wayline'`);
+    await page.waitFor(`document.querySelector('.jh-title')?.textContent === 'Every journey begins somewhere.'`);
     await page.waitFor(`${general}.length > 4 && document.querySelector('#near').hidden`); // general content before any location
     await page.eval(`[...document.querySelectorAll('button')].find(b => b.textContent.includes('Use my location')).click()`);
     await page.waitFor(`document.querySelector('.chip-place') && ${cards}.length === 4`);

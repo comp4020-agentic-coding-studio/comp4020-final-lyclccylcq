@@ -64,7 +64,7 @@ contradict the README, stop and ask. Don't quietly change the product.
 - The homepage is public: anyone can browse curated itineraries, search
   destinations and preview. Trips, copying an itinerary and invites need an
   account.
-- Homepage order (October 2026 redesign, search first): video hero; "Where
+- Homepage order (October 2026 redesign, search first): journey window; "Where
   would you like to go?" (destination search, the location offer and the
   explore map, right under the hero); the photo stream; "Near you" / "Ideas
   for …" (only once a place is chosen); "Explore ready-made trips" (region
@@ -77,12 +77,21 @@ contradict the README, stop and ask. Don't quietly change the product.
   published trips carry no region and never appear there. Opening a
   destination card, a city photo or a quick pick sets the *destination*,
   never the current location.
-- The hero and photo stream are decoration over a page that works without
-  them (`public/media.js`, `docs/media.md`): the poster shows first, video
-  never plays with reduced motion or Save-Data and pauses off screen, one
-  `<video>` decodes at a time, the stream's drift only runs on wide
-  hover-capable screens without reduced motion. Clips are self-hosted from
-  `public/video/`, served with byte ranges.
+- The journey window and photo stream are decoration over a page that works
+  without them. `public/journey.js` holds the five destinations, photo
+  geometry and automatic playback; `public/journey-hero.js` renders them.
+  Switzerland, London, Sydney, Maldives and Shanghai loop independently of
+  page scrolling. Never capture wheel/touch input or pin the hero. Include
+  a pause control; stop off screen, in hidden tabs, with reduced motion or
+  Save-Data. Manual destination choices restart their hold without moving
+  the page. Each photo stays one whole layer, never tiled or split.
+  Credits follow the visible photo and all sources appear on `/credits`
+  and in `public/img/train/CREDITS.md`. Missing photos retain the last
+  successful view and its credit. Load only the current and next photos,
+  or only a chosen photo with reduced motion/Save-Data. The old experiment
+  address renders the same homepage. The stream's drift runs only on wide
+  hover-capable screens without reduced motion. The former video hero in
+  `public/media.js` remains unused; its clips stay credited and self-hosted.
 - Curated itineraries are Wayline's own templates (`itinerary_templates`,
   `src/curated.ts`), labelled "Curated by Wayline". Never present them as
   user-generated, and never add ratings, view counts or popularity numbers to
@@ -382,7 +391,8 @@ contradict the README, stop and ask. Don't quietly change the product.
   (erasable syntax only: no `enum`, no parameter properties, imports end in
   `.ts`). Client is hand-written HTML/CSS/JS modules in `public/` with no build
   step: `app.js` (routing, nav, auth, dashboard, join), `home.js` (the
-  discovery homepage), `media.js` (its video hero and photo stream),
+  discovery homepage), `journey-hero.js` / `journey.js` (its automatic
+  scenery), `media.js` (the photo stream and former video hero),
   `preview.js` (itinerary preview), `places.js` (place inspector), `editor.js` (the trip workspace), `map.js` (Google map or
   labelled schematic), `ui.js` (helpers). Server-side Google calls live only
   in `src/google.ts`, behind `src/discovery.ts` and the trip routes.

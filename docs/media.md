@@ -3,8 +3,8 @@
 Every photo and video clip on the homepage is a freely licensed Wikimedia
 Commons file, resized (and, for video, shortened and muted) and served from
 the app itself. Nothing is hotlinked. Each item's credit is in code next to
-the file (`public/photos.js`, `public/media.js`) and shown on `/credits`; the
-hero shows the playing clip's credit and the photo stream shows each photo's.
+the file (`public/photos.js`, `public/journey.js`, `public/media.js`) and shown on `/credits`; the
+journey window credits its visible photograph and the photo stream shows each photo's.
 `spec/photos.test.ts` checks every item has a free licence, an author where
 the licence needs one, a Commons page, and that the files exist and are
 served.
@@ -23,7 +23,35 @@ Rules for adding media:
   recognisable landmark and no cut inside the segment. The server answers byte-range requests for `/video/` (Safari needs
   them).
 
-## Hero video clips (`HERO_CLIPS`, `public/media.js`)
+## Automatic journey window
+
+The homepage now shows one window cycling through Switzerland, London,
+Sydney, Maldives and Shanghai. These are real photographs animated as a
+symbolic journey, not train footage or a real railway route. Sydney and
+Maldives replace the lower-quality Paris and Kyoto prototype images.
+
+The complete sources, authors, licences and adaptations are recorded in
+[`public/img/train/CREDITS.md`](../public/img/train/CREDITS.md); the runtime
+metadata lives in `public/journey.js`, and `/credits` lists all five.
+Photos are local WebP files, each under 760 KB; the scenery, rails and
+passing spruce together are under 4 MB. Each landscape stays whole,
+never repeated or split into independently moving strips.
+
+Playback uses one animation clock, holds each scene for 8.4 seconds and
+transitions for 1.8 seconds, looping after Shanghai. It leaves ordinary
+page scrolling alone. Pause/Play stops and resumes the scenery; choosing
+a destination restarts its hold. Playback stops off screen and in hidden
+tabs. Reduced motion and Save-Data show a still view with manual choices.
+Only the current and next photos load during playback; still mode loads
+only the selected scene. An unavailable photo leaves the previous view
+and its matching credit visible. Route changes destroy the observers and
+animation loop. `spec/pixel-train.test.ts` covers this final homepage
+behaviour, replacing the superseded scroll-prototype checks.
+
+## Former hero video clips (`HERO_CLIPS`, `public/media.js`)
+
+These clips remain self-hosted and credited, but the homepage no longer
+loads or plays them. The following records their sources and preparation.
 
 All 1280×720, 6 s, silent, in rotation order. The segment is which part of
 the source was used. Sydney is first: its poster is the still that shows

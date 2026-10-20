@@ -1197,29 +1197,117 @@ textarea { resize: vertical; }
 .schedule-hours .linklike { font-weight: 800; text-decoration: underline; }
 
 /* ===== Homepage, October 2026 redesign =====
-   Editorial travel: a calm warm-white page where photography and video
-   carry the colour. One accent (coral), one serif for display, the sans for
+   Editorial travel: a calm warm-white page where photography carries the
+   colour. One accent (coral), one serif for display, the sans for
    everything else. Full-width visuals alternate with structured sections. */
 .home { --hm-bg: #fbf9f5; --hm-soft: #f3f0ea; --hm-line: #e8e3da; background: var(--hm-bg); }
 
-/* cinematic hero */
-.vh { position: relative; min-height: min(78vh, 760px); display: grid; align-items: end; overflow: hidden; background: #1c2430; color: #fff; isolation: isolate; }
-.vh-stage { position: absolute; inset: 0; z-index: -2; }
-.vh-poster, .vh-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.vh-video { opacity: 0; transition: opacity 1.1s ease; }
-.vh-video.on { opacity: 1; }
-.vh-shade { position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, rgba(12, 16, 22, .18) 0%, rgba(12, 16, 22, .12) 40%, rgba(12, 16, 22, .62) 100%); }
-.vh-content { padding: 0 clamp(20px, 6vw, 88px) clamp(70px, 9vh, 110px); max-width: 980px; display: flex; flex-direction: column; gap: 14px; }
-.vh-title { font-family: var(--serif); font-weight: 600; font-size: clamp(56px, 10vw, 132px); letter-spacing: -.035em; line-height: .95; text-shadow: 0 2px 24px rgba(0, 0, 0, .25); }
-.vh-tagline { font-size: clamp(19px, 2.2vw, 26px); font-weight: 600; opacity: .95; text-shadow: 0 1px 12px rgba(0, 0, 0, .3); }
-.vh-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+/* the journey hero: the view through one large window with a thin walnut
+   frame, travelling by itself through five destinations (journey-hero.js).
+   An ordinary block: the page scrolls past it. A little of the next section
+   shows below it, so it's plain there's more. */
+.jh { position: relative; height: clamp(480px, calc(100svh - var(--bar-h) - 56px), 880px); overflow: hidden; background: #2a170c; color: #fff; isolation: isolate; }
+.jh-picture { position: absolute; inset: 0; overflow: hidden; }
+/* scenery, the tunnel and passing objects are clipped exactly to the glass */
+.jh-scene, .jh-tunnel, .jh-pass { position: absolute; inset: 0; clip-path: inset(var(--jh-gy) calc(100% - var(--jh-gx) - var(--jh-gw)) calc(100% - var(--jh-gy) - var(--jh-gh)) var(--jh-gx)); }
+.jh-scene { visibility: hidden; background: #2a3440; }
+.jh-photo { position: absolute; top: 0; left: 0; max-width: none; transform-origin: 0 0; will-change: transform; user-select: none; }
+.jh-scene:not(.jh-ready) .jh-photo { visibility: hidden; }
+/* everything in front of the scenery sits above the scenes' own stacking */
+.jh-tunnel { z-index: 10; visibility: hidden; pointer-events: none; overflow: hidden; }
+.jh-pass { z-index: 11; pointer-events: none; }
+.jh-glass { z-index: 12; }
+.jh-frame { z-index: 13; }
+.jh-ui { z-index: 14; }
+/* the tunnel wall: a dark band sliding across the glass from the right */
+.jh-band { position: absolute; top: 0; bottom: 0; left: 0; will-change: transform; background: linear-gradient(#0b0907, #17120d 30%, #120e0a 70%, #070605); }
+/* the portal's edges: soft shadows rather than hard lines */
+.jh-band::before, .jh-band::after { content: ""; position: absolute; top: 0; bottom: 0; width: 18%; }
+.jh-band::before { left: -1px; transform: translateX(-60%); background: linear-gradient(90deg, rgba(0, 0, 0, 0), #0d0a08); }
+.jh-band::after { right: -1px; transform: translateX(60%); background: linear-gradient(90deg, #0d0a08, rgba(0, 0, 0, 0)); }
+.jh-band-in { position: absolute; inset: 0; overflow: hidden; }
+.jh-lamps { position: absolute; left: 0; right: -840px; top: 28%; height: 12px; will-change: transform; background: repeating-linear-gradient(90deg, transparent 0 300px, rgba(255, 186, 96, .9) 330px 380px, transparent 420px); filter: blur(5px); }
+/* a near spruce crossing the glass, already motion-blurred in the image */
+.jh-passer { position: absolute; left: 0; top: 18%; height: 90%; width: 46vh; background: url("/img/train/pass-spruce.webp") no-repeat; background-size: auto 100%; opacity: .96; will-change: transform; }
+/* the glass: barely there. A faint sheen and the frame's soft shadow at its
+   edges; at night a dim warm reflection */
+.jh-glass { position: absolute; left: var(--jh-gx); top: var(--jh-gy); width: var(--jh-gw); height: var(--jh-gh); pointer-events: none;
+  background: linear-gradient(112deg, transparent 0 24%, rgba(255, 255, 255, .045) 28%, transparent 34% 70%, rgba(255, 255, 255, .03) 73%, transparent 77%);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .35), inset 0 6px 14px -6px rgba(0, 0, 0, .55), inset 0 -4px 10px -6px rgba(0, 0, 0, .35); }
+.jh-night .jh-glass { background:
+    linear-gradient(112deg, transparent 0 24%, rgba(255, 236, 210, .06) 28%, transparent 34% 70%, rgba(255, 236, 210, .04) 73%, transparent 77%),
+    radial-gradient(70% 50% at 50% 100%, rgba(255, 214, 160, .07), transparent 70%); }
+/* the frame: four walnut rails round the whole hero, mitred at 45° (each a
+   strip of one long moulding, never stretched or repeated); the bottom one
+   is the deeper sill. Dims at night and in tunnels. */
+.jh-frame { position: absolute; inset: 0; pointer-events: none; filter: brightness(calc(1 - var(--jh-dark, 0) * .45)); }
+.jh-rail { position: absolute; background-repeat: no-repeat; }
+.jh-rail-top { left: 0; right: 0; top: 0; height: var(--jh-frame); background-image: url("/img/train/frame-h.webp"); background-size: 4000px 100%;
+  clip-path: polygon(0 0, 100% 0, calc(100% - var(--jh-frame)) 100%, var(--jh-frame) 100%); }
+.jh-rail-bottom { left: 0; right: 0; bottom: 0; height: var(--jh-sill); background-image: url("/img/train/frame-h.webp"); background-size: 4000px 100%; background-position: -900px 0; transform: scaleY(-1);
+  clip-path: polygon(0 0, 100% 0, calc(100% - var(--jh-frame)) 100%, var(--jh-frame) 100%); }
+.jh-rail-left { top: 0; bottom: 0; left: 0; width: var(--jh-frame); background-image: url("/img/train/frame-v.webp"); background-size: 100% 2600px; background-position: 0 -300px;
+  clip-path: polygon(0 0, 100% var(--jh-frame), 100% calc(100% - var(--jh-sill)), 0 100%); }
+.jh-rail-right { top: 0; bottom: 0; right: 0; width: var(--jh-frame); background-image: url("/img/train/frame-v.webp"); background-size: 100% 2600px; background-position: 0 -1200px; transform: scaleX(-1);
+  clip-path: polygon(0 0, 100% var(--jh-frame), 100% calc(100% - var(--jh-sill)), 0 100%); }
+.jh-rail-bottom::after, .jh-rail-top::after { content: ""; position: absolute; inset: 0; }
+.jh-rail-bottom::after { background: linear-gradient(rgba(255, 220, 170, 0), rgba(255, 220, 170, .14)); }
+.jh-rail-top::after { background: rgba(0, 0, 0, .18); }
+
+/* the interface floats over the bottom of the view on a soft gradient,
+   never in an opaque box */
+.jh-ui { position: absolute; inset: 0; pointer-events: none; }
+.jh-ui a, .jh-ui button { pointer-events: auto; }
+.jh-pause { position: absolute; top: calc(var(--jh-gy) + 12px); right: calc(100% - var(--jh-gx) - var(--jh-gw) + 12px); min-height: 44px; padding: 10px 14px; border: 1px solid rgba(255, 255, 255, .5); border-radius: 999px; background: rgba(8, 10, 14, .55); color: #fff; font: 600 13px/1 var(--sans); cursor: pointer; }
+.jh-pause:hover { background: rgba(8, 10, 14, .8); }
+.jh-ui::before { content: ""; position: absolute; z-index: -1; left: var(--jh-gx); width: var(--jh-gw); bottom: var(--jh-sill); height: min(46%, 320px);
+  background: linear-gradient(rgba(8, 10, 14, 0), rgba(8, 10, 14, .28) 45%, rgba(8, 10, 14, .62)); }
+.jh-copy { position: absolute; left: calc(var(--jh-gx) + clamp(20px, 3.4vw, 56px)); bottom: calc(var(--jh-sill) + clamp(30px, 4.4vh, 52px)); max-width: min(620px, 48%); text-shadow: 0 1px 12px rgba(0, 0, 0, .45); }
+.jh-brand { margin: 0 0 10px; font: 800 13px/1 var(--sans); letter-spacing: .32em; color: var(--sun); }
+.jh-title { margin: 0 0 20px; font: 600 clamp(30px, 3.2vw, 54px)/1.04 var(--serif); letter-spacing: -.015em; color: #fff; }
+.jh-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.jh-actions .btn { text-shadow: none; }
+.jh-btn-light { background: rgba(255, 255, 255, .92); color: var(--ink); text-decoration: none; }
+.jh-btn-light:hover { background: #fff; }
+.jh-ui :is(a, button):focus-visible { outline: 3px solid var(--sun); outline-offset: 2px; }
+.jh-bar { position: absolute; right: calc(100% - var(--jh-gx) - var(--jh-gw) + clamp(20px, 3.4vw, 56px)); bottom: calc(var(--jh-sill) + clamp(30px, 4.4vh, 52px)); display: flex; flex-direction: column; align-items: flex-end; gap: 12px; max-width: 48%; }
+/* the destination: a line of type, not a panel */
+.jh-dest { text-align: right; text-shadow: 0 1px 10px rgba(0, 0, 0, .5); }
+.jh-kicker { margin: 0 0 4px; font: 700 11px/1 var(--sans); letter-spacing: .16em; text-transform: uppercase; color: rgba(255, 255, 255, .75); }
+.jh-count { color: var(--sun); }
+.jh-place { margin: 0; font: 800 18px/1.1 var(--sans); letter-spacing: .16em; color: #fff; }
+.jh-place-row { display: flex; align-items: baseline; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+.jh-sub { margin: 0; font: 500 italic 15px/1.2 var(--serif); color: rgba(255, 255, 255, .9); }
+.jh-stops { display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(10, 12, 16, .32); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); }
+.jh-stop { display: inline-flex; gap: 6px; align-items: center; padding: 7px 12px; border: 0; border-radius: 999px; background: transparent; color: rgba(255, 255, 255, .9); font: 600 13px/1 var(--sans); cursor: pointer; white-space: nowrap; }
+.jh-stop:hover { background: rgba(255, 255, 255, .14); color: #fff; }
+.jh-stop[aria-current="true"] { background: #fff; color: var(--ink); }
+.jh-stop-n { font-size: 11px; opacity: .65; font-variant-numeric: tabular-nums; }
+/* the photo's credit, small, in the view's bottom-left corner */
+.jh-credit { position: absolute; left: calc(var(--jh-gx) + 10px); bottom: calc(var(--jh-sill) + 6px); margin: 0; max-width: calc(var(--jh-gw) * .6); font: 500 10.5px/1.3 var(--sans); color: rgba(255, 255, 255, .75); text-shadow: 0 1px 3px rgba(0, 0, 0, .9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jh-credit a { color: inherit; }
+/* phones and portrait tablets: the window still fills the hero; the
+   controls stack at the bottom of the view, full width, and the scenery is
+   framed above them */
+.jh-portrait .jh-ui::before { height: 62%; background: linear-gradient(rgba(8, 10, 14, 0), rgba(8, 10, 14, .38) 35%, rgba(8, 10, 14, .74)); }
+.jh-portrait .jh-ui { display: flex; flex-direction: column; justify-content: flex-end; gap: 14px; padding: 0 calc(100% - var(--jh-gx) - var(--jh-gw) + 16px) calc(var(--jh-sill) + 10px) calc(var(--jh-gx) + 16px); }
+.jh-portrait :is(.jh-copy, .jh-bar, .jh-credit) { position: relative; left: auto; right: auto; bottom: auto; max-width: none; }
+.jh-portrait .jh-bar { order: -1; align-items: stretch; gap: 10px; }
+.jh-portrait .jh-title { font-size: clamp(26px, 7vw, 36px); margin-bottom: 14px; }
+.jh-portrait .jh-actions { flex-wrap: nowrap; }
+.jh-portrait .jh-actions .btn { flex: 1; justify-content: center; text-align: center; padding: 12px 8px; font-size: 15px; }
+.jh-portrait .jh-dest { text-align: left; }
+.jh-portrait .jh-place-row { justify-content: flex-start; }
+.jh-portrait .jh-stops { overflow-x: auto; scrollbar-width: none; }
+.jh-portrait .jh-stop { flex: 1 1 auto; justify-content: center; min-height: 44px; padding: 9px 6px; gap: 0; font-size: 11px; }
+.jh-portrait .jh-stop-n { display: none; }
+.jh-portrait .jh-credit { white-space: normal; color: rgba(255, 255, 255, .65); }
+/* short landscape screens: a smaller headline */
+@media (max-height: 820px) and (min-aspect-ratio: 1/1) {
+  .jh-title { font-size: clamp(26px, 2.6vw, 40px); margin-bottom: 14px; }
+  .jh-kicker { display: none; }
+}
 .btn-lg { padding: 13px 26px; font-size: 16px; }
-.btn-ghost-light { background: rgba(255, 255, 255, .14); color: #fff; border: 1px solid rgba(255, 255, 255, .55); backdrop-filter: blur(6px); }
-.btn-ghost-light:hover { background: rgba(255, 255, 255, .24); }
-.vh-foot { position: absolute; left: clamp(20px, 6vw, 88px); right: clamp(20px, 6vw, 88px); bottom: 18px; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12.5px; }
-.vh-label { font-weight: 800; letter-spacing: .08em; text-transform: uppercase; opacity: .9; }
-.vh-credit { opacity: .75; }
-.vh-credit a { color: inherit; }
 
 /* search first: the map section, right under the hero */
 #explore-map { padding-top: 40px; }
@@ -1307,9 +1395,6 @@ textarea { resize: vertical; }
 .mx .explore-map, .mx > .xm, .mx > section { margin-top: 6px; }
 
 @media (max-width: 899px) {
-  .vh { min-height: 72vh; }
-  .vh-content { padding-bottom: 84px; }
-  .vh-foot { flex-direction: column; align-items: flex-start; gap: 4px; }
   .finder { padding: 14px; }
   .rx-grid { grid-auto-columns: 172px; gap: 12px; }
   .rx-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-left: -4px; padding: 2px 4px; }
@@ -1322,6 +1407,5 @@ textarea { resize: vertical; }
   .ps-s { width: 160px; height: 210px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .vh-video { transition: none; }
   .rx-card, .rx-photo .cover-img, .ps-tile .cover-img { transition: none; }
 }

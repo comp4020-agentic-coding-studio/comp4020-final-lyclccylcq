@@ -38,6 +38,8 @@ export type Page = {
   microphone(origin: string, setting: "granted" | "denied"): Promise<void>;
   // cuts the page's HTTP and event streams (not WebRTC on this machine), like losing the network
   offline(on: boolean): Promise<void>;
+  // CSS media features, e.g. { "prefers-reduced-motion": "reduce" }
+  emulateMedia(features: Record<string, string>): Promise<void>;
 };
 
 // A mono 16-bit WAV of a sine tone, for Chrome's fake microphone: each
@@ -177,6 +179,9 @@ export async function launch(opts: { media?: { wav: string } | "deny" } = {}) {
       async offline(on) {
         await s("Network.enable");
         await s("Network.emulateNetworkConditions", { offline: on, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+      },
+      async emulateMedia(features) {
+        await s("Emulation.setEmulatedMedia", { media: "screen", features: Object.entries(features).map(([name, value]) => ({ name, value })) });
       },
       async microphone(origin, setting) {
         await send("Browser.setPermission", { permission: { name: "microphone" }, setting, origin, browserContextId });

@@ -117,10 +117,10 @@ function send(res: ServerResponse, status: number, body: string | Buffer, type: 
 const json = (res: ServerResponse, status: number, data: unknown, headers: Record<string, string | string[]> = {}): void =>
   send(res, status, JSON.stringify(data), "application/json; charset=utf-8", headers);
 
-// Files only by a plain name (no slashes, no dots up front), under one of two
-// known folders at most, so nothing outside them can be asked for.
+// Files only by a plain name (no slashes, no dots up front), under one of a
+// few known folders at most, so nothing outside them can be asked for.
 function serveFile(res: ServerResponse, dir: string, name: string, range?: string): boolean {
-  if (!/^((img\/covers|video)\/)?[\w-][\w.-]*$/.test(name)) return false;
+  if (!/^((img\/covers|img\/train|video)\/)?[\w-][\w.-]*$/.test(name)) return false;
   const path = join(dir, name);
   if (!existsSync(path)) return false;
   // media doesn't change in place (a new file gets a new name), so browsers may keep it
@@ -875,7 +875,7 @@ function requestLine(method: string, path: string, status: number, started: numb
   });
 }
 
-const APP_PAGES =/^\/(login|privacy|credits|trips|trips\/[0-9a-f-]{36}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80})?$/;
+const APP_PAGES =/^\/(login|privacy|credits|trips|trips\/[0-9a-f-]{36}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80}|experiments\/pixel-train)?$/;
 
 const server = createServer((req, res) => withRequest(shortId("req"), () => handle(req, res)));
 
