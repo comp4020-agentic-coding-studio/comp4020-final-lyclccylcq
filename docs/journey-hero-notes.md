@@ -45,3 +45,12 @@ failures before their fixes. External Google, AI and cross-network voice
 services were outside this homepage verification. This entry records
 local checks before release; Git and Fly release history record the
 authorised commit, push and deployment.
+
+## Release checks on Linux
+
+The first release CI run caught a macOS-only screenshot directory and the
+pre-existing five-second total deadline on each multi-account invitation
+journey. Screenshots now use the operating system's temporary directory.
+The two invitation journeys have a thirty-second total deadline; their
+individual UI waits and all assertions are unchanged. The two affected
+browser test files passed all 40 tests locally after these fixes.

@@ -628,7 +628,9 @@ describe.skipIf(!chromePath)("My Trips", () => {
 // reload, and accepting it opens the trip.
 describe.skipIf(!chromePath)("unique names and inviting by username", () => {
   for (const vp of VIEWPORTS) {
-    it(`flags a taken display name inline, then invites by username end to end (${vp.name})`, async () => {
+    // This exercises two accounts, reloads, real clicks and live acceptance;
+    // its per-step waits still enforce responsiveness on slower CI runners.
+    it(`flags a taken display name inline, then invites by username end to end (${vp.name})`, { timeout: 30_000 }, async () => {
       const owner = await browser!.newPage();
       const guest = await browser!.newPage();
       for (const p of [owner, guest]) await p.viewport(vp.width, vp.height, vp.mobile);

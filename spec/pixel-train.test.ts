@@ -1,4 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import { CURATED } from "../src/curated.ts";
 import { chromePath, launch, type Page, sleep } from "./browser.ts";
@@ -236,7 +238,7 @@ describe.skipIf(!chromePath)("homepage journey in a real browser", () => {
           expect(b.bottom).toBeLessThanOrEqual(h);
         }
         expect(q.image.x + q.image.w).toBeGreaterThanOrEqual(q.glass.x + q.glass.w - 1);
-        if (i === 2 || i === 3) await page.screenshot(`/private/tmp/wayline-${w}-${J.SCENES[i].id}.png`);
+        if (i === 2 || i === 3) await page.screenshot(join(tmpdir(), `wayline-${w}-${J.SCENES[i].id}.png`));
       }
     }
   });
