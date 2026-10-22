@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { newToken, sha256 } from "./auth.ts";
 import { DESTINATIONS } from "./curated.ts";
-import { transaction } from "./db.ts";
+import { displayNameKey, transaction } from "./db.ts";
 import { haversineKm } from "./geo.ts";
 import { bad, HttpError, notFound } from "./errors.ts";
 import { type Action, authorize, authorizeActivity, type Role } from "./permissions.ts";
@@ -222,6 +222,9 @@ function placeInput(v: unknown): { placeId: string; source: string; lat: number;
 // open pages. It carries no trip data, so it grants nothing.
 export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChange: (tripId: string) => void = () => {}, onInvitation: (userId: string) => void = () => {}) {
   const q = (sql: string) => db.prepare(sql);
+  // Legacy nickname collisions deliberately have no stored key. Compute
+  // the same Unicode key for those accounts without changing their data.
+  db.function("wayline_nickname_key", { deterministic: true }, (name) => displayNameKey(String(name ?? "")));
 
   function roleOf(tripId: string, userId: string): Role | null {
     const row = q("select role from trip_members where trip_id = ? and user_id = ?").get(tripId, userId);
@@ -766,28 +769,30 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       }));
     },
 
-    // --- inviting an existing account by username ---
+    // --- inviting an existing account by nickname ---
 
-    // Owner-only search for someone to invite: accounts whose username
-    // starts with or contains the query (taken literally, so _ . - aren't
-    // wildcards), exact match first, at most 8. Each says whether it's you,
+    // Owner-only nickname search, using registration's Unicode comparison.
+    // A one-character query is exact-only; longer queries can match part
+    // of a name. Punctuation is literal. Exact first, at most 8; each says whether it's you,
     // already on the trip, or already invited. Only what choosing needs.
     searchInvitees(userId: string, tripId: string, query: unknown) {
       require(tripId, userId, "manage_invites");
-      const raw = typeof query === "string" ? query.trim().replace(/^@/, "").toLowerCase() : "";
-      if (raw.length < 2) throw bad("Type at least 2 characters of a username.");
-      if (raw.length > 32 || !/^[a-z0-9_.-]+$/.test(raw)) return { query: raw, results: [] };
+      const raw = typeof query === "string" ? query.trim() : "";
+      const length = [...raw].length;
+      if (!length || length > 40 || /[\p{Cc}\p{Cf}\u2028\u2029]/u.test(raw)) throw bad("Enter a nickname of 1–40 characters.");
+      const key = displayNameKey(raw);
+      const nameKey = "coalesce(u.display_name_key, wayline_nickname_key(u.display_name))";
       const rows = q(
         `select u.id, u.username, u.display_name,
                 (select role from trip_members m where m.trip_id = ? and m.user_id = u.id) as role,
                 (select 1 from trip_invitations i where i.trip_id = ? and i.invitee_id = u.id and i.status = 'pending') as pending
            from users u
-          where instr(lower(u.username), ?) > 0
-          order by lower(u.username) = ? desc, instr(lower(u.username), ?) = 1 desc, length(u.username), lower(u.username)
+          where ${length === 1 ? `${nameKey} = ?` : `instr(${nameKey}, ?) > 0`}
+          order by ${nameKey} = ? desc, instr(${nameKey}, ?) = 1 desc, length(${nameKey}), ${nameKey}, lower(u.username), u.id
           limit 8`,
-      ).all(tripId, tripId, raw, raw, raw);
+      ).all(tripId, tripId, key, key, key);
       return {
-        query: raw,
+        query: key,
         results: rows.map((r) => ({
           id: String(r.id),
           username: String(r.username),

@@ -138,7 +138,7 @@ function renderPrivacy() {
       h(
         "p",
         {},
-        "Usernames and display names are unique, so someone planning a trip can find you by your username. Only a trip's owner can search, and only while inviting people to that trip; a search shows the matching usernames and display names and nothing else about your account. When an owner invites you, Wayline stores who invited you to which trip and whether you accepted, declined, or the owner cancelled it. You see the trip's title, destination and dates before deciding, and you join only if you accept.",
+        "Your login username and nickname (entered as “Your name” at registration) are each unique. Someone planning a trip can find you by your nickname. Only a trip's owner can search, and only while inviting people to that trip; a search shows the matching usernames and display names and nothing else about your account. When an owner invites you, Wayline stores who invited you to which trip and whether you accepted, declined, or the owner cancelled it. You see the trip's title, destination and dates before deciding, and you join only if you accept.",
       ),
       h("h2", {}, "Invite links, publishing and reviews"),
       h(

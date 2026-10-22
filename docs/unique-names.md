@@ -51,3 +51,22 @@ the index.
 
 Production was not inspected when this was written. Run the report there
 before deploying to see whether any groups exist.
+
+## Finding people by nickname
+
+The invitation form searches the nickname entered as “Your name” during
+registration (`display_name`), rather than the login username. Results
+retain `@username` to help people select the correct account; invitations
+are addressed to the selected user ID. No membership is added until the
+recipient accepts.
+
+Search uses the same comparison key as registration. A single Unicode
+character finds that exact nickname; longer input supports exact, prefix
+and literal contains matches, in that order, with at most eight results.
+Leading `@`, percent signs, underscores and spaces are ordinary nickname
+characters. The 1–40 character limit is checked before normalisation,
+because compatibility characters can expand in the key.
+
+For old accounts with a null comparison key, search calculates the key
+without saving it. Colliding nicknames remain separate accounts with their
+login usernames shown; nobody is renamed, merged or automatically selected.

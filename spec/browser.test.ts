@@ -1,6 +1,8 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import { chromePath, inPage, launch, type Page, signUpIn, sleep } from "./browser.ts";
-import { uniqueName } from "./helpers.ts";
+import { signUp, uniqueName } from "./helpers.ts";
 
 // Promises only a real browser can check: the map and timeline are usable at
 // both marking viewports, adding and reordering work without a mouse drag,
@@ -623,14 +625,14 @@ describe.skipIf(!chromePath)("My Trips", () => {
 });
 
 // Unique names and the two ways to invite, in two separate browsers (two
-// accounts): the owner finds someone by username and invites them; the
+// accounts): the owner finds someone by nickname and invites them; the
 // invitation appears live in the other person's My Trips, survives a
 // reload, and accepting it opens the trip.
-describe.skipIf(!chromePath)("unique names and inviting by username", () => {
+describe.skipIf(!chromePath)("unique names and inviting by nickname", () => {
   for (const vp of VIEWPORTS) {
     // This exercises two accounts, reloads, real clicks and live acceptance;
     // its per-step waits still enforce responsiveness on slower CI runners.
-    it(`flags a taken display name inline, then invites by username end to end (${vp.name})`, { timeout: 30_000 }, async () => {
+    it(`flags a taken display name inline, then invites by nickname end to end (${vp.name})`, { timeout: 30_000 }, async () => {
       const owner = await browser!.newPage();
       const guest = await browser!.newPage();
       for (const p of [owner, guest]) await p.viewport(vp.width, vp.height, vp.mobile);
@@ -662,11 +664,16 @@ describe.skipIf(!chromePath)("unique names and inviting by username", () => {
       await owner.waitFor(`document.querySelector('.conn-live')`, 8000);
       await owner.eval(`[...document.querySelectorAll('.trip-bar button')].find(b => b.textContent.includes('Share')).click()`);
       await owner.waitFor(`document.querySelector('#share-by-name') && document.querySelector('#share-by-link')`, 3000); // both methods
-      await owner.eval(`(() => { const i = document.querySelector('.invitee-input'); i.value = ${JSON.stringify(guestUser.toUpperCase())}; i.dispatchEvent(new Event('input')); })()`);
+      await owner.eval(`(() => { const i = document.querySelector('.invitee-input'); i.value = ${JSON.stringify(`旅人 ${guestUser}`)}; i.dispatchEvent(new Event('input')); })()`);
       await owner.waitFor(`document.querySelector('.invitee')`, 4000);
+      expect(await owner.eval(`document.querySelector('.invitee-input').getAttribute('aria-label')`)).toBe("Search by nickname");
+      expect(await owner.eval<string>(`document.querySelector('.invitee').innerText`)).toContain(`旅人 ${guestUser}`);
       expect(await owner.eval<string>(`document.querySelector('.invitee').innerText`)).toContain(`@${guestUser}`);
       expect(await owner.eval(`document.querySelector('[data-share=invite]').disabled`)).toBe(true); // nothing until chosen
       await owner.tap(".invitee");
+      expect(await owner.eval<string>(`document.querySelector('[data-share=invite]').getAttribute('aria-label')`)).toBe(`Invite 旅人 ${guestUser}`);
+      expect(await owner.eval<string>(`document.querySelector('[data-share=invite]').textContent`)).toBe("Invite");
+      await owner.screenshot(join(tmpdir(), `wayline-nickname-${vp.width}.png`));
       await sleep(500);
       expect((await inPage(guest, "GET", "/api/invitations")).invitations).toEqual([]); // choosing sends nothing
       await owner.tap("[data-share=invite]");
@@ -688,6 +695,60 @@ describe.skipIf(!chromePath)("unique names and inviting by username", () => {
       expect(await guest.eval(`[...document.querySelectorAll('.dash-section')].find(s => s.textContent.includes('Shared with you')).querySelector('h3')?.textContent`)).toBe("Named invite");
     });
   }
+});
+
+describe.skipIf(!chromePath)("nickname search responses", () => {
+  it("discards an old response during the next debounce and after the share dialog closes", { timeout: 30_000 }, async () => {
+    const page = await browser!.newPage();
+    await page.viewport(390, 844, true);
+    await signUpIn(page, baseUrl, uniqueName("searchowner"));
+    const oldName = uniqueName("oldfriend");
+    const nextName = uniqueName("nextfriend");
+    const oldUser = await signUp(baseUrl, oldName);
+    const nextUser = await signUp(baseUrl, nextName);
+    const trip = await inPage(page, "POST", "/api/trips", { title: "Search ordering", destination: "Sydney", startDate: "2026-12-01", endDate: "2026-12-02", timezone: "Australia/Sydney" });
+    await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await page.waitFor(`document.querySelector('.conn-live')`);
+    await page.eval(`[...document.querySelectorAll('.trip-bar button')].find(b => b.textContent.includes('Share')).click()`);
+    await page.waitFor(`document.querySelector('.invitee-input')`);
+    await page.eval(`(() => {
+      window.__inviteFetch = window.fetch;
+      window.fetch = async (...args) => {
+        const r = await window.__inviteFetch(...args);
+        const url = new URL(String(args[0]), location.href);
+        if (url.pathname.endsWith('/invitees') && url.searchParams.get('q') === ${JSON.stringify(oldName)}) {
+          window.__oldReady = true;
+          await new Promise(resolve => { window.__releaseOld = resolve; });
+        }
+        if (url.pathname.endsWith('/invitees') && url.searchParams.get('q') === ${JSON.stringify(nextName)}) {
+          window.__nextReady = true;
+          await new Promise(resolve => { window.__releaseNext = resolve; });
+        }
+        return r;
+      };
+    })()`);
+    const query = (name: string) => page.eval(`(() => { const i = document.querySelector('.invitee-input'); i.value = ${JSON.stringify(name)}; i.dispatchEvent(new Event('input')); })()`);
+    await query(oldName);
+    await page.waitFor(`window.__oldReady`);
+    await query(nextName);
+    await page.eval(`window.__releaseOld()`);
+    // Hold the new response so a busy CI runner cannot render a legitimate
+    // new result before the assertion about the old response.
+    await page.waitFor(`window.__nextReady`);
+    expect(await page.eval(`document.querySelectorAll('.invitee').length`)).toBe(0);
+    await page.eval(`window.__releaseNext()`);
+    await page.waitFor(`document.querySelector('.invitee[data-user="${nextUser.userId}"]')`);
+    expect(await page.eval(`Boolean(document.querySelector('.invitee[data-user="${oldUser.userId}"]'))`)).toBe(false);
+    expect(await page.eval(`document.querySelector('[data-share=invite]').disabled`)).toBe(true);
+    await page.eval(`window.__oldReady = false`);
+    await query(oldName);
+    await page.waitFor(`window.__oldReady`);
+    await page.eval(`window.__closedShare = document.querySelector('dialog[open]'); window.__closedShare.close();`);
+    await page.eval(`window.__releaseOld()`);
+    await sleep(100);
+    expect(await page.eval(`window.__closedShare.querySelectorAll('.invitee').length`)).toBe(0);
+    await page.eval(`window.fetch = window.__inviteFetch`);
+  });
 });
 
 // "My spot" and the collaboration notice. pnpm check runs without a Google

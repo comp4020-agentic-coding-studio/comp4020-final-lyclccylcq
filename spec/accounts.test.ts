@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, inject, it } from "vitest";
-import { anon, logIn, newTrip, share, signUp, startApp, uniqueName, watchEvents } from "./helpers.ts";
+import { anon, client, logIn, newTrip, share, signUp, startApp, uniqueName, watchEvents } from "./helpers.ts";
 
 // Usernames and display names are each unique (README, "Accounts"). A
 // display name is compared by its normalised key (NFKC, trimmed, inner
@@ -131,7 +131,7 @@ describe("existing accounts when display names became unique", () => {
   });
 });
 
-describe("inviting an existing account by username", () => {
+describe("inviting an existing account by nickname", () => {
   async function setup() {
     const owner = await signUp(baseUrl);
     const name = uniqueName("guest_");
@@ -140,7 +140,7 @@ describe("inviting an existing account by username", () => {
     return { owner, guest, name, trip };
   }
 
-  it("searches usernames for the owner only, exact match first, literal characters, bounded, with each account's status", async () => {
+  it("searches nicknames for the owner only, exact match first, literal characters, bounded, with each account's status", async () => {
     const { owner, guest, name, trip } = await setup();
     const longer = await signUp(baseUrl, `${name}x`.slice(0, 32));
     const r = await owner.get(`/api/trips/${trip.id}/invitees?q=${name.toUpperCase()}`);
@@ -148,12 +148,12 @@ describe("inviting an existing account by username", () => {
     expect(r.data.results[0]).toEqual({ id: guest.userId, username: name, displayName: name, status: "available" });
     expect(r.data.results.some((x: any) => x.id === longer.userId)).toBe(true);
     expect(Object.keys(r.data.results[0]).sort()).toEqual(["displayName", "id", "status", "username"]); // nothing more
-    expect((await owner.get(`/api/trips/${trip.id}/invitees?q=@${name}`)).data.results[0].id).toBe(guest.userId);
+    expect((await owner.get(`/api/trips/${trip.id}/invitees?${new URLSearchParams({ q: `  ${name.toUpperCase()}  ` })}`)).data.results[0].id).toBe(guest.userId);
     // _ is a character here, not a wildcard; % finds nothing
     const under = await owner.get(`/api/trips/${trip.id}/invitees?q=t_`);
     expect(under.data.results.every((x: any) => x.username.toLowerCase().includes("t_"))).toBe(true);
     expect((await owner.get(`/api/trips/${trip.id}/invitees?q=%25%25`)).data.results).toEqual([]);
-    expect((await owner.get(`/api/trips/${trip.id}/invitees?q=s`)).status).toBe(400); // too short to mean anything
+    expect((await owner.get(`/api/trips/${trip.id}/invitees?q=s`)).data.results).toEqual([]); // one character is exact-only
     expect((await owner.get(`/api/trips/${trip.id}/invitees?q=spec`)).data.results.length).toBeLessThanOrEqual(8);
     // you, and members
     const me = (await owner.get("/api/auth/me")).data.user;
@@ -164,6 +164,82 @@ describe("inviting an existing account by username", () => {
     expect((await longer.get(`/api/trips/${trip.id}/invitees?q=${name}`)).status).toBe(403);
     expect((await guest.get(`/api/trips/${trip.id}/invitees?q=${name}`)).status).toBe(404);
     expect((await anon(baseUrl).get(`/api/trips/${trip.id}/invitees?q=${name}`)).status).toBe(401);
+  });
+
+  it("finds a previous collaborator by their nickname when their login username is different", async () => {
+    const owner = await signUp(baseUrl);
+    const username = uniqueName("friend_");
+    const displayName = `旅人 ${username.slice(-6)}`;
+    const registered = await signup(username, displayName);
+    expect(registered.status).toBe(201);
+    const guest = client(baseUrl, registered.cookie!.split(";")[0], registered.data.user.id);
+    const previous = await newTrip(owner);
+    await share(owner, guest, previous.id);
+    const trip = await newTrip(owner);
+    const result = await owner.get(`/api/trips/${trip.id}/invitees?${new URLSearchParams({ q: displayName })}`);
+    expect(result.data.results[0]).toEqual({ id: guest.userId, username, displayName, status: "available" });
+    // A login handle is identity information on a result, not the search key.
+    expect((await owner.get(`/api/trips/${trip.id}/invitees?q=${username}`)).data.results).toEqual([]);
+    const sent = await owner.send("POST", `/api/trips/${trip.id}/invitations`, { userId: result.data.results[0].id });
+    expect(sent.status).toBe(201);
+    expect((await owner.get(`/api/trips/${trip.id}/invitees?${new URLSearchParams({ q: displayName })}`)).data.results[0].status).toBe("invited");
+  });
+
+  it("normalises nicknames, treats punctuation literally, and puts an exact match ahead of many similar names", async () => {
+    const owner = await signUp(baseUrl);
+    const trip = await newTrip(owner);
+    const tag = uniqueName("").slice(-6);
+    const nickname = `Äsa 旅人 ${tag}`;
+    const account = await signup(uniqueName("nick"), nickname);
+    expect(account.status).toBe(201);
+    const search = (q: string) => owner.get(`/api/trips/${trip.id}/invitees?${new URLSearchParams({ q })}`);
+    expect((await search(`  ÄSA   旅人 ${tag}  `)).data.results[0].id).toBe(account.data.user.id);
+    const fullWidth = nickname.replace(/[A-Za-z0-9]/g, c => String.fromCharCode(c.charCodeAt(0) + 0xfee0));
+    expect((await search(fullWidth)).data.results[0].id).toBe(account.data.user.id);
+    for (let i = 0; i < 10; i++) expect((await signup(uniqueName("prefix"), `${nickname} ${i}`)).status).toBe(201);
+    const exact = await search(nickname);
+    expect(exact.data.results).toHaveLength(8);
+    expect(exact.data.results[0].id).toBe(account.data.user.id);
+    for (const symbol of ["%", "_", "@", "'"]) {
+      const text = `${symbol}${tag}`;
+      const person = await signup(uniqueName("literal"), text);
+      expect(person.status).toBe(201);
+      expect((await search(text)).data.results.map((r: any) => r.id)).toEqual([person.data.user.id]);
+    }
+    const longName = `😀${"旅".repeat(33)}${tag}`; // 40 code points, over 40 UTF-16 units
+    expect([...longName]).toHaveLength(40);
+    const long = await signup(uniqueName("longnick"), longName);
+    expect(long.status).toBe(201);
+    expect((await search(longName)).data.results[0].id).toBe(long.data.user.id);
+    const expandingName = `${"ﬃ".repeat(34)}${tag}`; // normalised key is longer than the valid 40-character nickname
+    const expanding = await signup(uniqueName("expand"), expandingName);
+    expect(expanding.status).toBe(201);
+    expect((await search(expandingName)).data.results[0].id).toBe(expanding.data.user.id);
+    expect((await search("旅".repeat(41))).status).toBe(400);
+    expect((await search(" ")).status).toBe(400);
+  });
+
+  it("finds one-character and legacy colliding nicknames without changing accounts", async () => {
+    const app = await startApp();
+    try {
+      const owner = await signUp(app.url);
+      const trip = await newTrip(owner);
+      const single = await signup(uniqueName("single"), "陈", app.url);
+      const longer = await signup(uniqueName("longer"), "陈小明", app.url);
+      const oldA = await signup(uniqueName("old"), "Legacy Friend", app.url);
+      const oldB = await signup(uniqueName("old"), "Legacy Other", app.url);
+      const db = new DatabaseSync(join(app.dataDir, "wayline.db"));
+      db.prepare("update users set display_name_key = null where id in (?, ?)").run(oldA.data.user.id, oldB.data.user.id);
+      db.prepare("update users set display_name = '  LEGACY   FRIEND  ' where id = ?").run(oldB.data.user.id);
+      const before = db.prepare("select id, username, display_name, display_name_key from users order by id").all();
+      const search = (q: string) => owner.get(`/api/trips/${trip.id}/invitees?${new URLSearchParams({ q })}`);
+      expect((await search("陈")).data.results.map((r: any) => r.id)).toEqual([single.data.user.id]);
+      expect((await search("陈小")).data.results[0].id).toBe(longer.data.user.id);
+      const legacy = await search("Ｌｅｇａｃｙ  friend");
+      expect(legacy.data.results.map((r: any) => r.id).sort()).toEqual([oldA.data.user.id, oldB.data.user.id].sort());
+      expect(db.prepare("select id, username, display_name, display_name_key from users order by id").all()).toEqual(before);
+      db.close();
+    } finally { await app.stop(); }
   });
 
   it("sends an invitation that grants nothing until the right person accepts it, then adds them through the trip's live path", async () => {

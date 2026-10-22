@@ -19,7 +19,7 @@ are ignored).
 | Calculate a route between stops | ✓ | ✓ | 404 |
 | Choose a transport mode, apply a copilot fix | ✓ | 403 | 404 |
 | Rename, change dates or meal times | ✓ | 403 | 404 |
-| Invite (link or username), see and decide join requests | ✓ | 403 | 404 |
+| Invite (link or nickname), see and decide join requests | ✓ | 403 | 404 |
 | Remove a collaborator | ✓ | only themself (Leave) | 404 |
 | Delete the trip | ✓ | 403 | 404 |
 | Publish, republish, unpublish | ✓ | 403 | 404 |
@@ -61,7 +61,7 @@ and the stop's author now.
   decided after.
 - Rejection grants nothing. A rejected person can ask again only through a
   link that's still valid; that's a new request.
-- Inviting by username (`trip_invitations`) is unchanged: the owner chose that
+- Inviting by nickname (`trip_invitations`) is unchanged: the owner chose that
   account, and the invitee accepts in My Trips.
 
 **Legacy links.** Links made before October 2026 (`trips.invite_hash`) never

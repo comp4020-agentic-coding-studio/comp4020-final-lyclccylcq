@@ -86,7 +86,7 @@ const drafts = new Map<string, { userId: string; tripId: string; draft: PlanDraf
 const DRAFT_TTL_MS = 30 * 60_000;
 const callLimit = createLimiter(60, 60_000); // invites, answers and hang-ups per person per minute
 const iceLimit = createLimiter(20, 60_000);
-const searchLimit = createLimiter(60, 60_000); // username searches per owner per minute
+const searchLimit = createLimiter(60, 60_000); // nickname searches per owner per minute
 const inviteLimit = createLimiter(30, 60_000);
 const availabilityLimit = createLimiter(60, 60_000); // per IP, before an account exists
 const port = Number(process.env.PORT ?? 8080);
@@ -389,7 +389,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     }
   }
 
-  // inviting an existing account by username: owner only (checked in the store)
+  // inviting an existing account by nickname: owner only (checked in the store)
   if (method === "GET" && rest === "/invitees") {
     searchLimit(user.id);
     return json(res, 200, trips.searchInvitees(user.id, tripId, url.searchParams.get("q")));

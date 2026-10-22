@@ -2544,11 +2544,11 @@ export async function openEditor(root, tripId, ctx) {
     loadLink();
     loadRequests();
 
-    // --- invite by username: search, choose, then an explicit Invite ---
+    // --- invite by nickname: search, choose, then an explicit Invite ---
     const STATUS = { you: "You", member: "Already a member", invited: "Invited", available: null };
-    const nameInput = h("input", { type: "search", class: "invitee-input", placeholder: "Search by username", "aria-label": "Search by username", autocomplete: "off", spellcheck: "false", autocapitalize: "none", maxlength: 33 });
+    const nameInput = h("input", { type: "search", class: "invitee-input", placeholder: "Search by nickname", "aria-label": "Search by nickname", autocomplete: "off", spellcheck: "false", maxlength: 80 });
     const results = h("ul", { class: "invitee-results", role: "listbox", "aria-label": "Matching accounts" });
-    const searchNote = h("p", { class: "small muted", role: "status", "aria-live": "polite" }, "Type at least 2 characters of their username.");
+    const searchNote = h("p", { class: "small muted", role: "status", "aria-live": "polite" }, "Enter their nickname. A single character matches that exact nickname.");
     const sent = h("ul", { class: "invitations" });
     let chosen = null;
     let seq = 0;
@@ -2558,7 +2558,8 @@ export async function openEditor(root, tripId, ctx) {
       chosen = r;
       for (const li of results.children) li.setAttribute("aria-selected", String(li.dataset.user === r?.id));
       inviteBtn.disabled = !r || r.status !== "available";
-      inviteBtn.textContent = r ? (r.status === "available" ? `Invite @${r.username}` : STATUS[r.status]) : "Invite";
+      inviteBtn.textContent = r && r.status !== "available" ? STATUS[r.status] : "Invite";
+      inviteBtn.setAttribute("aria-label", r?.status === "available" ? `Invite ${r.displayName}` : inviteBtn.textContent);
     };
     const resultRow = (r) =>
       h(
@@ -2579,24 +2580,27 @@ export async function openEditor(root, tripId, ctx) {
       );
     const search = () => {
       clearTimeout(timer);
+      const mine = ++seq; // invalidate an old response before the new debounce
       choose(null);
-      const q = nameInput.value.trim().replace(/^@/, "");
-      if (q.length < 2) {
-        seq++;
-        results.replaceChildren();
-        searchNote.textContent = "Type at least 2 characters of their username.";
+      results.replaceChildren();
+      const q = nameInput.value.trim();
+      if (!q) {
+        searchNote.textContent = "Enter their nickname. A single character matches that exact nickname.";
+        return;
+      }
+      if ([...q].length > 40) {
+        searchNote.textContent = "Nicknames have at most 40 characters.";
         return;
       }
       searchNote.textContent = "Searching…";
       timer = setTimeout(async () => {
-        const mine = ++seq;
         try {
           const r = await api(`${base}/invitees?${new URLSearchParams({ q })}`);
-          if (mine !== seq) return; // a newer search is on its way
+          if (mine !== seq || !dialog.open) return;
           results.replaceChildren(...r.results.map(resultRow));
-          searchNote.textContent = r.results.length ? "Choose an account, then press Invite." : `No account matches “${q}”.`;
+          searchNote.textContent = r.results.length ? "Check the nickname and @username, then choose an account and press Invite." : `No nickname matches “${q}”.`;
         } catch (err) {
-          if (mine !== seq) return;
+          if (mine !== seq || !dialog.open) return;
           results.replaceChildren();
           searchNote.textContent = err.message;
         }
@@ -2627,7 +2631,7 @@ export async function openEditor(root, tripId, ctx) {
                       e.target.disabled = true;
                       await api(`${base}/invitations/${i.id}`, { method: "DELETE" }).catch((err) => toast(err.message, { kind: "error" }));
                       loadSent();
-                      if (nameInput.value.trim().length >= 2) search();
+                      if (nameInput.value.trim()) search();
                     },
                   },
                   "Cancel",
@@ -2661,8 +2665,8 @@ export async function openEditor(root, tripId, ctx) {
     const byName = isOwner && h(
       "section",
       { class: "share-method", "aria-labelledby": "share-by-name" },
-      h("h3", { id: "share-by-name" }, "Invite by username"),
-      h("p", { class: "small muted" }, "Send an invitation to someone who already has a Wayline account. They join when they accept it in My Trips."),
+      h("h3", { id: "share-by-name" }, "Invite by nickname"),
+      h("p", { class: "small muted" }, "Search for the nickname they entered as “Your name” when registering. Check the @username shown below each result to confirm the account. They join when they accept in My Trips."),
       h("div", { class: "invitee-search" }, nameInput, inviteBtn),
       searchNote,
       results,
@@ -2704,6 +2708,12 @@ export async function openEditor(root, tripId, ctx) {
         ),
       ),
     );
+    dialog.addEventListener("close", () => {
+      clearTimeout(timer);
+      seq++;
+      choose(null);
+      results.replaceChildren();
+    });
   }
 
   // Publishing: a read-only snapshot for others to browse, review and copy.

@@ -361,9 +361,17 @@ contradict the README, stop and ask. Don't quietly change the product.
   endpoint is advice only. Existing collisions are never renamed, merged or
   deleted: the index waits and `scripts/display-names.ts` reports them
   (`docs/unique-names.md`).
-- Inviting by username: the owner searches (`/invitees`, owner-only,
-  parameterised, literal characters, at most 8, exact first) and presses
-  Invite; searching or choosing sends nothing. An invitation is a
+- Inviting by nickname: the owner searches the display name entered as
+  “Your name” at registration (`/invitees`, owner-only), using the same
+  `displayNameKey` comparison. Validate the raw trimmed query's 1–40 Unicode
+  characters before normalising (a valid name's key can expand). One-character
+  queries match exactly; longer queries match exact, prefix, then contains.
+  Punctuation, including a leading @, is literal. At most 8 results; show
+  nickname and @username, but never search the login username. Legacy null
+  keys use the same normalisation without changing accounts. Input changes
+  and closing the dialog immediately invalidate older responses. An
+  invitation is sent only when the owner presses Invite; searching or
+  choosing sends nothing. An invitation is a
   `trip_invitations` row addressed to a user id, one pending per person per
   trip (partial unique index). It grants nothing until the invitee accepts
   it in My Trips; accepting checks recipient, `pending` and the trip, then
