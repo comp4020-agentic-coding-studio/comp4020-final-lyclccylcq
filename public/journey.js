@@ -14,13 +14,12 @@
 //   w, h    the photo's pixel size
 //   focus   picture x (0..1) at the window's centre in the middle of the
 //           scene's stretch: the landmark (`phoneFocus` on a narrow window)
-//   pan     how far the view travels across the scene's whole stretch, in
-//           glass widths
+//   pan     how far the view drifts across the scene's whole stretch, in
+//           glass widths: the scene's only motion, a slow camera drift within
+//           the photo, never past its edges
 //   ay, gy  photo row `ay` (0..1, the horizon or the skyline's base) sits at
 //           glass row `gy` (0..1); the photo grows if that would leave any
 //           of the glass uncovered
-//   pass    a near object that flicks past now and then (Switzerland's
-//           spruces), or null
 //   tip     (optional) the photo row of the landmark's top, which must stay
 //           inside the glass (checked in spec/journey.test.ts)
 //   phoneZoom (optional) how much closer a phone's narrow window looks, for
@@ -35,7 +34,7 @@ export const SCENES = [
     explore: null,
     search: { label: "Bernese Oberland, Switzerland", lat: 46.7296, lng: 7.9614 },
     night: false,
-    photo: { w: 4400, h: 1564, focus: 0.5, pan: 0.5, ay: 0.58, gy: 0.52, pass: "spruce" },
+    photo: { w: 4400, h: 1564, focus: 0.5, pan: 0.34, ay: 0.58, gy: 0.52 },
     place: "Lake Brienz from Oberried, Bernese Oberland",
     alt: "Through a window: Lake Brienz in the Swiss Alps, a lakeside village below snow-capped peaks.",
   },
@@ -45,7 +44,7 @@ export const SCENES = [
     subtitle: "Across the Thames",
     explore: "/itineraries/london-royal-riverside",
     night: false,
-    photo: { w: 4600, h: 1641, focus: 0.36, phoneFocus: 0.52, phoneZoom: 2, pan: 0.4, ay: 0.76, gy: 0.68, pass: null },
+    photo: { w: 4600, h: 1641, focus: 0.36, phoneFocus: 0.52, phoneZoom: 2, pan: 0.3, ay: 0.76, gy: 0.68 },
     place: "The Thames from Hungerford Bridge: the London Eye and Westminster",
     alt: "Through a window: the Thames, with the London Eye, Westminster Bridge and Big Ben.",
   },
@@ -55,9 +54,9 @@ export const SCENES = [
     subtitle: "Around the harbour",
     explore: "/itineraries/sydney-harbour-highlights",
     night: false,
-    // a very wide panorama (4.1:1): the view travels from the city towers
-    // to the Opera House and the Harbour Bridge
-    photo: { w: 5200, h: 1268, focus: 0.5, phoneFocus: 0.6, phoneZoom: 1.5, pan: 0.6, ay: 0.64, gy: 0.62, tip: 0.36, pass: null },
+    // a very wide panorama (4.1:1): the view drifts from the city towers
+    // towards the Opera House and the Harbour Bridge
+    photo: { w: 5200, h: 1268, focus: 0.5, phoneFocus: 0.6, phoneZoom: 1.5, pan: 0.34, ay: 0.64, gy: 0.62, tip: 0.36 },
     place: "Sydney Harbour from Yurong Point: the city, the Opera House and the Harbour Bridge",
     alt: "Through a window: Sydney Harbour on a summer day, the city's towers, the Opera House and the Harbour Bridge across the water.",
   },
@@ -68,8 +67,8 @@ export const SCENES = [
     explore: null,
     search: { label: "Maldives", lat: 4.1755, lng: 73.5093 },
     night: false,
-    // symmetrical round its jetty, so the view barely moves
-    photo: { w: 4000, h: 1840, focus: 0.5, phoneZoom: 1.8, pan: 0.12, ay: 0.66, gy: 0.6, tip: 0.5, pass: null },
+    // symmetrical round its jetty, so the view drifts only a little
+    photo: { w: 4000, h: 1840, focus: 0.5, phoneZoom: 1.8, pan: 0.16, ay: 0.66, gy: 0.6, tip: 0.5 },
     place: "Thudufushi, Ari Atoll, from its jetty",
     alt: "Through a window: a small palm-covered island with white sand in a turquoise lagoon, a wooden jetty leading to it.",
   },
@@ -79,9 +78,9 @@ export const SCENES = [
     subtitle: "Night on the Huangpu",
     explore: "/itineraries/shanghai-bund-gardens",
     night: true,
-    // the Pearl Tower is 0.4 of the photo's width tall, so any real pan
-    // would scale it past the window's top: this view barely moves
-    photo: { w: 3840, h: 1920, focus: 0.5, phoneFocus: 0.33, pan: 0.06, ay: 0.86, gy: 0.93, tip: 0.06, pass: null },
+    // the Pearl Tower is 0.4 of the photo's width tall, so a wider drift
+    // would scale it past the window's top: this view moves least
+    photo: { w: 3840, h: 1920, focus: 0.5, phoneFocus: 0.33, pan: 0.1, ay: 0.86, gy: 0.93, tip: 0.06 },
     place: "Pudong from the Bund",
     alt: "Through a window at night: the Pudong skyline across the Huangpu, with the Oriental Pearl Tower and Shanghai Tower lit up.",
   },
@@ -97,11 +96,12 @@ export const CREDITS = [
   { scene: "shanghai", title: "Pudong Shanghai November 2017 HDR panorama", author: "King of Hearts", license: "CC BY-SA 4.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0", page: "https://commons.wikimedia.org/wiki/File:Pudong_Shanghai_November_2017_HDR_panorama.jpg" },
 ];
 
-// What joins scene i to the next (the last back to the first): a short
-// tunnel (a dark band crossing the window) or a dissolve, one photo melting
-// into the next while both keep moving. The journey is symbolic: no railway
-// runs to the Maldives, and the window doesn't pretend one does.
-export const TRANSITIONS = [{ kind: "tunnel" }, { kind: "dissolve" }, { kind: "dissolve" }, { kind: "dissolve" }, { kind: "tunnel" }];
+// What joins scene i to the next (the last back to the first): always a
+// short tunnel. The window is never shown two photos at once: a soft dark
+// wall covers the glass, the scene changes while it's dark, and the view
+// opens onto the next place. The journey is symbolic: no railway runs to
+// the Maldives, and the window doesn't pretend one does.
+export const TRANSITIONS = SCENES.map(() => ({ kind: "tunnel" }));
 
 // Seconds: each destination holds, then the transition to the next.
 export const TIMING = { hold: 8.4, move: 1.8 };
@@ -148,68 +148,89 @@ export function sceneU(i, clock) {
   return Math.max(-1, Math.min(1, d / (TIMING.hold / 2 + TIMING.move)));
 }
 
-const smooth = (t) => t * t * (3 - 2 * t);
-
-// The layers to draw at `clock`, bottom first: a scene id, where its view
-// is (sceneU) and its opacity. One scene during a hold; during a tunnel
-// whichever is behind the band (swapped when the band covers the glass);
-// during a dissolve the incoming scene fades in over the outgoing one.
+// The scene to draw at `clock`, with where its view is (sceneU): the one
+// being left until the tunnel covers the glass, then the one ahead.
 export function layersAt(clock) {
   const st = stateAt(clock);
-  const at = (i, opacity) => ({ scene: i, u: sceneU(i, clock), opacity });
-  if (st.kind === "scene") return [at(st.scene, 1)];
-  if (st.kind === "tunnel") return [at(st.t < 0.5 ? st.scene : st.next, 1)];
-  return [at(st.scene, 1), at(st.next, smooth(st.t))];
+  const i = st.kind === "scene" || st.t < 0.5 ? st.scene : st.next;
+  return [{ scene: i, u: sceneU(i, clock), opacity: 1 }];
 }
 
-// The playback state machine: one clock, advanced only while playing, and
-// a short crossfade when someone picks a destination. Everything the hero
-// shows comes from here, so there are no competing timers: a pick just
-// moves the clock (to the start of that destination's hold, so it stays
-// for a whole hold before moving on), and rapid picks simply move it again.
-export const FADE_S = 0.5;
+// The playback state machine: one clock, advanced only while playing.
+// Everything the hero shows comes from here, so there are no competing
+// timers. A destination button runs the same tunnel as the journey itself
+// (a "jump") straight to that destination, then restarts its hold. A pick
+// while a tunnel is already running retargets it if the scene ahead hasn't
+// been seen yet (the window is still showing the last place, or is
+// completely dark); otherwise it waits for that tunnel to finish, and only
+// the latest such pick is kept. So rapid clicks never overlap tunnels or
+// show a scene for a moment and then snatch it away.
 export function createPlayback() {
   let clock = 0;
-  let fade = null; // { from: layer, t: 0..1 } while a pick crossfades in
+  let jump = null; // { from, c0, to, t }: a picked destination's tunnel
+  let queued = null; // a pick waiting for the running tunnel to finish
+  const unseen = (t) => t < 0.5 || band(t).covered === 1;
+  const startQueued = () => {
+    const st = stateAt(clock);
+    if (queued !== null && st.kind === "scene" && queued !== st.scene) jump = { from: st.scene, c0: clock, to: queued, t: 0 };
+    queued = null;
+  };
   return {
     get clock() {
       return clock;
     },
     // Advances by dt seconds. `ready(i)`: whether scene i's photo can be
     // drawn; playback waits at the end of a hold rather than start a
-    // transition into a scene that can't be shown yet.
+    // tunnel into a scene that can't be shown yet.
     tick(dt, ready = () => true) {
       dt = Math.max(0, Math.min(0.1, Number.isFinite(dt) ? dt : 0));
-      if (fade) {
-        fade.t += dt / FADE_S;
-        if (fade.t >= 1) fade = null;
+      if (jump) {
+        jump.t += dt / TIMING.move;
+        if (jump.t >= 1) {
+          clock = sceneStart(jump.to);
+          jump = null;
+          startQueued();
+        }
+        return;
       }
       const st = stateAt(clock);
       const end = sceneStart(st.scene) + TIMING.hold;
       const next = clock + dt;
-      // wait at the end of the hold, rather than start a transition into a
-      // scene that can't be shown yet
       if (st.kind === "scene" && next >= end && !ready((st.scene + 1) % SCENES.length)) clock = end - 1e-6;
       else clock = wrap(next);
+      if (queued !== null && stateAt(clock).kind === "scene") startQueued();
     },
-    // A destination button: show scene i now (crossfading from what's on
-    // screen, unless `instant`) and restart its hold from the beginning.
+    // A destination button: tunnel to scene i (or, `instant`, cut to it at
+    // once: reduced motion, paused) and restart its hold from the beginning.
     select(i, { instant = false } = {}) {
       sceneStart(i); // throws for a scene that doesn't exist
-      // fade from whichever picture dominates now (mid-dissolve or mid-fade)
-      const shown = this.layers().reduce((a, b) => (b.opacity >= 0.5 ? b : a));
-      clock = sceneStart(i);
-      fade = instant || shown.scene === i ? null : { from: { ...shown, opacity: 1 }, t: 0 };
+      if (instant) {
+        jump = null;
+        queued = null;
+        clock = sceneStart(i);
+        return;
+      }
+      const st = this.state();
+      if (st.kind === "tunnel") {
+        if (!unseen(st.t)) return void (queued = i);
+        if (jump) jump.to = i;
+        else jump = { from: st.scene, c0: clock - st.t * TIMING.move, to: i, t: st.t };
+        queued = null;
+        return;
+      }
+      queued = null;
+      if (st.scene !== i) jump = { from: st.scene, c0: clock, to: i, t: 0 };
     },
-    // what to draw now, bottom first
+    // what to draw now
     layers() {
-      const now = layersAt(clock);
-      if (!fade) return now;
-      const e = smooth(clamp01(fade.t));
-      return [fade.from, ...now.filter((l) => l.scene !== fade.from.scene).map((l) => ({ ...l, opacity: l.opacity * e }))];
+      if (!jump) return layersAt(clock);
+      return jump.t < 0.5
+        ? [{ scene: jump.from, u: sceneU(jump.from, jump.c0 + jump.t * TIMING.move), opacity: 1 }]
+        : [{ scene: jump.to, u: sceneU(jump.to, sceneStart(jump.to) - TIMING.move * (1 - jump.t)), opacity: 1 }];
     },
     state() {
-      return { ...stateAt(clock), clock, fading: Boolean(fade) };
+      if (jump) return { kind: "tunnel", scene: jump.from, next: jump.to, t: jump.t, label: jump.t < 0.5 ? jump.from : jump.to, clock, jumping: true, queued };
+      return { ...stateAt(clock), clock, jumping: false, queued };
     },
   };
 }
@@ -253,28 +274,31 @@ export function placePhoto(s, glass, u, portrait = false, viewShare = 1) {
 // controls stacked over its bottom
 export const PHONE_VIEW = 0.7;
 
-// The window: one large opening filling the hero, a thin wooden frame round
-// it, nothing else. The glass takes 90% or more of the hero at every size;
-// the frame is the same in every scene and never moves. Returns where its
-// clear glass is, in stage px, and the frame's and sill's widths.
-export const FRAME = { share: 0.011, min: 12, max: 20, phone: 9, sill: 1.4 };
+// The window: the view fills the hero, inset by a thin, even margin of the
+// page's own background (the same on all four sides) with softly rounded
+// corners and a hairline edge (styles.css). No carriage and no heavy frame:
+// the scenery is the subject, and the hero sits on the page like the rest
+// of it. The glass takes 90% or more of the hero at every size, and never
+// moves. Returns, in stage px, the margin (`frame`), the corner radius and
+// where the clear glass is.
+export const FRAME = { share: 0.006, min: 8, max: 14, phone: 8, radius: 0.016 };
 export function fitWindow(stageW, stageH) {
   const W = Math.round(stageW);
   const H = Math.round(stageH);
   const portrait = W / H < 0.9;
   const f = portrait ? FRAME.phone : Math.round(Math.min(FRAME.max, Math.max(FRAME.min, Math.min(W, H * 1.6) * FRAME.share)));
-  // the bottom rail is a little deeper, as a window's sill is
-  const sill = Math.round(f * FRAME.sill);
-  return { portrait, frame: f, sill, glass: { x: f, y: f, w: W - 2 * f, h: H - f - sill } };
+  const glass = { x: f, y: f, w: W - 2 * f, h: H - 2 * f };
+  const radius = Math.round(Math.min(18, Math.max(10, Math.min(glass.w, glass.h) * FRAME.radius)));
+  return { portrait, frame: f, radius, glass };
 }
 
 // A tunnel is a dark band sliding across the glass from the right, the way
-// the scenery moves: its leading edge sweeps over the window, it stays dark
-// through the middle, and daylight returns from the right. Returns the
-// band's left edge and width in glass widths (0 = the glass's left edge) at
-// t, and how much of the glass it covers (0..1). Fully covered from about t
-// 0.3 to 0.7, so the scene swap at t 0.5 is never seen.
-export const BAND_W = 2.6;
+// the scenery drifts: its soft edge sweeps over the window, it's dark for under half a second,
+// and daylight returns from the right. Returns the band's left edge and
+// width in glass widths (0 = the glass's left edge) at t, and how much of
+// the glass it covers (0..1). Fully covered from about t 0.37 to 0.63, so
+// the scene swap at t 0.5 is never seen.
+export const BAND_W = 1.7;
 export function band(t) {
   const left = 1 - clamp01(t) * (BAND_W + 1);
   const covered = clamp01(Math.min(1, left + BAND_W) - Math.max(0, left));

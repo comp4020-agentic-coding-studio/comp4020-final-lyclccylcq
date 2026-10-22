@@ -37,17 +37,39 @@ describe("automatic journey playback", () => {
     expect(p.state().kind).toBe("tunnel");
   });
 
-  it("restarts a full hold on selection, handles rapid picks and settles the fade", () => {
+  // A pick runs the same tunnel as the journey, then a full hold. Rapid
+  // picks never overlap tunnels or flash a scene: before the scene ahead
+  // has been seen the tunnel is retargeted; after, the pick waits.
+  it("tunnels to a picked destination, restarts its hold, and handles rapid picks", () => {
     const p = J.createPlayback();
+    p.tick(1);
     p.select(2);
-    expect(p.state()).toMatchObject({ scene: 2, fading: true, clock: J.sceneStart(2) });
-    p.tick(0.1);
-    p.select(4);
-    for (let n = 0; n < 8; n++) p.tick(0.1);
-    expect(p.state()).toMatchObject({ kind: "scene", scene: 4, fading: false });
+    expect(p.state()).toMatchObject({ kind: "tunnel", scene: 0, next: 2, jumping: true });
+    p.tick(0.2);
+    p.select(4); // still showing Switzerland: retarget
+    expect(p.state()).toMatchObject({ next: 4 });
+    while (p.state().jumping) p.tick(0.05);
+    expect(p.state()).toMatchObject({ kind: "scene", scene: 4, clock: J.sceneStart(4) });
     expect(p.layers().map((x: any) => x.scene)).toEqual([4]);
+    // late in a tunnel (the next scene already showing): the pick waits for it
+    p.select(1);
+    while (p.state().t < 0.8) p.tick(0.05);
+    p.select(3);
+    expect(p.state()).toMatchObject({ next: 1, queued: 3 });
+    while (p.state().next === 1) p.tick(0.05);
+    // the first tunnel finished, then the queued one began: never both
+    expect(p.state()).toMatchObject({ kind: "tunnel", scene: 1, next: 3, queued: null });
+    while (p.state().jumping) p.tick(0.05);
+    expect(p.state()).toMatchObject({ kind: "scene", scene: 3, queued: null });
+    // never more than one scene drawn, at any moment of any of this
+    p.select(0);
+    for (let n = 0; n < 60; n++) {
+      expect(p.layers().length).toBe(1);
+      if (n % 7 === 0) p.select(n % 5);
+      p.tick(0.05);
+    }
     p.select(1, { instant: true });
-    expect(p.state()).toMatchObject({ scene: 1, fading: false, clock: J.sceneStart(1) });
+    expect(p.state()).toMatchObject({ kind: "scene", scene: 1, jumping: false, clock: J.sceneStart(1) });
     expect(() => p.select(8)).toThrow(RangeError);
     const c = p.clock;
     p.tick(Number.NaN);
@@ -55,18 +77,43 @@ describe("automatic journey playback", () => {
     expect(p.clock).toBe(c);
   });
 
-  it("covers the swap during tunnels and blends two whole photos during dissolves", () => {
+  // Regression: four of five boundaries used to be crossfades, two photos
+  // dissolving into each other. Every boundary, the last back to the
+  // first included, is now the same tunnel, and the swap is only ever
+  // behind its wall.
+  it("joins every pair of destinations, Shanghai back to Switzerland too, with one tunnel", () => {
+    expect(J.TRANSITIONS.map((t: any) => t.kind)).toEqual(Array(5).fill("tunnel"));
     for (let i = 0; i < J.SCENES.length; i++) {
-      const clock = J.sceneStart(i) + J.TIMING.hold + J.TIMING.move / 2;
-      const st = J.stateAt(clock);
-      if (st.kind === "tunnel") {
-        expect(J.band(st.t).covered).toBe(1);
-        expect(J.layersAt(clock).length).toBe(1);
-      } else {
-        expect(J.layersAt(clock).map((x: any) => x.scene)).toEqual([i, (i + 1) % 5]);
-        expect(J.layersAt(clock)[1].opacity).toBeCloseTo(0.5);
+      const at = (t: number) => J.sceneStart(i) + J.TIMING.hold + J.TIMING.move * t;
+      for (let t = 0; t < 1; t += 0.02) {
+        const layers = J.layersAt(at(t));
+        expect(layers.length).toBe(1);
+        expect(layers[0].opacity).toBe(1);
+        // the photo changes only while the wall covers all the glass
+        if (layers[0].scene !== J.layersAt(at(Math.max(0, t - 0.02)))[0].scene) expect(J.band(t).covered, `${i} ${t}`).toBe(1);
       }
     }
+    // dark for well under a second, the transition itself 1–2 seconds
+    const dark = Array.from({ length: 1001 }, (_, k) => k / 1000).filter((t) => J.band(t).covered === 1).length / 1000;
+    expect(dark * J.TIMING.move).toBeLessThan(0.6);
+    expect(J.TIMING.move).toBeGreaterThanOrEqual(1);
+    expect(J.TIMING.move).toBeLessThanOrEqual(2);
+  });
+
+  // Regression: drawn trees, masts, railings and palms composited over the
+  // photos looked like stickers. Nothing moves over a photo now: each
+  // scene's only motion is a gentle drift within its own photo, never
+  // faster than a few percent of the window a second, and every scene has
+  // some.
+  it("moves each scene only by a gentle drift within its photo", () => {
+    for (const s of J.SCENES) {
+      expect(s.track, s.id).toBeUndefined();
+      const persec = s.photo.pan / (J.TIMING.hold + 2 * J.TIMING.move);
+      expect(persec, s.id).toBeGreaterThan(0.005);
+      expect(persec, s.id).toBeLessThan(0.03);
+    }
+    expect(existsSync("public/journey-track.js")).toBe(false);
+    expect(existsSync("public/img/train/pass-spruce.webp")).toBe(false);
   });
 
   it("keeps each photo whole, covering the glass throughout its pan at desktop and phone sizes", () => {
@@ -74,6 +121,11 @@ describe("automatic journey playback", () => {
       const f = J.fitWindow(w, h);
       const g = f.glass;
       expect(g.w * g.h / (w * h)).toBeGreaterThan(0.9);
+      // a thin margin, the same on all four sides: no heavy bottom band
+      expect(f.frame).toBeLessThanOrEqual(14);
+      expect(g.x).toBe(w - g.x - g.w);
+      expect(g.y).toBe(h - g.y - g.h);
+      expect(f.radius).toBeGreaterThan(0);
       for (const s of J.SCENES) for (const u of [-1, -0.5, 0, 0.5, 1]) {
         const r = J.placePhoto(s, g, u, f.portrait, f.portrait ? J.PHONE_VIEW : 1);
         const at = `${s.id} ${w}x${h} ${u}`;
@@ -115,7 +167,8 @@ describe("journey media", () => {
       expect(credits).toContain(c.page);
       expect(credits).toContain(c.author);
     }
-    for (const n of ["frame-h", "frame-v", "pass-spruce"]) total += statSync(`public/img/train/${n}.webp`).size;
+    expect(existsSync("public/img/train/frame-h.webp")).toBe(false); // the walnut picture frame is gone
+
     expect(total).toBeLessThan(4 * 1024 * 1024);
   });
 
@@ -188,6 +241,8 @@ describe.skipIf(!chromePath)("homepage journey in a real browser", () => {
     expect(await page.eval("window.__journey.state().shown")).toBe(3);
     expect(await page.eval("window.__journey.state().layers")).toEqual(["maldives"]);
     expect(await page.eval("document.querySelector('.jh-pause').hidden")).toBe(true);
+    // no tunnel runs with reduced motion
+    expect(await page.eval("window.__journey.state().tunnel")).toBeNull();
     await page.click(".jh-actions a");
     await page.waitFor("/Maldives/.test(document.querySelector('.chip-place')?.textContent ?? '')");
     expect(await page.eval("location.pathname")).toBe("/");
@@ -240,6 +295,45 @@ describe.skipIf(!chromePath)("homepage journey in a real browser", () => {
         expect(q.image.x + q.image.w).toBeGreaterThanOrEqual(q.glass.x + q.glass.w - 1);
         if (i === 2 || i === 3) await page.screenshot(join(tmpdir(), `wayline-${w}-${J.SCENES[i].id}.png`));
       }
+    }
+  });
+
+  // A pick while playing runs a tunnel, never a crossfade: one photo at a
+  // time throughout. Afterwards the scene drifts, and nothing but the photo
+  // is drawn over the glass.
+  it("tunnels to a picked destination with only one photo ever on view, then drifts", async () => {
+    const page = await open();
+    await page.eval(`window.__seen = []; window.__watch = setInterval(() => { const s = window.__journey.state(); window.__seen.push([s.layers.length, Boolean(s.tunnel)]); }, 16)`);
+    await page.click(".jh-stop:nth-child(5)");
+    await page.waitFor("window.__journey.state().shown === 4 && !window.__journey.state().jumping", 8000);
+    const seen = await page.eval<[number, boolean][]>("(clearInterval(window.__watch), window.__seen)");
+    expect(seen.every(([n]) => n <= 1)).toBe(true);
+    expect(seen.some(([, tunnel]) => tunnel)).toBe(true);
+    await page.click(".jh-stop:nth-child(2)");
+    await page.waitFor("window.__journey.state().shown === 1 && !window.__journey.state().jumping", 8000);
+    const x0 = await page.eval<number>("window.__journey.state().photo(1).x");
+    await sleep(1500);
+    expect(await page.eval<number>("window.__journey.state().photo(1).x")).toBeLessThan(x0);
+    expect(await page.eval("document.querySelectorAll('.jh canvas, .jh-trackside, .jh-passer').length")).toBe(0);
+  });
+
+  // Regression: a thick, nearly black band ran along the hero's bottom
+  // edge (the hero's dark background showing through its deeper sill),
+  // right above the light search section. The margin round the glass is
+  // now the page's own background, the same on all four sides.
+  it("sits on the page's own background, with no dark band above the search section", async () => {
+    const page = await open();
+    for (const [w, h] of [[1920, 1080], [390, 844]]) {
+      await page.viewport(w, h, w < 500);
+      await page.waitFor(`Math.abs(window.__journey.state().glass.w + 2 * window.__journey.state().frame - document.querySelector('.jh').clientWidth) < 1`);
+      const q = await page.eval<any>(`(() => {
+        const hero = document.querySelector('.jh'), g = window.__journey.state().glass;
+        return { hero: getComputedStyle(hero).backgroundColor, page: getComputedStyle(document.querySelector('main.home')).backgroundColor,
+          below: hero.clientHeight - g.y - g.h, above: g.y, left: g.x };
+      })()`);
+      expect(q.hero, `${w}`).toBe(q.page);
+      expect(q.below, `${w}`).toBe(q.above);
+      expect(q.below, `${w}`).toBe(q.left);
     }
   });
 

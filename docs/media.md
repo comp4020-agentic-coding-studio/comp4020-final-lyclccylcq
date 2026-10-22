@@ -33,12 +33,15 @@ Maldives replace the lower-quality Paris and Kyoto prototype images.
 The complete sources, authors, licences and adaptations are recorded in
 [`public/img/train/CREDITS.md`](../public/img/train/CREDITS.md); the runtime
 metadata lives in `public/journey.js`, and `/credits` lists all five.
-Photos are local WebP files, each under 760 KB; the scenery, rails and
-passing spruce together are under 4 MB. Each landscape stays whole,
+Photos are local WebP files, each under 760 KB and under 4 MB together.
+Nothing is composited over them: each scene's only motion is a slow drift
+within its own photo, and the window's edge is CSS. Each landscape stays whole,
 never repeated or split into independently moving strips.
 
 Playback uses one animation clock, holds each scene for 8.4 seconds and
-transitions for 1.8 seconds, looping after Shanghai. It leaves ordinary
+runs a 1.8-second tunnel to the next (every boundary, Shanghai back to
+Switzerland included; never a crossfade), looping after Shanghai. A
+destination button runs the same tunnel. It leaves ordinary
 page scrolling alone. Pause/Play stops and resumes the scenery; choosing
 a destination restarts its hold. Playback stops off screen and in hidden
 tabs. Reduced motion and Save-Data show a still view with manual choices.

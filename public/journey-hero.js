@@ -4,6 +4,11 @@
 // works without it: the heading and both buttons are ordinary controls, and
 // the photos are credited on the window and on /credits.
 //
+// Each scene is one real photograph and its only motion is a slow camera
+// drift within it, never past its edges: nothing is drawn or composited
+// over the photos. Every change of place is the same short tunnel, so two
+// photos never dissolve into each other.
+//
 // The hero is an ordinary block: the page scrolls past it as usual, and
 // nothing here listens to wheel, touch or scroll. Playback advances one
 // clock in a requestAnimationFrame loop, which runs only while the hero is
@@ -13,7 +18,6 @@ import { band, BAND_W, CREDITS, createPlayback, exploreFor, fitWindow, PHONE_VIE
 import { h } from "/ui.js";
 
 const IMG = "/img/train";
-const PASS_EVERY = 2.6; // seconds between spruces flicking past (Switzerland)
 
 // on a metered or "save data" connection, keep the hero still (fewer photos)
 const saveData = () => Boolean(navigator.connection?.saveData) || /(^|-)2g$/.test(navigator.connection?.effectiveType ?? "");
@@ -46,9 +50,8 @@ export function journeyHero({ start, onSearch }) {
   // Keep the value from change events, rather than polling .matches in
   // every animation frame (which can consume a pending query change).
   let reduce = reducedMotion.matches;
-  // --- the picture, back to front: scenery, tunnel, passing objects,
-  // glass, frame. Each scene is one photo (an <img>, so it's decoded once
-  // and moved by transform).
+  // --- the picture, back to front: one photo per scene (an <img> decoded
+  // once and moved by transform), the tunnel, and the glass's edge.
   const sceneEls = SCENES.map((s, i) => {
     const img = h("img", { class: "jh-photo", alt: "", decoding: "async", draggable: "false", fetchpriority: i === 0 ? "high" : "auto" });
     const el = h("div", { class: `jh-scene jh-scene-${s.id}`, "aria-hidden": "true" }, img);
@@ -58,11 +61,9 @@ export function journeyHero({ start, onSearch }) {
   // streaking past (in their own clipped box, so they never stream onto
   // the scenery)
   const tunnel = h("div", { class: "jh-tunnel", "aria-hidden": "true" }, h("div", { class: "jh-band" }, h("div", { class: "jh-band-in" }, h("div", { class: "jh-lamps" }))));
-  const pass = h("div", { class: "jh-pass", "aria-hidden": "true" });
+  // the glass: a hairline edge and a barely-there sheen
   const glass = h("div", { class: "jh-glass", "aria-hidden": "true" });
-  // the frame: four walnut rails, mitred at the corners
-  const frame = h("div", { class: "jh-frame", "aria-hidden": "true" }, ...["top", "right", "bottom", "left"].map((side) => h("div", { class: `jh-rail jh-rail-${side}` })));
-  const picture = h("div", { class: "jh-picture", role: "img", "aria-label": SCENES[0].alt }, ...sceneEls.map((e) => e.el), tunnel, pass, glass, frame);
+  const picture = h("div", { class: "jh-picture", role: "img", "aria-label": SCENES[0].alt }, ...sceneEls.map((e) => e.el), tunnel, glass);
 
   // --- the interface: Wayline's own type and buttons over the view
   const place = h("p", { class: "jh-place" });
@@ -122,8 +123,6 @@ export function journeyHero({ start, onSearch }) {
   let paused = false;
   let destroyed = false;
   let pickVersion = 0;
-  const passers = [];
-  let nextPass = 0;
   const still = () => reduce || saveData();
 
   // Photos load when they're showing or next, never all at once.
@@ -153,7 +152,7 @@ export function journeyHero({ start, onSearch }) {
     fit = fitWindow(r.width, r.height);
     el.classList.toggle("jh-portrait", fit.portrait);
     const g = fit.glass;
-    for (const [k, v] of [["frame", fit.frame], ["sill", fit.sill], ["gx", g.x], ["gy", g.y], ["gw", g.w], ["gh", g.h]]) el.style.setProperty(`--jh-${k}`, `${v}px`);
+    for (const [k, v] of [["frame", fit.frame], ["radius", fit.radius], ["gx", g.x], ["gy", g.y], ["gw", g.w], ["gh", g.h]]) el.style.setProperty(`--jh-${k}`, `${v}px`);
     draw();
   }
 
@@ -185,7 +184,7 @@ export function journeyHero({ start, onSearch }) {
       e.img.style.transform = `translate3d(${r.x}px,${r.y}px,0)`;
     });
     // the tunnel slides across the glass and off again
-    const inTunnel = st.kind === "tunnel" && !st.fading && !still();
+    const inTunnel = st.kind === "tunnel" && !still();
     tunnel.style.visibility = inTunnel ? "visible" : "hidden";
     let dark = 0;
     if (inTunnel) {
@@ -200,7 +199,7 @@ export function journeyHero({ start, onSearch }) {
     }
     const night = SCENES[layers.at(-1)?.scene ?? shown].night;
     el.classList.toggle("jh-night", (night && dark < 0.5) || dark > 0.5);
-    el.style.setProperty("--jh-dark", String(Math.max(dark * 0.8, night ? 0.7 : 0)));
+    el.style.setProperty("--jh-dark", String(Math.max(dark * 0.85, night ? 0.6 : 0)));
   }
 
   function label(i) {
@@ -220,7 +219,8 @@ export function journeyHero({ start, onSearch }) {
     else explore.removeAttribute("data-link");
   }
 
-  // A destination button: that scene at once, its hold restarted.
+  // A destination button: a tunnel to that scene (a cut when paused or
+  // still), its hold restarted.
   async function pick(i) {
     const version = ++pickVersion;
     const ready = await want(i, true);
@@ -230,31 +230,9 @@ export function journeyHero({ start, onSearch }) {
       return;
     }
     playback.select(i, { instant: still() || paused });
-    for (const p of passers.splice(0)) p.el.remove();
     live.textContent = `${SCENES[i].name}, ${SCENES[i].subtitle}`;
     draw();
     kick();
-  }
-
-  // near spruces flick past the glass in Switzerland, blurred by speed
-  function passing(dt, now) {
-    const st = playback.state();
-    const kind = st.kind === "scene" && !st.fading ? SCENES[st.scene].photo.pass : null;
-    if (kind && now > nextPass && st.t > 0.05 && st.t < 0.85) {
-      const p = h("div", { class: `jh-passer jh-passer-${kind}` });
-      pass.append(p);
-      passers.push({ el: p, x: (fit?.glass.w ?? 1200) + 40, v: 1900 });
-      nextPass = now + PASS_EVERY * 1000 * (0.7 + Math.random() * 0.6);
-    }
-    for (let k = passers.length - 1; k >= 0; k--) {
-      const p = passers[k];
-      p.x -= p.v * dt;
-      p.el.style.transform = `translate3d(${Math.round(p.x)}px,0,0)`;
-      if (p.x < -600 || !kind) {
-        p.el.remove();
-        passers.splice(k, 1);
-      }
-    }
   }
 
   // --- the loop: one, and only while it can be seen ---
@@ -266,7 +244,6 @@ export function journeyHero({ start, onSearch }) {
     last = now;
     // a photo that failed to load doesn't hold the journey up: its scene shows the one before
     playback.tick(dt * speed, (i) => sceneEls[i].ready || sceneEls[i].failed);
-    passing(dt, now);
     frames++;
     draw();
     if (canRun()) raf = requestAnimationFrame(frameLoop);
@@ -293,7 +270,6 @@ export function journeyHero({ start, onSearch }) {
   const onVisibility = () => (document.hidden ? halt() : kick());
   const onMotion = () => {
     reduce = reducedMotion.matches;
-    for (const p of passers.splice(0)) p.el.remove();
     if (still()) halt();
     pause.hidden = still();
     draw();
@@ -312,6 +288,7 @@ export function journeyHero({ start, onSearch }) {
   // for tests and evaluation: what's on screen, without reaching into closures
   window.__journey = {
     state: () => ({ ...playback.state(), shown, running: raf !== 0, visible, paused, frames, still: still(), loaded: sceneEls.map((e) => e.ready), requested: sceneEls.map((e) => e.wanted), glass: fit?.glass, frame: fit?.frame,
+      tunnel: tunnel.style.visibility === "visible" ? { band: tunnel.firstChild.getBoundingClientRect().toJSON() } : null,
       layers: [...sceneEls].filter((e) => e.el.style.visibility === "visible").map((e) => e.s.id),
       photo: (i) => { const r = sceneEls[i].img.getBoundingClientRect(); const o = el.getBoundingClientRect(); return { x: r.x - o.x, y: r.y - o.y, w: r.width, h: r.height }; } }),
     speed: (n) => void (speed = n),

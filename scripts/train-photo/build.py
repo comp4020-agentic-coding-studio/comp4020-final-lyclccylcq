@@ -23,45 +23,7 @@ def save(im: Image.Image, name: str, q=80):
     print(name, im.size, f"{(OUT / f'{name}.webp').stat().st_size // 1024} KB")
 
 
-# --- the window frame: thin, mitred walnut ---------------------------------
-# No carriage: the page is one big window, so all that's drawn is its frame.
-# One long rail, its moulding profile baked in (outer bead, flat face, a
-# groove, then an ogee falling to the glass, catching the daylight, and the
-# dark glazing line against the glass). The page crops it to each rail's
-# length (never stretched, never repeated) and mitres the corners.
-#   frame-h  horizontal rail, glass side at the bottom (4000x48)
-#   frame-v  vertical rail, glass side on the right (48x2600)
-def wood(length: int, depth: int, seed: int) -> np.ndarray:
-    """Walnut grain along x: long streaks (noise stretched along the
-    grain), a slow figure across it, and fine pores."""
-    rng = np.random.default_rng(seed)
-    def streaks(n_along, n_across):
-        a = rng.standard_normal((n_across, n_along)).astype(np.float32)
-        return np.asarray(Image.fromarray(a, "F").resize((length, depth), Image.BICUBIC))
-    g = 0.55 * streaks(length // 260, depth // 2) + 0.3 * streaks(length // 70, depth) + 0.15 * streaks(length // 18, depth)
-    g = (g - g.mean()) / (g.std() + 1e-6)
-    figure = np.sin(np.linspace(0, 7.3, length)[None, :] + 0.6 * streaks(12, 2)) * 0.35
-    pores = rng.standard_normal((depth, length)).astype(np.float32) * 0.08
-    v = np.clip(0.5 + 0.16 * g + 0.07 * figure + pores, 0, 1)
-    dark, light = np.array([46, 25, 14], np.float32), np.array([132, 76, 42], np.float32)
-    return dark + (light - dark) * v[..., None]
-
-
-def profile(depth: int) -> np.ndarray:
-    """Light across the rail's width, outside (0) to the glass (depth-1)."""
-    t = np.linspace(0, 1, depth)
-    k = np.interp(t, [0, .05, .1, .16, .2, .62, .66, .7, .78, .88, .92, .94, 1],
-                     [.5, .8, 1.12, .92, .96, .92, .62, .9, 1.02, 1.22, 1.32, .42, .32])
-    return k.astype(np.float32)
-
-
-def frame():
-    D = 48
-    h = wood(4000, D, 7) * profile(D)[:, None, None]
-    save(Image.fromarray(np.clip(h, 0, 255).astype(np.uint8)), "frame-h", 82)
-    v = wood(2600, D, 11) * profile(D)[:, None, None]
-    v = np.clip(v, 0, 255).astype(np.uint8)
-    save(Image.fromarray(v).rotate(90, expand=True).transpose(Image.FLIP_LEFT_RIGHT), "frame-v", 82)
+# The window's edge is drawn in CSS: no images for it.
 
 
 # --- landscapes ------------------------------------------------------------
@@ -134,35 +96,6 @@ def shanghai():
     landscape("shanghai", "shanghai2.jpg", 3840, q=70, night=True)
 
 
-# --- a near object that sweeps past the glass (motion-blurred) ------------
-def passing():
-    # a spruce from the Swiss photo, cut out by colour and blurred along the
-    # direction of travel
-    sw = Image.open(SRC / "swiss-full.jpg").convert("RGB")
-    spr = sw.crop((5450, 520, 6150, 2385))
-    a = np.asarray(spr).astype(np.float32)
-    green = (a[..., 1] > a[..., 2] - 5) & (a.mean(axis=2) < 120)
-    m = Image.fromarray((green * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.GaussianBlur(3))
-    fade = np.clip(np.minimum(np.arange(spr.width), spr.width - 1 - np.arange(spr.width)) / 120, 0, 1)
-    m = Image.fromarray((np.asarray(m).astype(np.float32) * fade[None, :]).astype(np.uint8))
-    s = Image.merge("RGBA", (*spr.split(), m)).resize((350, 932), Image.LANCZOS)
-    s = motion_blur(s, 26)
-    save(s, "pass-spruce", 75)
-
-
-def motion_blur(im: Image.Image, n: int) -> Image.Image:
-    a = np.asarray(im).astype(np.float32)
-    rgb, al = a[..., :3] * a[..., 3:4] / 255, a[..., 3]
-    pad = n
-    rgb = np.pad(rgb, ((0, 0), (pad, pad), (0, 0)))
-    al = np.pad(al, ((0, 0), (pad, pad)))
-    k = np.ones(n) / n
-    rgb = np.apply_along_axis(lambda r: np.convolve(r, k, "same"), 1, rgb)
-    al = np.apply_along_axis(lambda r: np.convolve(r, k, "same"), 1, al)
-    out = np.dstack([rgb * 255 / np.maximum(al[..., None], 1), al])
-    return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), "RGBA")
-
-
-steps = {"frame": frame, "switzerland": switzerland, "london": london, "sydney": sydney, "maldives": maldives, "shanghai": shanghai, "passing": passing}
+steps = {"switzerland": switzerland, "london": london, "sydney": sydney, "maldives": maldives, "shanghai": shanghai}
 for name in sys.argv[2:] or steps:
     steps[name]()
