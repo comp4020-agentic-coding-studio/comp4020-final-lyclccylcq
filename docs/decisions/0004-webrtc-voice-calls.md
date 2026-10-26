@@ -102,6 +102,15 @@ in memory there.
   own restart offer, rolling back one whose answer never came. The callee,
   which never offers, sends a `restart` signal asking the caller for one.
   If media doesn't recover within 30 s, the call ends with "Call again".
+- A first connection gets 15 s. A lost offer or answer leaves ICE at "new"
+  or "checking", which never becomes `failed`, so after 15 s still
+  "Connecting" the same recovery runs. While the first offer is unanswered
+  the caller resends that offer rather than rolling it back (the callee may
+  already have applied it and would refuse a different one). A call that
+  never connected ends with "couldn't connect", not "lost".
+- Events that reach the caller before the response to its own Call request
+  (the answer, and after a merge the offer and candidates) are held and
+  replayed once that response gives the call id.
 - ICE servers come from `POST /call/ice`: Cloudflare credentials (TTL 5 h),
   coturn HMAC credentials (TTL 5 h), optional STUN-only URLs, or nothing (direct
   connections only).
@@ -192,3 +201,16 @@ that can't connect directly.
   retried (with an immediate retry on reconnect), the callee can ask for
   one, brief `disconnected` blips don't trigger anything, and the limit is
   30 s.
+- 2026-10-26: a report of a call stuck at "Connecting" on one side.
+  Not reproduced in that exact form (callee "Connected", caller
+  "Connecting") on one machine. Two-browser runs with injected faults
+  reproduced permanent hangs from two defects: events that beat the
+  caller's own Call response were dropped (caller "Calling…", callee
+  "Connecting…" for good; also when both called at once), and a first
+  connection had no time limit, so a lost offer or answer, or the
+  caller's signalling dropping at the moment of answer, left both sides
+  "Connecting…" indefinitely. Both fixed (above), with regression tests that
+  fail on the old code. Real Cloudflare TURN was checked the same day:
+  credentials minted for both sides (STUN included), and relay on both,
+  either or neither side connected. Still unverified: other devices,
+  networks and browsers.

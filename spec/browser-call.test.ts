@@ -204,6 +204,52 @@ describe.skipIf(!chromePath)("voice calls in two real browsers", () => {
     await a.tap("[data-call=hangup]");
   });
 
+  // The response to the caller's own Call request is held back after the
+  // server has acted on it, so the answer (and on a merge, the offer and
+  // candidates) arrives on the event stream first. Those events must wait
+  // for the call id, not be dropped: dropped, the caller sat at "Calling…"
+  // and the callee at "Connecting…" for good.
+  const slowCallResponse = (ms: number) =>
+    `(() => { const f = window.fetch; window.fetch = async (u, o) => { const r = await f(u, o); if (/\\/call$/.test(String(u))) await new Promise(r => setTimeout(r, ${ms})); return r; }; })()`;
+
+  it("connects when the answer beats the response to the caller's own Call request", async () => {
+    const a = await alice!.newPage();
+    const b = await bob!.newPage();
+    await signUpIn(a, baseUrl, uniqueName("la"));
+    await signUpIn(b, baseUrl, uniqueName("lb"));
+    const trip = await sharedTrip(a, b);
+    await open(a, trip.id);
+    await open(b, trip.id);
+    await a.eval(slowCallResponse(2500));
+    await a.tap("[data-call=start]");
+    await b.waitFor(`document.querySelector('[data-call=accept]')`, 8000);
+    await b.tap("[data-call=accept]"); // answered while the caller's request is still out
+    await a.waitFor(`${phase} === 'connected'`, 15_000);
+    await b.waitFor(`${phase} === 'connected'`, 15_000);
+    await expectTone(b, 440);
+    await expectTone(a, 660);
+    await a.tap("[data-call=hangup]");
+  });
+
+  it("two people calling each other at once connect even when one's Call response is slow", async () => {
+    const a = await alice!.newPage();
+    const b = await bob!.newPage();
+    await signUpIn(a, baseUrl, uniqueName("ga"));
+    await signUpIn(b, baseUrl, uniqueName("gb"));
+    const trip = await sharedTrip(a, b);
+    await open(a, trip.id);
+    await open(b, trip.id);
+    await a.eval(slowCallResponse(1500));
+    await a.waitFor(`document.querySelector('[data-call=start]')`, 8000);
+    await b.waitFor(`document.querySelector('[data-call=start]')`, 8000);
+    await Promise.all([b.tap("[data-call=start]"), sleep(20).then(() => a.tap("[data-call=start]"))]);
+    await a.waitFor(`${phase} === 'connected'`, 15_000);
+    await b.waitFor(`${phase} === 'connected'`, 15_000);
+    await expectTone(b, 440);
+    await expectTone(a, 660);
+    await a.tap("[data-call=hangup]");
+  });
+
   it("declining ends the invitation for the caller", async () => {
     const a = await alice!.newPage();
     const b = await bob!.newPage();
@@ -353,6 +399,56 @@ describe.skipIf(!chromePath)("call recovery and tabs in real browsers", () => {
     Object.defineProperty(pc, 'connectionState', { configurable: true, get: () => window.__fixed ? conn.get.call(pc) : 'failed' });
     Object.defineProperty(pc, 'iceConnectionState', { configurable: true, get: () => window.__fixed ? ice.get.call(pc) : 'failed' });
   })()`;
+
+  // A lost answer leaves the caller's ICE at "checking" (or "new" for a lost
+  // offer), which never turns "failed": without a limit on the first
+  // connection the call said "Connecting…" forever. It must restart ICE and
+  // connect, or end with a way to call again.
+  it("recovers a first connection whose answer was lost, instead of Connecting forever", async () => {
+    const a = await alice!.newPage();
+    const b = await bob!.newPage();
+    await signUpIn(a, baseUrl, uniqueName("wa"));
+    await signUpIn(b, baseUrl, uniqueName("wb"));
+    const trip = await sharedTrip(a, b);
+    await open(a, trip.id, 1920, 1080, false, "calldebug&connectms=3000");
+    await open(b, trip.id);
+    // the callee's first answer never reaches the server (send() swallows the failure)
+    await b.eval(`(() => { const f = window.fetch; let lost = false; window.fetch = async (u, o) => {
+      if (!lost && String(u).endsWith('/signal') && JSON.parse(o.body).description?.type === 'answer') { lost = true; return new Response('{}', { status: 200 }); }
+      return f(u, o); }; })()`);
+    await a.tap("[data-call=start]");
+    await b.waitFor(`document.querySelector('[data-call=accept]')`, 8000);
+    await b.tap("[data-call=accept]");
+    await sleep(1500);
+    expect(await a.eval<string>(phase)).toBe("connecting"); // genuinely stuck, not shown as connected
+    await a.waitFor(`${phase} === 'connected'`, 12_000);
+    await b.waitFor(`${phase} === 'connected'`, 5000);
+    await expectTone(b, 440);
+    await expectTone(a, 660);
+    await a.tap("[data-call=hangup]");
+  });
+
+  it("ends a first connection that can never be made with a clear message, not Connecting forever", async () => {
+    const a = await alice!.newPage();
+    const b = await bob!.newPage();
+    await signUpIn(a, baseUrl, uniqueName("xa"));
+    await signUpIn(b, baseUrl, uniqueName("xb"));
+    const trip = await sharedTrip(a, b);
+    await open(a, trip.id, 1920, 1080, false, "calldebug&connectms=2000&recoverms=3000");
+    await open(b, trip.id);
+    // every answer the callee sends is lost
+    await b.eval(`(() => { const f = window.fetch; window.fetch = async (u, o) => {
+      if (String(u).endsWith('/signal') && JSON.parse(o.body).description?.type === 'answer') return new Response('{}', { status: 200 });
+      return f(u, o); }; })()`);
+    await a.tap("[data-call=start]");
+    await b.waitFor(`document.querySelector('[data-call=accept]')`, 8000);
+    await b.tap("[data-call=accept]");
+    await a.waitFor(`${phase} === 'reconnecting'`, 6000);
+    await a.waitFor(`${phase} === 'ended'`, 8000);
+    expect(await a.eval<string>(cardText)).toMatch(/couldn't connect/);
+    await b.waitFor(`${phase} === 'ended'`, 5000);
+    expect(await a.eval<unknown>(mic)).toBeNull();
+  });
 
   for (const who of ["caller", "callee"] as const) {
     it(`keeps retrying through a network outage on the ${who}'s side and reconnects when it's back`, async () => {

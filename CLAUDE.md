@@ -271,7 +271,10 @@ contradict the README, stop and ask. Don't quietly change the product.
   then checked by the element's clock advancing. Speaking indicators and
   meters show measured levels only. Only the caller sends offers; the
   callee's track goes in its answer, and signals that arrive before its
-  peer connection are held, not dropped.
+  peer connection are held, not dropped; so are events that beat the
+  response to the caller's own Call request. A first connection that isn't
+  connected after 15 s goes into recovery: "new"/"checking" never turns
+  `failed` by itself, so never rely on `failed` alone.
 - A dropped call keeps trying: ICE restarts are retried until connected or
   30 s, with an immediate retry when the stream or the network comes back,
   because a restart offer sent while offline is simply lost. The callee asks

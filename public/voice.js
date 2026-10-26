@@ -24,6 +24,11 @@ const recoverMs = () => Number(new URLSearchParams(location.search).get("recover
 const GRACE_MS = 3_000;
 // ICE restarts are retried until connected: after these delays, then every 5 s
 const RETRY_MS = [1_500, 3_000, 5_000];
+// A first connection that hasn't connected by now never will on its own: a
+// lost offer or answer leaves ICE at "new" or "checking", which never turns
+// "failed". So it gets the same recovery as a dropped call.
+const CONNECT_MS = 15_000;
+const connectMs = () => Number(new URLSearchParams(location.search).get("connectms")) || CONNECT_MS;
 // below this measured level, a track counts as silent (RMS of -50 dBFS)
 const SPEAKING = 0.003;
 
@@ -54,8 +59,10 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
   let ignoreOffer = false;
   let pendingCandidates = [];
   let earlySignals = []; // signals for this call that came before the peer connection
+  let beforeCallId = []; // events that came while our Call request was still out
   const seenSeq = new Map(); // callId -> highest seq handled
   let recoverTimer = null;
+  let connectTimer = null;
   let ringTimer = null;
   let tickTimer = null;
   let meter = null; // { ctx, local, remote } analysers for the level meters
@@ -94,7 +101,8 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
     clearTimeout(recoverTimer);
     clearTimeout(retryTimer);
     clearTimeout(graceTimer);
-    recoverTimer = retryTimer = graceTimer = null;
+    clearTimeout(connectTimer);
+    recoverTimer = retryTimer = graceTimer = connectTimer = null;
     clearInterval(tickTimer);
     tickTimer = null;
     clearTimeout(verifyTimer);
@@ -219,6 +227,8 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
         graceTimer = setTimeout(() => pc && pc.connectionState !== "connected" && recover(), GRACE_MS);
       }
     };
+    clearTimeout(connectTimer);
+    connectTimer = setTimeout(() => pc && V.phase === "connecting" && recover(), debug ? connectMs() : CONNECT_MS);
     startTicking();
     // anything the other side sent while we were fetching ICE servers
     for (const ev of earlySignals.splice(0)) await onSignal(ev);
@@ -384,7 +394,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
         recoverTimer = null;
         if (!pc || V.phase !== "reconnecting") return;
         if (pc.connectionState === "connected" && pc.iceConnectionState !== "disconnected" && pc.iceConnectionState !== "checking") return recovered();
-        if (Date.now() - recoverStarted >= limit) return void hangup("failed");
+        if (Date.now() - recoverStarted >= limit) return void hangup(V.connectedAt ? "failed" : "never-connected");
         recoverTimer = setTimeout(check, 500);
       };
       recoverTimer = setTimeout(check, 500);
@@ -403,16 +413,23 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
       // Each attempt makes and sends its own restart offer: after a failed
       // attempt, a repeated restartIce() doesn't fire negotiationneeded again.
       try {
-        // an offer whose answer never came (lost while offline) would block
-        // the next one: roll it back first
-        if (pc.signalingState === "have-local-offer") await pc.setLocalDescription({ type: "rollback" });
-        if (pc.signalingState === "stable" && !makingOffer) {
-          makingOffer = true;
-          try {
-            await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }));
-            await send({ kind: "description", description: pc.localDescription }, { throwOnFail: true });
-          } finally {
-            makingOffer = false;
+        // The very first offer, unanswered (it or its answer was lost): send
+        // it again. The callee may already have applied it, and a new first
+        // offer made after a rollback doesn't match it, so it would refuse it.
+        if (pc.signalingState === "have-local-offer" && !pc.currentRemoteDescription) {
+          await send({ kind: "description", description: pc.localDescription }, { throwOnFail: true });
+        } else {
+          // a restart offer whose answer never came (lost while offline)
+          // would block the next one: roll it back first
+          if (pc.signalingState === "have-local-offer") await pc.setLocalDescription({ type: "rollback" });
+          if (pc.signalingState === "stable" && !makingOffer) {
+            makingOffer = true;
+            try {
+              await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }));
+              await send({ kind: "description", description: pc.localDescription }, { throwOnFail: true });
+            } finally {
+              makingOffer = false;
+            }
           }
         }
       } catch {
@@ -428,7 +445,8 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
     clearTimeout(recoverTimer);
     clearTimeout(retryTimer);
     clearTimeout(graceTimer);
-    recoverTimer = retryTimer = graceTimer = null;
+    clearTimeout(connectTimer);
+    recoverTimer = retryTimer = graceTimer = connectTimer = null;
     set({ phase: "connected", error: null, connectedAt: V.connectedAt ?? Date.now() });
   }
 
@@ -447,6 +465,8 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
   }
 
   async function onDescription(description) {
+    // an answer to an offer we resent, after the first answer already landed
+    if (description.type === "answer" && pc.signalingState === "stable") return;
     const collision = description.type === "offer" && (makingOffer || pc.signalingState !== "stable");
     ignoreOffer = !polite && collision;
     if (ignoreOffer) return;
@@ -486,6 +506,10 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
 
   async function handle(ev) {
     if (destroyed || !ev?.callId || ended.has(ev.callId)) return;
+    // The answer, its offer and candidates can all beat the response to our
+    // own Call request (or, when we both called, its merge). Until that tells
+    // us the call id, hold them; call() replays them once it does.
+    if (V.phase === "outgoing" && !V.callId && ev.type !== "invite" && ev.type !== "outgoing") return void beforeCallId.push(ev);
     const lastSeq = seenSeq.get(ev.callId) ?? 0;
     if (ev.seq <= lastSeq) return; // duplicate or replayed
     seenSeq.set(ev.callId, ev.seq);
@@ -552,18 +576,27 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
       stream = await microphone();
       const res = await post(`${base}/call`, { to: member.id });
       if (destroyed) return stopMedia();
+      let started = null;
       if (res.merged) {
         // they called us at the same moment: this is now their call, answered
         set({ callId: res.callId, peer: res.peer, role: "callee", phase: "connecting" });
-        return startPeer(true);
+        started = startPeer(true);
+      } else {
+        set({ callId: res.callId, peer: res.peer });
       }
-      set({ callId: res.callId, peer: res.peer });
+      await replayHeld();
+      return started;
     } catch (err) {
       // someone's call reached us while we were starting ours: keep showing it
-      if (V.phase === "incoming") return;
+      if (V.phase === "incoming") return replayHeld();
       stopMedia();
       set({ phase: "idle", callId: null, error: err.message, minimized: false });
+      return replayHeld();
     }
+  }
+
+  async function replayHeld() {
+    for (const ev of beforeCallId.splice(0)) await handle(ev);
   }
 
   async function accept() {
@@ -593,7 +626,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
   async function hangup(reason = "hangup") {
     const callId = V.callId;
     if (!callId || V.elsewhere) return;
-    finish(reason === "failed" || reason === "no-relay" ? reason : "left");
+    finish(reason === "failed" || reason === "never-connected" || reason === "no-relay" ? reason : "left");
     await post(url(callId, "hangup")).catch(() => {});
   }
 
@@ -626,6 +659,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
     left: "You left the call.",
     disconnected: "The call dropped.",
     failed: "The connection was lost and couldn't be recovered.",
+    "never-connected": "The call couldn't connect. Check your network and call again.",
     removed: "The call ended because someone is no longer on this trip.",
     "signed-out": "The call ended.",
     "answered-elsewhere": "That call was answered in another tab.",
