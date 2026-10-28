@@ -508,5 +508,26 @@ describe("applying a restaurant re-checks its opening hours", () => {
     expect(titles).toEqual(["Senso-ji", "Lunch", "Shibuya", "Closes at nine", "Late walk"]);
     expect(ok.data.days[0].activities[3]).toMatchObject({ meal: "dinner", durationMin: 75 });
   });
+
+  it("explores nearby without the model as a preview, each suggestion with an id, and changes nothing until applied", async () => {
+    const c = await signUp(app.url);
+    await c.send("PUT", "/api/me/preferences", { food: {}, travel: {} });
+    const trip = (await c.send("POST", "/api/trips", { title: "Tokyo", destination: "Tokyo", startDate: "2026-10-25", endDate: "2026-10-25", timezone: "Asia/Tokyo" })).data;
+    const at = (lat: number, lng: number, i: number) => ({ placeId: `ChIJ_near_${i}_zzzzzzzz`, source: "google", lat, lng });
+    for (const [i, [title, start, dur, lat, lng]] of ([["Senso-ji", 540, 60, 35.7148, 139.7967], ["Shibuya", 1020, 45, 35.6595, 139.7005]] as const).entries()) {
+      await c.send("POST", `/api/trips/${trip.id}/activities`, { clientId: `nb-${i}-xxxxxx`, dayId: trip.days[0].id, title, kind: "attraction", startMin: start, durationMin: dur, place: at(lat, lng, i) });
+    }
+    const dayId = (await c.get(`/api/trips/${trip.id}`)).data.days[0].id;
+    const near = await c.send("POST", `/api/trips/${trip.id}/plan`, { dayId, action: "nearby" });
+    expect(near.status).toBe(200);
+    expect(near.data).toMatchObject({ action: "nearby", draftId: expect.stringMatching(/^plan_/) });
+    expect(near.data.caveats.join(" ")).toMatch(/Calculated 1 travel time with Google Maps/);
+    expect(near.data.changes.length).toBeGreaterThan(0);
+    for (const ch of near.data.changes) expect(ch).toMatchObject({ type: "add", kind: "attraction", id: expect.any(String) });
+    expect((await c.get(`/api/trips/${trip.id}`)).data.days[0].activities).toHaveLength(2);
+    const ok = await c.send("POST", `/api/trips/${trip.id}/plan/apply`, { draftId: near.data.draftId, changeIds: [near.data.changes[0].id] });
+    expect(ok.status).toBe(200);
+    expect(ok.data.days[0].activities).toHaveLength(3);
+  });
 });
 

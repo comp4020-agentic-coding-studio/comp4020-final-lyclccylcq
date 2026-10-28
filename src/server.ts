@@ -9,16 +9,17 @@ import { cleanHistory, createCopilot, describeAiError, detectLang, LIMITS } from
 import { openDb } from "./db.ts";
 import { HttpError } from "./errors.ts";
 import { createDiscovery } from "./discovery.ts";
-import { computeRouteOptions, DEMO_PLACES, googleConfigured, mapsKeyWarnings, nearbyPlaces, placeDetails, searchPlaces } from "./google.ts";
-import { clock as clockOf, hoursOn, mealFits } from "./hours.ts";
-import { type Candidate, changeId, createPlanner, dayCentre, eatDraft, freeSlots, mealSearchPoints, nearbyDraft, type PlanDraft, searchTypes, toCandidates } from "./planner.ts";
+import { computeRouteOptions, DEMO_PLACES, googleConfigured, mapsKeyWarnings, placeDetails, searchPlaces } from "./google.ts";
+import { createPlanner } from "./planner.ts";
+import { createPlanning } from "./planning.ts";
 import { createPreferences } from "./preferences.ts";
 import { createItineraryStore } from "./itineraries.ts";
 import { createPublications } from "./publications.ts";
-import { afterEvent, flushAfter, log, note, notes, sanitize, setUser, shortId, withRequest } from "./log.ts";
+import { afterEvent, flushAfter, log, note, sanitize, setUser, shortId, withRequest } from "./log.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { clientIp, createLimiter } from "./ratelimit.ts";
 import { createHub } from "./realtime.ts";
+import { ERROR_CODES, logRequest } from "./request-log.ts";
 import { zonedTimeToUtc } from "./schedule.ts";
 import { createTripStore, type TripSnapshot } from "./trips.ts";
 
@@ -80,10 +81,7 @@ const aiLog = (level: "info" | "warn", event: string, fields: Record<string, unk
 const copilot = createCopilot(ai, { usage: aiUsage, log: aiLog });
 const planner = createPlanner(ai, { usage: aiUsage, log: aiLog });
 const preferences = createPreferences(db, (tripId, userId) => trips.roleOf(tripId, userId));
-// A plan is applied by id, exactly as previewed, so a client can't edit it on
-// the way back. Drafts are disposable: kept 30 minutes, in memory.
-const drafts = new Map<string, { userId: string; tripId: string; draft: PlanDraft; at: number }>();
-const DRAFT_TTL_MS = 30 * 60_000;
+const planning = createPlanning({ trips, preferences, planner, calculateRoute });
 const callLimit = createLimiter(60, 60_000); // invites, answers and hang-ups per person per minute
 const iceLimit = createLimiter(20, 60_000);
 const searchLimit = createLimiter(60, 60_000); // nickname searches per owner per minute
@@ -459,180 +457,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     }
   }
 
-  // "Plan with AI" for one day: a preview only; nothing changes until /apply
-  // The planning assistant. Three actions, each a preview only; nothing
-  // changes until /plan/apply. "eat" and "nearby" use Google and plain rules
-  // (no model call); "optimize" makes one model call over the whole day.
+  // The planning assistant (src/planning.ts): a preview, then an apply of
+  // exactly that preview.
   if (method === "POST" && rest === "/plan") {
-    const input = await body(req);
-    const action = input.action === "eat" || input.action === "nearby" ? input.action : "optimize";
-    const snap = trips.view(user.id, tripId);
-    const day = snap.days.find((d) => d.id === input.dayId);
-    if (!day) throw new HttpError(404, "That day isn't part of this trip.");
-    if (action === "optimize" && !planner.configured) return json(res, 503, { configured: false, error: "AI planning isn't available on this server. Planning by hand still works." });
-    const prefs = preferences.effective(user.id, tripId);
-    if (!prefs.confirmed) return json(res, 409, { code: "preferences", error: "Set your travel preferences first.", effective: prefs });
-    if (action !== "optimize" && !googleConfigured()) return json(res, 503, { error: "Place suggestions need Google Maps configured on the server." });
-    // Real travel times first: legs between consecutive routable stops that
-    // have no Google route yet are calculated through the ordinary
-    // (deduplicated, cached) route path, at most six per plan. A leg Google
-    // can't route stays "not calculated"; nothing is estimated.
-    const routable = (a: (typeof day.activities)[number]) => a.place?.source === "google" || (a.place?.source === "custom" && a.place.lat !== null);
-    const missing = googleConfigured()
-      ? day.activities.slice(0, -1).flatMap((a, i) => {
-          const b = day.activities[i + 1];
-          const seg = day.segments.find((s) => s.fromId === a.id && s.toId === b.id);
-          return routable(a) && routable(b) && (!seg || seg.stale) ? [[a.id, b.id]] : [];
-        }).slice(0, 6)
-      : [];
-    let routed = 0;
-    for (const [fromId, toId] of missing) {
-      try {
-        await calculateRoute(user, tripId, { fromId, toId });
-        routed++;
-      } catch {
-        // left uncalculated; the preview says so
-      }
-    }
-    const fresh = routed ? trips.view(user.id, tripId) : snap;
-    const planDay = fresh.days.find((d) => d.id === day.id) ?? day;
-    const routeNotes: string[] = [];
-    if (routed) routeNotes.push(`Calculated ${routed} travel time${routed === 1 ? "" : "s"} with Google Maps.`);
-    if (missing.length > routed) routeNotes.push(`${missing.length - routed} travel time${missing.length - routed === 1 ? "" : "s"} couldn't be calculated.`);
-    const search = async (points: { lat: number; lng: number }[], types: { type: string; kind: "food" | "attraction" }[], radius: number) => {
-      // one Places request per type per point, at most six; a failure leaves it out rather than guessing
-      const jobs = points.flatMap((pt) => types.map((t) => ({ pt, t }))).slice(0, 6);
-      const groups = await Promise.all(jobs.map(async ({ pt, t }) => ({ kind: t.kind, places: (await nearbyPlaces(pt, radius, t.type, { withPrice: true }).catch(() => ({ places: [] }))).places })));
-      return toCandidates(groups, planDay, points[0]);
-    };
-    const keep = (draft: PlanDraft) => {
-      const id = shortId("plan");
-      const t = Date.now();
-      for (const [k, v] of drafts) if (t - v.at > DRAFT_TTL_MS) drafts.delete(k);
-      drafts.set(id, { userId: user.id, tripId, draft, at: t });
-      return id;
-    };
-    const withIds = (draft: PlanDraft) => ({ ...draft, changes: draft.changes.map((c) => ({ ...c, id: changeId(c) })) });
-
-    if (action === "eat") {
-      const gaps = planDay.review.meals;
-      const gap = gaps.find((g) => g.meal === input.meal) ?? gaps[0];
-      if (!gap) return json(res, 200, { action, meals: [], summary: "No meal looks missing on this day.", changes: [], caveats: [], picks: [] });
-      const points = mealSearchPoints(planDay, gap);
-      if (!points.length) return json(res, 200, { action, meals: gaps, summary: "The stops around this meal have no places on the map.", changes: [], caveats: [], picks: [] });
-      const types = [{ type: "restaurant", kind: "food" as const }, ...(prefs.food.cuisines.includes("cafe") ? [{ type: "cafe", kind: "food" as const }] : [])];
-      const draft = eatDraft(planDay, prefs, gap, await search(points, types, 1200));
-      draft.caveats.unshift(...routeNotes);
-      note({ dayId: day.id, meal: gap.meal, changes: draft.changes.length, event: "AI_EAT_SUGGESTED", action: "find_food", message: "User asked for places to eat (Google only, no model call)" });
-      return json(res, 200, { draftId: keep(draft), meals: gaps, ...withIds(draft) });
-    }
-
-    if (action === "nearby") {
-      const slots = freeSlots(planDay);
-      const points = slots.flatMap((sl) => {
-        const a = planDay.activities.find((x) => x.id === sl.afterActivityId);
-        return a?.place?.lat != null && a.place.lng != null ? [{ lat: a.place.lat, lng: a.place.lng }] : [];
-      }).slice(0, 2);
-      const types = searchTypes(prefs).filter((t) => t.kind === "attraction").slice(0, 3);
-      const candidates = points.length ? await search(points, types, 2000) : [];
-      const draft = nearbyDraft(planDay, prefs, candidates);
-      draft.caveats.unshift(...routeNotes);
-      note({ dayId: day.id, changes: draft.changes.length, event: "AI_NEARBY_SUGGESTED", action: "explore_nearby", message: "User asked for nearby places (Google only, no model call)" });
-      return json(res, 200, { draftId: keep(draft), ...withIds(draft) });
-    }
-
-    const centre = dayCentre(planDay, fresh.center);
-    let candidates: Candidate[] = [];
-    let candidateNote: string | null = null;
-    if (!centre) candidateNote = "This day has no places on the map yet, so there's nothing nearby to suggest.";
-    else if (!googleConfigured()) candidateNote = "Nearby suggestions need Google Maps configured on the server.";
-    else {
-      // missing meals are searched where they'd go on the route; other ideas near the day
-      const mealPoints = planDay.review.meals.flatMap((g) => mealSearchPoints(planDay, g)).slice(0, 2);
-      const foodCands = mealPoints.length ? await search(mealPoints, [{ type: "restaurant", kind: "food" }], 1200) : [];
-      const sightCands = await search([centre], searchTypes(prefs).filter((t) => t.kind === "attraction").slice(0, 2), 2500);
-      candidates = [...foodCands.slice(0, 6), ...sightCands.slice(0, 6)];
-      if (!candidates.length) candidateNote = "Google found no new places near this day to suggest.";
-    }
-    const ac = new AbortController();
-    res.on("close", () => {
-      if (!res.writableEnded) ac.abort();
-    });
-    try {
-      const draft = await planner.plan({ userId: user.id, tripId, day: planDay, prefs, candidates });
-      if (candidateNote) draft.caveats.unshift(candidateNote);
-      draft.caveats.unshift(...routeNotes);
-      const id = keep(draft);
-      note({ dayId: day.id, changes: draft.changes.length, routesCalculated: routed, candidates: candidates.length });
-      return json(res, 200, { draftId: id, action, ...withIds(draft) });
-    } catch (err) {
-      const status = (err as { status?: number }).status;
-      if (status === 429 || status === 503 || err instanceof HttpError) throw err;
-      const d = describeAiError(err);
-      return json(res, d.status, { error: d.error.replace("AI copilot", "AI planner"), retry: d.retry });
-    }
+    const r = await planning.draft(user, tripId, await body(req), res);
+    return json(res, r.status, r.data);
   }
-
-  // Applies a previewed draft, all of it or only the chosen changes (changeIds).
-  // Every change is re-checked against the day as it is now (fingerprint,
-  // permissions, places, times, modes) in one mutate(). Applying part of a
-  // draft changes the day, so the rest of it goes stale and is refused (409).
-  if (method === "POST" && rest === "/plan/apply") {
-    const input = await body(req);
-    const entry = typeof input.draftId === "string" ? drafts.get(input.draftId) : undefined;
-    if (!entry || entry.tripId !== tripId || entry.userId !== user.id || Date.now() - entry.at > DRAFT_TTL_MS) {
-      trips.requireMember(tripId, user.id);
-      throw new HttpError(410, "This plan has expired. Make a new one.", { code: "expired" });
-    }
-    const d = entry.draft;
-    const wanted = Array.isArray(input.changeIds) ? new Set(input.changeIds.filter((x): x is string => typeof x === "string")) : null;
-    const picked = wanted ? d.changes.filter((c) => wanted.has(changeId(c))) : d.changes;
-    if (!picked.length) throw new HttpError(400, "Choose at least one suggestion to apply.");
-    // a person may change a suggestion's time or length before adding it; the
-    // hours check below then runs on what's actually being saved
-    const edits = input.edits && typeof input.edits === "object" ? (input.edits as Record<string, { startMin?: unknown; durationMin?: unknown }>) : {};
-    const chosen = picked.map((c) => {
-      const e = edits[changeId(c)];
-      if (c.type !== "add" || !e) return c;
-      const startMin = e.startMin === null ? null : Number.isInteger(e.startMin) ? (e.startMin as number) : c.startMin;
-      const durationMin = Number.isInteger(e.durationMin) && (e.durationMin as number) >= 5 && (e.durationMin as number) <= 600 ? (e.durationMin as number) : c.durationMin;
-      return { ...c, startMin, durationMin };
-    });
-    // Every restaurant is re-checked against its opening hours on the trip's
-    // date before anything is written, whichever action made it (eat,
-    // optimize). A time its known hours rule out is refused for review, never
-    // applied quietly.
-    const tripDay = trips.view(user.id, tripId).days.find((x) => x.id === d.dayId);
-    for (const c of chosen) {
-      if (c.type !== "add" || c.kind !== "food" || c.startMin === null || !tripDay) continue;
-      const fit = mealFits(hoursOn(c.candidate.hours ?? null, tripDay.date), c.startMin, c.durationMin);
-      if (!fit.ok) throw new HttpError(409, `${c.candidate.name}: ${fit.message}${fit.latestStart !== null ? ` The latest start that fits is ${clockOf(fit.latestStart)}.` : ""}`, { code: "hours", changeId: changeId(c), latestStart: fit.latestStart });
-    }
-    const snap = trips.applyPlan(user.id, tripId, {
-      dayId: d.dayId,
-      basedOn: d.basedOn,
-      changes: chosen.map((c) =>
-        c.type === "move"
-          ? { type: "move", activityId: c.activityId, toIndex: c.toIndex }
-          : c.type === "mode"
-            ? { type: "mode", segmentId: c.segmentId, to: c.to }
-            : {
-                type: "add",
-                clientId: c.clientId,
-                title: c.candidate.name,
-                kind: c.kind === "food" ? "food" : "attraction",
-                startMin: c.startMin,
-                durationMin: c.durationMin,
-                meal: c.meal,
-                notes: c.warning ?? "",
-                place: { placeId: c.candidate.placeId, source: c.candidate.source === "demo" ? "demo" : "google", lat: c.candidate.lat, lng: c.candidate.lng },
-              },
-      ),
-    });
-    drafts.delete(input.draftId as string);
-    note({ dayId: d.dayId, changes: chosen.length, of: d.changes.length });
-    return json(res, 200, snap);
-  }
+  if (method === "POST" && rest === "/plan/apply") return json(res, 200, planning.apply(user, tripId, await body(req)));
 
   if (method === "POST" && rest === "/copilot") {
     const input = await body(req);
@@ -749,130 +580,6 @@ async function refreshStalePlaces(tripId: string): Promise<void> {
       // try again next time
     }
   }
-}
-
-// The business event each API request stands for. Anything not listed (map
-// views, place searches, call signalling, polling) logs only when it fails,
-// so a live session reads as a list of what people did.
-type Route = { event: string; action: string; message: string };
-const ROUTES: [string, RegExp, Route][] = [
-  ["POST", /^\/api\/auth\/signup$/, { event: "USER_SIGNED_UP", action: "signup", message: "New account created and signed in" }],
-  ["POST", /^\/api\/auth\/login$/, { event: "USER_SESSION_CREATED", action: "login", message: "User signed in; new session started" }],
-  ["POST", /^\/api\/auth\/logout$/, { event: "USER_SESSION_ENDED", action: "logout", message: "User signed out" }],
-  ["POST", /^\/api\/trips$/, { event: "TRIP_CREATED", action: "create_trip", message: "User created a trip" }],
-  ["POST", /^\/api\/itineraries\/pub-[0-9a-f-]{36}\/copy$/, { event: "TRIP_FORKED", action: "use_template", message: "User forked a published trip into a new private trip" }],
-  ["POST", /^\/api\/itineraries\/[a-z0-9-]+\/copy$/, { event: "TRIP_CREATED", action: "copy_itinerary", message: "User created a trip from a curated itinerary" }],
-  ["PUT", /^\/api\/itineraries\/pub-[0-9a-f-]{36}\/reviews$/, { event: "REVIEW_UPDATED", action: "review", message: "User changed their review of a published trip" }],
-  ["DELETE", /^\/api\/itineraries\/pub-[0-9a-f-]{36}\/reviews\/[0-9a-f-]{36}$/, { event: "REVIEW_DELETED", action: "delete_review", message: "User deleted their review" }],
-  ["GET", /^\/api\/trips\/[0-9a-f-]{36}$/, { event: "TRIP_OPENED", action: "open_trip", message: "User opened the trip" }],
-  ["PATCH", /^\/api\/trips\/[0-9a-f-]{36}$/, { event: "TRIP_UPDATED", action: "update_trip", message: "Owner changed the trip's name, dates or settings" }],
-  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}$/, { event: "TRIP_DELETED", action: "delete_trip", message: "Owner deleted the trip" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/invite$/, { event: "INVITATION_CREATED", action: "create_invite_link", message: "Owner created a 24-hour invite link (any earlier link was revoked)" }],
-  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}\/invite$/, { event: "INVITATION_REVOKED", action: "revoke_invite_link", message: "Owner revoked the invite link" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/requests\/[0-9a-f-]{36}\/approve$/, { event: "COLLAB_REQUEST_APPROVED", action: "approve_request", message: "Owner approved a request to join" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/requests\/[0-9a-f-]{36}\/reject$/, { event: "COLLAB_REQUEST_REJECTED", action: "reject_request", message: "Owner rejected a request to join; no access granted" }],
-  ["PUT", /^\/api\/trips\/[0-9a-f-]{36}\/publication$/, { event: "TRIP_PUBLISHED", action: "publish_trip", message: "Owner published a snapshot of the trip" }],
-  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}\/publication$/, { event: "TRIP_UNPUBLISHED", action: "unpublish_trip", message: "Owner unpublished the trip; existing forks are unaffected" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/invitations$/, { event: "TRIP_MEMBER_INVITED", action: "invite_user", message: "Owner invited a user by username" }],
-  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}\/invitations\/[0-9a-f-]{36}$/, { event: "TRIP_INVITATION_CANCELLED", action: "cancel_invitation", message: "Owner cancelled an invitation" }],
-  ["GET", /^\/api\/invites\/[A-Za-z0-9_-]+$/, { event: "INVITATION_OPENED", action: "open_invite_link", message: "User opened an invite link" }],
-  ["POST", /^\/api\/invites\/[A-Za-z0-9_-]+\/(request|accept)$/, { event: "COLLAB_REQUEST_CREATED", action: "request_to_join", message: "User asked to join the trip through an invite link; waiting for the owner" }],
-  ["POST", /^\/api\/invitations\/[0-9a-f-]{36}\/accept$/, { event: "COLLAB_TRIP_JOINED", action: "accept_invitation", message: "User accepted an invitation and joined the trip" }],
-  ["POST", /^\/api\/invitations\/[0-9a-f-]{36}\/decline$/, { event: "TRIP_INVITATION_DECLINED", action: "decline_invitation", message: "User declined an invitation" }],
-  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}\/members\/[0-9a-f-]{36}$/, { event: "COLLAB_TRIP_LEFT", action: "remove_member", message: "A member left or was removed from the trip" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/activities$/, { event: "TRIP_DESTINATION_ADDED", action: "add_destination", message: "User added a destination to the trip" }],
-  ["PATCH", /^\/api\/trips\/[0-9a-f-]{36}\/activities\/[0-9a-f-]{36}$/, { event: "TRIP_DESTINATION_MODIFIED", action: "edit_destination", message: "User edited a destination's details" }],
-  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}\/activities\/[0-9a-f-]{36}$/, { event: "TRIP_DESTINATION_REMOVED", action: "remove_destination", message: "User removed a destination" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/activities\/[0-9a-f-]{36}\/move$/, { event: "TRIP_DESTINATION_REORDERED", action: "reorder_destination", message: "User moved a destination in the plan" }],
-  ["PUT", /^\/api\/trips\/[0-9a-f-]{36}\/activities\/[0-9a-f-]{36}\/place$/, { event: "TRIP_DESTINATION_MODIFIED", action: "change_place", message: "User pointed a stop at a different place" }],
-  ["PUT", /^\/api\/trips\/[0-9a-f-]{36}\/start$/, { event: "TRIP_START_CHANGED", action: "set_start", message: "User set the trip's starting point" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/routes$/, { event: "TRIP_ROUTE_CALCULATED", action: "calculate_route", message: "User calculated the route between two stops" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/segments\/[0-9a-f-]{36}\/mode$/, { event: "TRIP_ROUTE_MODE_SELECTED", action: "select_mode", message: "User chose a transport mode for a leg" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/proposals\/apply$/, { event: "TRIP_SCHEDULE_MODIFIED", action: "apply_proposal", message: "User applied a schedule fix" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/copilot$/, { event: "COPILOT_ASKED", action: "ask_copilot", message: "User asked the copilot about a day" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/plan$/, { event: "AI_PLAN_DRAFTED", action: "plan_day", message: "User asked the AI to plan a day (preview only)" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/plan\/apply$/, { event: "AI_PLAN_APPLIED", action: "apply_plan", message: "User applied a previewed AI plan" }],
-  ["PUT", /^\/api\/trips\/[0-9a-f-]{36}\/preferences$/, { event: "TRIP_PREFERENCES_UPDATED", action: "update_trip_preferences", message: "A member changed the trip's shared travel preferences" }],
-  ["PUT", /^\/api\/me\/preferences$/, { event: "USER_PREFERENCES_UPDATED", action: "update_preferences", message: "User saved their own travel preferences" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/call$/, { event: "CALL_INVITED", action: "start_call", message: "User started a voice call" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/call\/[0-9a-f-]{36}\/accept$/, { event: "CALL_ACCEPTED", action: "accept_call", message: "User accepted a voice call" }],
-  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/call\/[0-9a-f-]{36}\/hangup$/, { event: "CALL_ENDED", action: "hang_up", message: "User hung up the voice call" }],
-];
-
-const routeFor = (method: string, path: string): Route | undefined => ROUTES.find(([m, re]) => m === method && re.test(path))?.[2];
-
-const ERROR_CODES: Record<number, string> = {
-  400: "INVALID_INPUT",
-  401: "UNAUTHENTICATED",
-  403: "FORBIDDEN",
-  404: "NOT_FOUND",
-  409: "CONFLICT",
-  413: "PAYLOAD_TOO_LARGE",
-  415: "UNSUPPORTED_MEDIA_TYPE",
-  429: "RATE_LIMITED",
-  502: "UPSTREAM_ERROR",
-  503: "UNAVAILABLE",
-};
-
-// One line per API request worth telling: its business event when it worked,
-// or what went wrong when it didn't. 401/403/404 on a trip are "denied"
-// (non-members get the same 404 as a missing trip, so that's an attempt on
-// a trip the user can't touch); other 4xx are invalid operations; 5xx errors.
-function logRequest(method: string, path: string, status: number, started: number, error?: unknown): void {
-  try {
-    requestLine(method, path, status, started, error);
-  } finally {
-    flushAfter();
-  }
-}
-
-function requestLine(method: string, path: string, status: number, started: number, error?: unknown): void {
-  const route = routeFor(method, path);
-  const tripId = path.match(/^\/api\/trips\/([0-9a-f-]{36})/)?.[1] ?? null;
-  const publicationId = path.match(/^\/api\/itineraries\/(pub-[0-9a-f-]{36})/)?.[1];
-  const activityId = path.match(/\/activities\/([0-9a-f-]{36})/)?.[1];
-  const extra = notes();
-  const durationMs = Math.round(performance.now() - started);
-  const { event: _e, action: _a, message: _m, ...details } = extra;
-  const base = { tripId, activityId, publicationId, ...details, method, path: path.replace(/\/api\/invites\/[^/]+/, "/api/invites/[token]"), httpStatus: status, durationMs };
-  if (status < 400) {
-    // the same PUT creates a review (201) or edits the caller's own (200)
-    if (route?.event === "REVIEW_UPDATED" && status === 201) {
-      log.info("REVIEW_CREATED", { ...base, action: "review", message: "User reviewed a published trip", status: "success" });
-      return;
-    }
-    if (route) log.info(String(extra.event ?? route.event), { ...base, action: String(extra.action ?? route.action), message: String(extra.message ?? route.message), status: "success" });
-    return;
-  }
-  if (status === 499) return; // the browser gave up on its own request
-  const event = route ? String(extra.event ?? route.event) : "API_REQUEST";
-  const action = String(extra.action ?? route?.action ?? `${method} ${base.path}`);
-  const detail = sanitize(error instanceof Error ? error.message : (error ?? ""));
-  // 503 is a feature switched off (no Google or AI key): handled, said plainly to the user
-  if (status === 503) {
-    log.warn("FEATURE_UNAVAILABLE", { ...base, action, status: "failure", errorCode: "UNAVAILABLE", message: detail || "Feature not configured on this server", attemptedEvent: event });
-    return;
-  }
-  if (status >= 500) {
-    log.error("API_OPERATION_FAILED", { ...base, action, status: "failure", errorCode: ERROR_CODES[status] ?? "INTERNAL_ERROR", message: detail || "Server error", failedEvent: event });
-    return;
-  }
-  // "Trip not found." is what a non-member gets for a real trip (requireMember)
-  const denied = status === 401 || status === 403 || (status === 404 && tripId !== null && detail === "Trip not found.");
-  const isWrite = method !== "GET" && method !== "HEAD";
-  // a failed read that isn't about a trip (a stale invite link, an expired
-  // session polling) isn't worth a line unless it was a denied write
-  if (!route && !isWrite && !denied) return;
-  // every signed-out page load asks "who am I?" and is told 401; that's not an attempt
-  if (status === 401 && !isWrite && tripId === null) return;
-  log.warn(denied && isWrite ? "UNAUTHORIZED_MODIFICATION_ATTEMPT" : denied ? "ACCESS_DENIED" : "INVALID_TRIP_OPERATION", {
-    ...base,
-    action,
-    status: denied ? "denied" : "failure",
-    errorCode: ERROR_CODES[status] ?? `HTTP_${status}`,
-    message: detail || (status === 401 ? "Not signed in" : `Request refused (${status})`),
-    attemptedEvent: event,
-  });
 }
 
 const APP_PAGES =/^\/(login|privacy|credits|trips|trips\/[0-9a-f-]{36}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80}|experiments\/pixel-train)?$/;

@@ -170,6 +170,16 @@ export const KIND_LABEL = {
 };
 export const KIND_DURATION = { attraction: 120, food: 60, shopping: 60, accommodation: 30, custom: 60 };
 
+// an itinerary's categories, on the homepage and its preview
+export const CATEGORY_LABEL = {
+  "half-day": "Half-day",
+  "one-day": "One-day",
+  weekend: "Weekend",
+  "food-culture": "Food & Culture",
+  "nature-outdoors": "Nature & Outdoors",
+  "city-highlights": "City Highlights",
+};
+
 export function guessKind(types = []) {
   const t = new Set(types);
   if (["restaurant", "cafe", "bar", "bakery", "food", "meal_takeaway", "coffee_shop"].some((x) => t.has(x) || [...t].some((y) => y.endsWith("_restaurant")))) return "food";

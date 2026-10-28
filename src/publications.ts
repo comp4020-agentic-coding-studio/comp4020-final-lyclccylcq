@@ -4,7 +4,7 @@ import { transaction } from "./db.ts";
 import { bad, HttpError, notFound } from "./errors.ts";
 import type { LatLng } from "./geo.ts";
 import type { TemplateDetail, TemplateStop, TemplateSummary } from "./itineraries.ts";
-import type { ForkStop, TripSnapshot, TripStore } from "./trips.ts";
+import { type ForkStop, isFresh, type TripSnapshot, type TripStore } from "./trips.ts";
 
 // Published trips (docs/permissions.md). A publication is a snapshot of an
 // owner's trip, taken when they publish or republish; editing the working
@@ -12,7 +12,6 @@ import type { ForkStop, TripSnapshot, TripStore } from "./trips.ts";
 // (`pub-…`), so its reviews survive republishing and unpublishing. Anyone can
 // read a published one; nobody edits it except by republishing the trip.
 
-const CACHE_MS = 30 * 86_400_000; // Google coordinates are a temporary copy, as in trips.ts
 const DESCRIPTION_MAX = 600;
 const COMMENT_MAX = 1000;
 
@@ -51,7 +50,7 @@ export function createPublications(db: DatabaseSync, trips: TripStore, now = () 
 
   function stopsOf(pubId: string): (TemplateStop & ForkStop)[] {
     return q("select * from publication_stops where publication_id = ? order by day, position").all(pubId).map((r) => {
-      const fresh = r.place_source === "custom" || (r.cached_at !== null && now() - Number(r.cached_at) < CACHE_MS);
+      const fresh = r.place_source === "custom" || isFresh(r.cached_at, now());
       const lat = fresh && r.lat !== null ? Number(r.lat) : null;
       const lng = fresh && r.lng !== null ? Number(r.lng) : null;
       return {
@@ -107,7 +106,7 @@ export function createPublications(db: DatabaseSync, trips: TripStore, now = () 
   }
 
   function refOf(r: Record<string, unknown>, stops: { lat: number | null; lng: number | null }[]): LatLng | null {
-    if (r.ref_lat !== null && r.ref_cached_at !== null && now() - Number(r.ref_cached_at) < CACHE_MS) return { lat: Number(r.ref_lat), lng: Number(r.ref_lng) };
+    if (r.ref_lat !== null && isFresh(r.ref_cached_at, now())) return { lat: Number(r.ref_lat), lng: Number(r.ref_lng) };
     const s = stops.find((x) => x.lat !== null && x.lng !== null);
     return s ? { lat: s.lat as number, lng: s.lng as number } : null;
   }
@@ -222,7 +221,7 @@ export function createPublications(db: DatabaseSync, trips: TripStore, now = () 
     fork(userId: string, id: unknown, input: Record<string, unknown>): TripSnapshot {
       const r = row(id, null); // published only: unpublished can't be forked, even by its author
       const stops = stopsOf(String(r.id));
-      const hasRef = r.ref_lat !== null && r.ref_cached_at !== null && now() - Number(r.ref_cached_at) < CACHE_MS;
+      const hasRef = r.ref_lat !== null && isFresh(r.ref_cached_at, now());
       return trips.createFork(
         userId,
         {

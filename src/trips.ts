@@ -39,7 +39,10 @@ export const DEFAULT_MEAL_TIMES: MealTimes = {
 };
 
 const MAX_DAYS = 30;
-const CACHE_MS = 30 * 86_400_000; // how long a copy of Google coordinates or route data is kept
+// How long a copy of Google coordinates or route data may be kept (CLAUDE.md,
+// "Google content"); publications.ts follows the same rule.
+const CACHE_MS = 30 * 86_400_000;
+export const isFresh = (cachedAt: unknown, now: number): boolean => cachedAt !== null && now - Number(cachedAt) < CACHE_MS;
 
 export type Activity = {
   id: string;
@@ -139,6 +142,10 @@ function datesBetween(start: string, end: string): string[] {
   }
   return out;
 }
+
+// `count` consecutive dates from `start`, for a copy of a template or a publication.
+const datesFrom = (start: string, count: number): string[] =>
+  datesBetween(start, new Date(Date.parse(`${start}T00:00:00Z`) + (count - 1) * 86_400_000).toISOString().slice(0, 10));
 
 function validTimeZone(tz: unknown): string {
   if (typeof tz !== "string" || tz.length > 64) throw bad("Choose a time zone.");
@@ -260,7 +267,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
 
   const toActivity = (r: Row): Activity => {
     // a custom point is the travellers' own choice, not Google content, so it never expires
-    const fresh = r.place_source === "custom" || (r.place_cached_at !== null && now() - Number(r.place_cached_at) < CACHE_MS);
+    const fresh = r.place_source === "custom" || isFresh(r.place_cached_at, now());
     return {
       id: String(r.id),
       dayId: String(r.day_id),
@@ -317,7 +324,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     }
     for (const s of q("select id, from_activity_id, to_activity_id, computed_at from transport_segments where trip_id = ?").all(tripId)) {
       const pair = `${s.from_activity_id}>${s.to_activity_id}`;
-      if (!keep.has(pair) || now() - Number(s.computed_at) >= CACHE_MS) {
+      if (!keep.has(pair) || !isFresh(s.computed_at, now())) {
         q("delete from transport_segments where id = ?").run(String(s.id));
       }
     }
@@ -400,7 +407,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       const segments: Segment[] = [];
       for (let i = 0; i + 1 < activities.length; i++) {
         const r = segRows.find((s) => s.from_activity_id === activities[i].id && s.to_activity_id === activities[i + 1].id);
-        if (!r || now() - Number(r.computed_at) >= CACHE_MS) continue;
+        if (!r || !isFresh(r.computed_at, now())) continue;
         segments.push({
           id: String(r.id),
           fromId: String(r.from_activity_id),
@@ -432,7 +439,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       return { id: String(d.id), date, activities, segments, analysis: analyseDay(plain, segs), review, fingerprint: fp };
     });
 
-    const fresh = t.dest_cached_at !== null && now() - Number(t.dest_cached_at) < CACHE_MS;
+    const fresh = isFresh(t.dest_cached_at, now());
     return {
       id: String(t.id),
       title: String(t.title),
@@ -474,7 +481,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     if (t.cover_key) return String(t.cover_key); // a fork keeps its template's photo
     const placeId = t.dest_place_id === null ? "" : String(t.dest_place_id);
     if (placeId.startsWith("tpl:")) return placeId.slice(4);
-    const fresh = t.dest_cached_at !== null && now() - Number(t.dest_cached_at) < CACHE_MS && t.dest_lat !== null;
+    const fresh = isFresh(t.dest_cached_at, now()) && t.dest_lat !== null;
     let at = fresh ? { lat: Number(t.dest_lat), lng: Number(t.dest_lng) } : null;
     if (!at) {
       const s = q(
@@ -550,7 +557,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     createFromTemplate(userId: string, tpl: TemplateDetail, input: Row): TripSnapshot {
       if (!isDate(input.startDate)) throw bad("Choose a start date (YYYY-MM-DD).");
       const startDate = input.startDate;
-      const dates = datesBetween(startDate, new Date(Date.parse(`${startDate}T00:00:00Z`) + (tpl.days - 1) * 86_400_000).toISOString().slice(0, 10));
+      const dates = datesFrom(startDate, tpl.days);
       const id = randomUUID();
       transaction(db, () => {
         const t = now();
@@ -1095,7 +1102,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         timezone: tz,
         departKey: departKey(day.date, from, tz),
         departMin: from.startMin === null ? null : from.startMin + from.durationMin,
-        existing: existing && now() - Number(existing.computed_at) < CACHE_MS
+        existing: existing && isFresh(existing.computed_at, now())
           ? { departKey: String(existing.depart_key), selectedMode: (existing.selected_mode as Mode | null) ?? null }
           : null,
       };
@@ -1252,7 +1259,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
           };
         }),
       );
-      const fresh = t.dest_cached_at !== null && now() - Number(t.dest_cached_at) < CACHE_MS && t.dest_lat !== null;
+      const fresh = isFresh(t.dest_cached_at, now()) && t.dest_lat !== null;
       return {
         title: String(t.title),
         destination: String(t.destination),
@@ -1275,7 +1282,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     ): TripSnapshot {
       if (!isDate(input.startDate)) throw bad("Choose a start date (YYYY-MM-DD).");
       const startDate = input.startDate;
-      const dates = datesBetween(startDate, new Date(Date.parse(`${startDate}T00:00:00Z`) + (pub.days - 1) * 86_400_000).toISOString().slice(0, 10));
+      const dates = datesFrom(startDate, pub.days);
       const id = randomUUID();
       transaction(db, () => {
         const t = now();

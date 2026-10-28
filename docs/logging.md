@@ -14,9 +14,9 @@ are no log files, no external service and no extra dependency.
 - **`src/server.ts`** gives each request a `requestId` and resolves the user
   from the session (`setUser` after `auth.userForToken`, or after a
   successful sign-up or login). When the response finishes, it writes the
-  request's single business event. A route table (`ROUTES`) maps method and
-  path to an event name, and the route can add detail (`note`), such as which
-  fields an edit touched. Requests not in the table (map views, place
+  request's single business event through `src/request-log.ts`, whose route
+  table (`ROUTES`) maps method and path to an event name, and the route can
+  add detail (`note`), such as which fields an edit touched. Requests not in the table (map views, place
   searches, call signalling) log only when they fail.
 - **`src/realtime.ts`** (the SSE hub) logs connections, joins, leaves and
   broadcasts. A broadcast happens inside the request that made the change,

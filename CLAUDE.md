@@ -404,7 +404,8 @@ contradict the README, stop and ask. Don't quietly change the product.
   step: `app.js` (routing, nav, auth, dashboard, join), `home.js` (the
   discovery homepage), `journey-hero.js` / `journey.js` (its automatic
   scenery), `media.js` (the photo stream and former video hero),
-  `preview.js` (itinerary preview), `places.js` (place inspector), `editor.js` (the trip workspace), `map.js` (Google map or
+  `preview.js` (itinerary preview), `places.js` (place inspector), `editor.js` (the trip workspace), `share.js` (its
+  people, invite and publish dialogs), `map.js` (Google map or
   labelled schematic), `ui.js` (helpers). Server-side Google calls live only
   in `src/google.ts`, behind `src/discovery.ts` and the trip routes.
   **Add no runtime dependency without asking.** The one runtime dependency is
@@ -418,7 +419,7 @@ contradict the README, stop and ask. Don't quietly change the product.
 - **Logs** go through `src/log.ts` only (no `console.*`): one JSON line per
   significant action, user from the session context, never request bodies,
   titles, notes, coordinates, cookies, tokens or keys. A new user-facing
-  route gets a line in `ROUTES` (`src/server.ts`); high-frequency traffic
+  route gets a line in `ROUTES` (`src/request-log.ts`); high-frequency traffic
   (map views, keep-alives, signalling) stays unlogged (`docs/logging.md`).
 - **Starter contract:** `/` answers 200; `/readme/` serves `README.md` in full,
   server-rendered; listen on `0.0.0.0:$PORT`. Don't touch `fly.toml`'s machine,

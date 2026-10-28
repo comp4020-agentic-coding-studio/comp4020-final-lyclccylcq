@@ -3,16 +3,8 @@ import { journeyHero } from "/journey-hero.js";
 import { photoStream, streamItems } from "/media.js";
 import { coverImg, photoCredit, photoFor } from "/photos.js";
 import { placeDialog } from "/places.js";
-import { api, dur, fmtRange, h, icon, km, relTime, uid } from "/ui.js";
+import { api, CATEGORY_LABEL, dur, fmtRange, h, icon, km, relTime, uid } from "/ui.js";
 
-export const CATEGORY_LABEL = {
-  "half-day": "Half-day",
-  "one-day": "One-day",
-  weekend: "Weekend",
-  "food-culture": "Food & Culture",
-  "nature-outdoors": "Nature & Outdoors",
-  "city-highlights": "City Highlights",
-};
 const CATEGORY_ICON = { "food-culture": "food", "nature-outdoors": "leaf", "city-highlights": "city" };
 const CATEGORY_HUE = { "food-culture": 14, "nature-outdoors": 148, "city-highlights": 208 };
 // Kept on this device only, coordinates rounded to ~1 km. The current location

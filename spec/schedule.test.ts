@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openDb } from "../src/db.ts";
 import { analyseDay, type DaySegment, defaultMode, type RouteOption, zonedTimeToUtc } from "../src/schedule.ts";
-import { createTripStore } from "../src/trips.ts";
+import { createTripStore, isFresh } from "../src/trips.ts";
 
 // The deterministic half of the copilot: time arithmetic, conflicts and
 // candidate fixes, and how transport segments follow the plan. Driven
@@ -122,6 +122,13 @@ describe("transport segments follow the plan", () => {
     expect(snap.days[0].segments).toEqual([]);
     expect(snap.days[0].activities[0].place).toMatchObject({ placeId: "ChIJAxxxxxxxxxx", lat: null, lng: null });
     expect(store.stalePlaces(trip.id)).toHaveLength(2);
+  });
+
+  it("keeps a copy of Google data for exactly 30 days, and never one with no time", () => {
+    const day = 86_400_000;
+    expect(isFresh(1_000, 1_000 + 30 * day - 1)).toBe(true);
+    expect(isFresh(1_000, 1_000 + 30 * day)).toBe(false);
+    expect(isFresh(null, 1_000)).toBe(false);
   });
 
   it("only selects a mode that has a route", () => {

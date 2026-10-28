@@ -1,8 +1,7 @@
-import { CATEGORY_LABEL } from "/home.js";
 import { createMap } from "/map.js";
 import { placeDialog } from "/places.js";
 import { coverImg, photoFor } from "/photos.js";
-import { api, decodePolyline, dur, fill, h, hhmm, icon, KIND_LABEL, openDialog, toast } from "/ui.js";
+import { api, CATEGORY_LABEL, decodePolyline, dur, fill, h, hhmm, icon, KIND_LABEL, openDialog, toast } from "/ui.js";
 
 const MODE_LABEL = { WALK: "Walk", TRANSIT: "Public transport", DRIVE: "Drive" };
 

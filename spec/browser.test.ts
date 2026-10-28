@@ -781,3 +781,62 @@ describe.skipIf(!chromePath)("my spot and view sharing", () => {
     expect(await a.eval<string>(`document.querySelector('[data-share=view-note]').textContent`)).toMatch(/where your map is looking.*never your location/);
   });
 });
+
+// The owner's trip-bar dialogs: publishing a snapshot (and updating and
+// withdrawing it), and the trip's settings.
+describe.skipIf(!chromePath)("publishing and trip settings", () => {
+  it("publishes, opens the public page, updates it after a change, then unpublishes", { timeout: 30_000 }, async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    await signUpIn(page, baseUrl, uniqueName("pub"));
+    const trip = await tripWithStops(page);
+    await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await page.waitFor(`document.querySelector('.conn-live')`, 8000);
+    expect(await page.eval(`document.querySelector('.trip-bar [data-publish]').dataset.publish`)).toBe("none");
+
+    await page.click(".trip-bar [data-publish]");
+    await page.waitFor(`document.querySelector('dialog[open] [data-publish=submit]')`, 3000);
+    expect(await page.eval<string>(`document.querySelector('dialog[open] h2').textContent`)).toBe("Publish Trip");
+    await page.eval(`(() => { const f = document.querySelector('dialog[open] form'); f.description.value = 'A day by the harbour'; f.requestSubmit(); })()`);
+    await page.waitFor(`location.pathname.startsWith('/itineraries/pub-')`, 5000);
+    const pubPath = await page.eval<string>(`location.pathname`);
+    await page.waitFor(`document.body.innerText.includes('A day by the harbour')`, 5000);
+
+    // a change after publishing leaves the public copy behind until the owner updates it
+    await inPage(page, "POST", `/api/trips/${trip.id}/activities`, { clientId: `late-${Math.random()}`, dayId: trip.days[0].id, title: "Late stop", kind: "attraction", startMin: 1000, durationMin: 60 });
+    await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await page.waitFor(`document.querySelector('.trip-bar [data-publish=published]')`, 8000);
+    expect(await page.eval<string>(`document.querySelector('.trip-bar [data-publish]').textContent`)).toBe("Update published");
+    await page.click(".trip-bar [data-publish]");
+    await page.waitFor(`document.querySelector('dialog[open] [data-publish=state]')`, 3000);
+    expect(await page.eval<string>(`document.querySelector('dialog[open] [data-publish=state]').textContent`)).toMatch(/You've changed the trip since/);
+    expect(await page.eval<string>(`document.querySelector('dialog[open] [data-publish=submit]').textContent`)).toBe("Update published version");
+    await page.click("dialog[open] [data-publish=submit]");
+    await page.waitFor(`!document.querySelector('dialog[open]') && document.querySelector('.trip-bar [data-publish]').textContent === 'Published'`, 5000);
+    expect(await page.eval(`location.pathname`)).toBe(`/trips/${trip.id}`); // an update stays in the editor
+
+    await page.click(".trip-bar [data-publish]");
+    await page.waitFor(`document.querySelector('dialog[open] [data-publish=unpublish]')`, 3000);
+    await page.eval(`window.confirm = () => true; document.querySelector('dialog[open] [data-publish=unpublish]').click()`);
+    await page.waitFor(`!document.querySelector('dialog[open]') && document.querySelector('.trip-bar [data-publish]').dataset.publish === 'unpublished'`, 5000);
+    expect((await inPage(page, "GET", `/api/trips/${trip.id}/publication`)).publication.status).toBe("unpublished");
+    expect((await fetch(new URL(`/api${pubPath}`, baseUrl))).status).toBe(404); // hidden from everyone else
+  });
+
+  it("saves the trip's name and a meal time from Trip settings, and the timeline follows", { timeout: 20_000 }, async () => {
+    const page = await browser!.newPage();
+    await page.viewport(390, 844, true);
+    await signUpIn(page, baseUrl, uniqueName("set"));
+    const trip = await tripWithStops(page);
+    await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await page.waitFor(`document.querySelector('.conn-live')`, 8000);
+    await page.click(`.trip-bar [aria-label="Trip settings"]`);
+    await page.waitFor(`document.querySelector('dialog[open] input[name=title]')`, 3000);
+    await page.eval(`(() => { const f = document.querySelector('dialog[open] form'); f.title.value = 'Renamed trip'; f['meal-dinner-usual'].value = '19:00'; f.requestSubmit(); })()`);
+    await page.waitFor(`!document.querySelector('dialog[open]') && document.querySelector('.trip-title h1').textContent === 'Renamed trip'`, 5000);
+    const saved = await inPage(page, "GET", `/api/trips/${trip.id}`);
+    expect(saved.title).toBe("Renamed trip");
+    expect(saved.mealTimes.dinner.usual).toBe(19 * 60);
+    expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  });
+});

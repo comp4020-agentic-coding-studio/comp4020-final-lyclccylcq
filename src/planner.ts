@@ -368,6 +368,7 @@ export function createPlanner(provider: AiProvider | null, opts: { usage: AiUsag
     },
   };
 }
+export type Planner = ReturnType<typeof createPlanner>;
 
 // --- Focused actions: Find Places to Eat and Explore Nearby ----------------
 // No model call: Google finds the places, these rules rank and place them.
