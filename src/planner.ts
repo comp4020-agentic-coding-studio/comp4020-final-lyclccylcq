@@ -354,13 +354,13 @@ export function buildDraft(raw: unknown, day: Day, p: Effective, candidates: Can
 export function createPlanner(provider: AiProvider | null, opts: { usage: AiUsage; log?: (level: "info" | "warn", event: string, fields: Record<string, unknown>) => void }) {
   return {
     configured: provider !== null,
-    async plan(input: { userId: string; tripId: string; day: Day; prefs: Effective; candidates: Candidate[] }): Promise<PlanDraft> {
+    async plan(input: { userId: string; tripId: string; day: Day; prefs: Effective; candidates: Candidate[]; signal?: AbortSignal }): Promise<PlanDraft> {
       if (!provider) throw new HttpError(503, "AI planning isn't available on this server. Planning by hand still works.");
       if (input.day.activities.length > PLAN_LIMITS.stops) throw new HttpError(400, `AI planning works on days with up to ${PLAN_LIMITS.stops} stops.`);
       if (!input.day.activities.some((a) => a.role !== "start") && !input.candidates.length) throw new HttpError(400, "Add a stop or two first, so there's something to plan around.");
       const data = planInput(input.day, input.prefs, input.candidates);
       const user = `<plan_data>\n${JSON.stringify(data)}\n</plan_data>`;
-      return guardedCall(opts.usage, provider, { userId: input.userId, tripId: input.tripId, feature: "plan_day", maxTokens: PLAN_LIMITS.maxTokens, request: { system: SYSTEM, user, schema: SCHEMA }, log: opts.log }, (raw) => {
+      return guardedCall(opts.usage, provider, { userId: input.userId, tripId: input.tripId, feature: "plan_day", maxTokens: PLAN_LIMITS.maxTokens, request: { system: SYSTEM, user, schema: SCHEMA, signal: input.signal }, log: opts.log }, (raw) => {
         const draft = buildDraft(raw, input.day, input.prefs, input.candidates);
         if (!draft.summary) throw new AiError("invalid", "empty summary");
         return draft;

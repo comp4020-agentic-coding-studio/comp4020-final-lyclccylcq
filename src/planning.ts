@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
 import type { User } from "./auth.ts";
+import { AiError } from "./ai.ts";
 import { describeAiError } from "./copilot.ts";
 import { HttpError } from "./errors.ts";
 import { googleConfigured, nearbyPlaces } from "./google.ts";
@@ -29,117 +30,131 @@ export function createPlanning(deps: {
   const { trips, preferences, planner, calculateRoute } = deps;
   const drafts = new Map<string, { userId: string; tripId: string; draft: PlanDraft; at: number }>();
 
-  return {
-    // "Plan with AI" for one day: a preview only; nothing changes until /apply
-    // The planning assistant. Three actions, each a preview only; nothing
-    // changes until /plan/apply. "eat" and "nearby" use Google and plain rules
-    // (no model call); "optimize" makes one model call over the whole day.
-    async draft(user: User, tripId: string, input: Record<string, unknown>, res: ServerResponse): Promise<Reply> {
-      const action = input.action === "eat" || input.action === "nearby" ? input.action : "optimize";
-      const snap = trips.view(user.id, tripId);
-      const day = snap.days.find((d) => d.id === input.dayId);
-      if (!day) throw new HttpError(404, "That day isn't part of this trip.");
-      if (action === "optimize" && !planner.configured) return reply(503, { configured: false, error: "AI planning isn't available on this server. Planning by hand still works." });
-      const prefs = preferences.effective(user.id, tripId);
-      if (!prefs.confirmed) return reply(409, { code: "preferences", error: "Set your travel preferences first.", effective: prefs });
-      if (action !== "optimize" && !googleConfigured()) return reply(503, { error: "Place suggestions need Google Maps configured on the server." });
-      // Real travel times first: legs between consecutive routable stops that
-      // have no Google route yet are calculated through the ordinary
-      // (deduplicated, cached) route path, at most six per plan. A leg Google
-      // can't route stays "not calculated"; nothing is estimated.
-      const routable = (a: (typeof day.activities)[number]) => a.place?.source === "google" || (a.place?.source === "custom" && a.place.lat !== null);
-      const missing = googleConfigured()
-        ? day.activities.slice(0, -1).flatMap((a, i) => {
-            const b = day.activities[i + 1];
-            const seg = day.segments.find((s) => s.fromId === a.id && s.toId === b.id);
-            return routable(a) && routable(b) && (!seg || seg.stale) ? [[a.id, b.id]] : [];
-          }).slice(0, 6)
-        : [];
-      let routed = 0;
-      for (const [fromId, toId] of missing) {
-        try {
-          await calculateRoute(user, tripId, { fromId, toId });
-          routed++;
-        } catch {
-          // left uncalculated; the preview says so
-        }
-      }
-      const fresh = routed ? trips.view(user.id, tripId) : snap;
-      const planDay = fresh.days.find((d) => d.id === day.id) ?? day;
-      const routeNotes: string[] = [];
-      if (routed) routeNotes.push(`Calculated ${routed} travel time${routed === 1 ? "" : "s"} with Google Maps.`);
-      if (missing.length > routed) routeNotes.push(`${missing.length - routed} travel time${missing.length - routed === 1 ? "" : "s"} couldn't be calculated.`);
-      const search = async (points: { lat: number; lng: number }[], types: { type: string; kind: "food" | "attraction" }[], radius: number) => {
-        // one Places request per type per point, at most six; a failure leaves it out rather than guessing
-        const jobs = points.flatMap((pt) => types.map((t) => ({ pt, t }))).slice(0, 6);
-        const groups = await Promise.all(jobs.map(async ({ pt, t }) => ({ kind: t.kind, places: (await nearbyPlaces(pt, radius, t.type, { withPrice: true }).catch(() => ({ places: [] }))).places })));
-        return toCandidates(groups, planDay, points[0]);
-      };
-      const keep = (draft: PlanDraft) => {
-        const id = shortId("plan");
-        const t = Date.now();
-        for (const [k, v] of drafts) if (t - v.at > DRAFT_TTL_MS) drafts.delete(k);
-        drafts.set(id, { userId: user.id, tripId, draft, at: t });
-        return id;
-      };
-      const withIds = (draft: PlanDraft) => ({ ...draft, changes: draft.changes.map((c) => ({ ...c, id: changeId(c) })) });
-
-      if (action === "eat") {
-        const gaps = planDay.review.meals;
-        const gap = gaps.find((g) => g.meal === input.meal) ?? gaps[0];
-        if (!gap) return reply(200, { action, meals: [], summary: "No meal looks missing on this day.", changes: [], caveats: [], picks: [] });
-        const points = mealSearchPoints(planDay, gap);
-        if (!points.length) return reply(200, { action, meals: gaps, summary: "The stops around this meal have no places on the map.", changes: [], caveats: [], picks: [] });
-        const types = [{ type: "restaurant", kind: "food" as const }, ...(prefs.food.cuisines.includes("cafe") ? [{ type: "cafe", kind: "food" as const }] : [])];
-        const draft = eatDraft(planDay, prefs, gap, await search(points, types, 1200));
-        draft.caveats.unshift(...routeNotes);
-        note({ dayId: day.id, meal: gap.meal, changes: draft.changes.length, event: "AI_EAT_SUGGESTED", action: "find_food", message: "User asked for places to eat (Google only, no model call)" });
-        return reply(200, { draftId: keep(draft), meals: gaps, ...withIds(draft) });
-      }
-
-      if (action === "nearby") {
-        const slots = freeSlots(planDay);
-        const points = slots.flatMap((sl) => {
-          const a = planDay.activities.find((x) => x.id === sl.afterActivityId);
-          return a?.place?.lat != null && a.place.lng != null ? [{ lat: a.place.lat, lng: a.place.lng }] : [];
-        }).slice(0, 2);
-        const types = searchTypes(prefs).filter((t) => t.kind === "attraction").slice(0, 3);
-        const candidates = points.length ? await search(points, types, 2000) : [];
-        const draft = nearbyDraft(planDay, prefs, candidates);
-        draft.caveats.unshift(...routeNotes);
-        note({ dayId: day.id, changes: draft.changes.length, event: "AI_NEARBY_SUGGESTED", action: "explore_nearby", message: "User asked for nearby places (Google only, no model call)" });
-        return reply(200, { draftId: keep(draft), ...withIds(draft) });
-      }
-
-      const centre = dayCentre(planDay, fresh.center);
-      let candidates: Candidate[] = [];
-      let candidateNote: string | null = null;
-      if (!centre) candidateNote = "This day has no places on the map yet, so there's nothing nearby to suggest.";
-      else if (!googleConfigured()) candidateNote = "Nearby suggestions need Google Maps configured on the server.";
-      else {
-        // missing meals are searched where they'd go on the route; other ideas near the day
-        const mealPoints = planDay.review.meals.flatMap((g) => mealSearchPoints(planDay, g)).slice(0, 2);
-        const foodCands = mealPoints.length ? await search(mealPoints, [{ type: "restaurant", kind: "food" }], 1200) : [];
-        const sightCands = await search([centre], searchTypes(prefs).filter((t) => t.kind === "attraction").slice(0, 2), 2500);
-        candidates = [...foodCands.slice(0, 6), ...sightCands.slice(0, 6)];
-        if (!candidates.length) candidateNote = "Google found no new places near this day to suggest.";
-      }
-      const ac = new AbortController();
-      res.on("close", () => {
-        if (!res.writableEnded) ac.abort();
-      });
+  // "Plan with AI" for one day: a preview only; nothing changes until /apply
+  // The planning assistant. Three actions, each a preview only; nothing
+  // changes until /plan/apply. "eat" and "nearby" use Google and plain rules
+  // (no model call); "optimize" makes one model call over the whole day.
+  // signal: the person left; no model call starts, a running one is cancelled.
+  async function draft(user: User, tripId: string, input: Record<string, unknown>, signal: AbortSignal): Promise<Reply> {
+    const action = input.action === "eat" || input.action === "nearby" ? input.action : "optimize";
+    const snap = trips.view(user.id, tripId);
+    const day = snap.days.find((d) => d.id === input.dayId);
+    if (!day) throw new HttpError(404, "That day isn't part of this trip.");
+    if (action === "optimize" && !planner.configured) return reply(503, { configured: false, error: "AI planning isn't available on this server. Planning by hand still works." });
+    const prefs = preferences.effective(user.id, tripId);
+    if (!prefs.confirmed) return reply(409, { code: "preferences", error: "Set your travel preferences first.", effective: prefs });
+    if (action !== "optimize" && !googleConfigured()) return reply(503, { error: "Place suggestions need Google Maps configured on the server." });
+    // Real travel times first: legs between consecutive routable stops that
+    // have no Google route yet are calculated through the ordinary
+    // (deduplicated, cached) route path, at most six per plan. A leg Google
+    // can't route stays "not calculated"; nothing is estimated.
+    const routable = (a: (typeof day.activities)[number]) => a.place?.source === "google" || (a.place?.source === "custom" && a.place.lat !== null);
+    const missing = googleConfigured()
+      ? day.activities.slice(0, -1).flatMap((a, i) => {
+          const b = day.activities[i + 1];
+          const seg = day.segments.find((s) => s.fromId === a.id && s.toId === b.id);
+          return routable(a) && routable(b) && (!seg || seg.stale) ? [[a.id, b.id]] : [];
+        }).slice(0, 6)
+      : [];
+    let routed = 0;
+    for (const [fromId, toId] of missing) {
       try {
-        const draft = await planner.plan({ userId: user.id, tripId, day: planDay, prefs, candidates });
-        if (candidateNote) draft.caveats.unshift(candidateNote);
-        draft.caveats.unshift(...routeNotes);
-        const id = keep(draft);
-        note({ dayId: day.id, changes: draft.changes.length, routesCalculated: routed, candidates: candidates.length });
-        return reply(200, { draftId: id, action, ...withIds(draft) });
-      } catch (err) {
-        const status = (err as { status?: number }).status;
-        if (status === 429 || status === 503 || err instanceof HttpError) throw err;
-        const d = describeAiError(err);
-        return reply(d.status, { error: d.error.replace("AI copilot", "AI planner"), retry: d.retry });
+        await calculateRoute(user, tripId, { fromId, toId });
+        routed++;
+      } catch {
+        // left uncalculated; the preview says so
+      }
+    }
+    const fresh = routed ? trips.view(user.id, tripId) : snap;
+    const planDay = fresh.days.find((d) => d.id === day.id) ?? day;
+    const routeNotes: string[] = [];
+    if (routed) routeNotes.push(`Calculated ${routed} travel time${routed === 1 ? "" : "s"} with Google Maps.`);
+    if (missing.length > routed) routeNotes.push(`${missing.length - routed} travel time${missing.length - routed === 1 ? "" : "s"} couldn't be calculated.`);
+    const search = async (points: { lat: number; lng: number }[], types: { type: string; kind: "food" | "attraction" }[], radius: number) => {
+      // one Places request per type per point, at most six; a failure leaves it out rather than guessing
+      const jobs = points.flatMap((pt) => types.map((t) => ({ pt, t }))).slice(0, 6);
+      const groups = await Promise.all(jobs.map(async ({ pt, t }) => ({ kind: t.kind, places: (await nearbyPlaces(pt, radius, t.type, { withPrice: true }).catch(() => ({ places: [] }))).places })));
+      return toCandidates(groups, planDay, points[0]);
+    };
+    const keep = (draft: PlanDraft) => {
+      const id = shortId("plan");
+      const t = Date.now();
+      for (const [k, v] of drafts) if (t - v.at > DRAFT_TTL_MS) drafts.delete(k);
+      drafts.set(id, { userId: user.id, tripId, draft, at: t });
+      return id;
+    };
+    const withIds = (draft: PlanDraft) => ({ ...draft, changes: draft.changes.map((c) => ({ ...c, id: changeId(c) })) });
+
+    if (action === "eat") {
+      const gaps = planDay.review.meals;
+      const gap = gaps.find((g) => g.meal === input.meal) ?? gaps[0];
+      if (!gap) return reply(200, { action, meals: [], summary: "No meal looks missing on this day.", changes: [], caveats: [], picks: [] });
+      const points = mealSearchPoints(planDay, gap);
+      if (!points.length) return reply(200, { action, meals: gaps, summary: "The stops around this meal have no places on the map.", changes: [], caveats: [], picks: [] });
+      const types = [{ type: "restaurant", kind: "food" as const }, ...(prefs.food.cuisines.includes("cafe") ? [{ type: "cafe", kind: "food" as const }] : [])];
+      const draft = eatDraft(planDay, prefs, gap, await search(points, types, 1200));
+      draft.caveats.unshift(...routeNotes);
+      note({ dayId: day.id, meal: gap.meal, changes: draft.changes.length, event: "AI_EAT_SUGGESTED", action: "find_food", message: "User asked for places to eat (Google only, no model call)" });
+      return reply(200, { draftId: keep(draft), meals: gaps, ...withIds(draft) });
+    }
+
+    if (action === "nearby") {
+      const slots = freeSlots(planDay);
+      const points = slots.flatMap((sl) => {
+        const a = planDay.activities.find((x) => x.id === sl.afterActivityId);
+        return a?.place?.lat != null && a.place.lng != null ? [{ lat: a.place.lat, lng: a.place.lng }] : [];
+      }).slice(0, 2);
+      const types = searchTypes(prefs).filter((t) => t.kind === "attraction").slice(0, 3);
+      const candidates = points.length ? await search(points, types, 2000) : [];
+      const draft = nearbyDraft(planDay, prefs, candidates);
+      draft.caveats.unshift(...routeNotes);
+      note({ dayId: day.id, changes: draft.changes.length, event: "AI_NEARBY_SUGGESTED", action: "explore_nearby", message: "User asked for nearby places (Google only, no model call)" });
+      return reply(200, { draftId: keep(draft), ...withIds(draft) });
+    }
+
+    const centre = dayCentre(planDay, fresh.center);
+    let candidates: Candidate[] = [];
+    let candidateNote: string | null = null;
+    if (!centre) candidateNote = "This day has no places on the map yet, so there's nothing nearby to suggest.";
+    else if (!googleConfigured()) candidateNote = "Nearby suggestions need Google Maps configured on the server.";
+    else {
+      // missing meals are searched where they'd go on the route; other ideas near the day
+      const mealPoints = planDay.review.meals.flatMap((g) => mealSearchPoints(planDay, g)).slice(0, 2);
+      const foodCands = mealPoints.length ? await search(mealPoints, [{ type: "restaurant", kind: "food" }], 1200) : [];
+      const sightCands = await search([centre], searchTypes(prefs).filter((t) => t.kind === "attraction").slice(0, 2), 2500);
+      candidates = [...foodCands.slice(0, 6), ...sightCands.slice(0, 6)];
+      if (!candidates.length) candidateNote = "Google found no new places near this day to suggest.";
+    }
+    try {
+      // gone while routes and places were looked up: don't spend a model call
+      if (signal.aborted) throw new AiError("cancelled", "The request was cancelled.");
+      const draft = await planner.plan({ userId: user.id, tripId, day: planDay, prefs, candidates, signal });
+      if (candidateNote) draft.caveats.unshift(candidateNote);
+      draft.caveats.unshift(...routeNotes);
+      const id = keep(draft);
+      note({ dayId: day.id, changes: draft.changes.length, routesCalculated: routed, candidates: candidates.length });
+      return reply(200, { draftId: id, action, ...withIds(draft) });
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 429 || status === 503 || err instanceof HttpError) throw err;
+      const d = describeAiError(err);
+      return reply(d.status, { error: d.error.replace("AI copilot", "AI planner"), retry: d.retry });
+    }
+  }
+
+  return {
+    // Listens from the start, before any slow lookup. Only a connection that
+    // closes before the response ended is a cancellation.
+    async draft(user: User, tripId: string, input: Record<string, unknown>, res: ServerResponse): Promise<Reply> {
+      const ac = new AbortController();
+      const onClose = () => {
+        if (!res.writableEnded) ac.abort();
+      };
+      res.on("close", onClose);
+      try {
+        return await draft(user, tripId, input, ac.signal);
+      } finally {
+        res.off("close", onClose);
       }
     },
 

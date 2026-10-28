@@ -255,16 +255,25 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
     requests,
   );
   if (isOwner) loadSent();
-  // someone accepted while this was open: their status and the member list follow
-  const onSnap = () => {
-    if (!dialog.open) return events.removeEventListener("snapshot", onSnap);
+  // someone accepted while this was open: their status and the member list
+  // follow, a tick later so the editor has applied the snapshot first
+  const following = new Set();
+  const follow = () => {
+    if (!dialog.open) return;
     renderMembers();
     if (isOwner) {
       loadSent();
       loadRequests();
     }
   };
-  events.addEventListener("snapshot", () => setTimeout(onSnap, 0));
+  const onSnap = () => {
+    const t = setTimeout(() => {
+      following.delete(t);
+      follow();
+    }, 0);
+    following.add(t);
+  };
+  events.addEventListener("snapshot", onSnap);
 
   const dialog = openDialog(
     h(
@@ -283,6 +292,9 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
     ),
   );
   dialog.addEventListener("close", () => {
+    events.removeEventListener("snapshot", onSnap);
+    for (const t of following) clearTimeout(t);
+    following.clear();
     clearTimeout(timer);
     seq++;
     choose(null);
@@ -292,7 +304,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
 
 // Publishing: a read-only snapshot for others to browse, review and copy.
 // Editing this trip afterwards never changes it until "Update published".
-export async function publishDialog({ S, base, render, navigate }) {
+export async function publishDialog({ S, base, applySnapshot, navigate }) {
   const t = S.trip;
   let pub = null;
   try {
@@ -341,8 +353,7 @@ export async function publishDialog({ S, base, render, navigate }) {
       await api(`${base}/publication`, { method: "DELETE" });
       dialog.close();
       toast("Unpublished.");
-      S.trip = await api(base);
-      render();
+      applySnapshot(await api(base));
     } catch (err) {
       error.textContent = err.message;
       error.hidden = false;
@@ -354,8 +365,7 @@ export async function publishDialog({ S, base, render, navigate }) {
       const r = await api(`${base}/publication`, { method: "PUT", body: { description: form.description.value } });
       dialog.close();
       toast(live ? "Published version updated." : "Published. Others can now find and copy it.");
-      S.trip = await api(base);
-      render();
+      applySnapshot(await api(base));
       if (!live) navigate(`/itineraries/${r.publication.id}`);
     } catch (err) {
       error.textContent = err.message;

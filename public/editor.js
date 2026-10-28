@@ -191,7 +191,7 @@ export async function openEditor(root, tripId, ctx) {
   const session = uid();
   const events = new EventSource(`${base}/events?session=${session}`);
   // what the sharing dialogs (public/share.js) need from this editor
-  const sharing = () => ({ S, me, base, act, events, render, navigate: ctx.navigate, isOwner });
+  const sharing = () => ({ S, me, base, act, events, applySnapshot, navigate: ctx.navigate, isOwner });
   events.addEventListener("snapshot", (e) => applySnapshot(JSON.parse(e.data), { remote: true }));
   // voice calls: signalling for this tab only (ADR 0004)
   voice = createVoice({

@@ -840,3 +840,175 @@ describe.skipIf(!chromePath)("publishing and trip settings", () => {
     expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
   });
 });
+
+// The share dialog follows live changes (someone accepts, a request comes in)
+// only while it's open: each opening listens to the trip's stream once, and
+// closing stops listening at once, even with a change already on its way.
+describe.skipIf(!chromePath)("the share dialog and the live stream", () => {
+  // installed in the page before the editor opens (an in-page navigation, so
+  // it survives): counts the stream's snapshot listeners and the dialog's
+  // invitation and request lookups, and keeps the editor's stream to hand
+  const probe = `(() => {
+    const live = new Set();
+    window.__snap = { live, lookups: 0, stream: null };
+    const add = EventSource.prototype.addEventListener;
+    const remove = EventSource.prototype.removeEventListener;
+    EventSource.prototype.addEventListener = function (type, fn, ...rest) {
+      if (type === 'snapshot') { live.add(fn); __snap.stream = this; }
+      return add.call(this, type, fn, ...rest);
+    };
+    EventSource.prototype.removeEventListener = function (type, fn, ...rest) {
+      if (type === 'snapshot') live.delete(fn);
+      return remove.call(this, type, fn, ...rest);
+    };
+    const f = window.fetch;
+    window.fetch = function (url, ...rest) {
+      if (/\\/api\\/trips\\/[^/]+\\/(invitations|requests)$/.test(String(url))) __snap.lookups++;
+      return f.call(this, url, ...rest);
+    };
+  })()`;
+  const openShare = `[...document.querySelectorAll('.trip-bar button')].find(b => b.textContent.includes('Share')).click()`;
+  const closeShare = `document.querySelector('dialog.dialog-share[open]').close()`;
+  // the editor's own current snapshot, sent again down its stream
+  const snapshotEvent = `(async () => { const t = await (await fetch(location.pathname.replace('/trips/', '/api/trips/'))).json(); return new MessageEvent('snapshot', { data: JSON.stringify(t) }); })()`;
+
+  async function editor(page: Page) {
+    await signUpIn(page, baseUrl, uniqueName("snap"));
+    const trip = await inPage(page, "POST", "/api/trips", { title: "Live share", destination: "Sydney", startDate: "2026-12-01", endDate: "2026-12-01", timezone: "Australia/Sydney" });
+    await page.goto(new URL("/trips", baseUrl).href);
+    await page.waitFor(`document.querySelector('.dash-section')`, 5000);
+    await page.eval(probe);
+    await page.eval(`history.pushState(null, '', '/trips/${trip.id}'); dispatchEvent(new PopStateEvent('popstate'))`);
+    await page.waitFor(`document.querySelector('.conn-live')`, 8000);
+    return trip;
+  }
+
+  it("listens once per opening and stops when closed, however often it's opened", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    await editor(page);
+    const base = await page.eval<number>(`__snap.live.size`); // the editor's own listener
+    expect(base).toBe(1);
+    for (let i = 0; i < 4; i++) {
+      await page.eval(openShare);
+      await page.waitFor(`document.querySelector('dialog.dialog-share[open]')`, 3000);
+      expect(await page.eval<number>(`__snap.live.size`)).toBe(base + 1);
+      await page.eval(closeShare);
+      // gone with the dialog's close event (queued by the browser), no snapshot needed
+      await page.waitFor(`__snap.live.size === ${base}`, 1000);
+    }
+    // a change after all that reaches only the editor: no closed dialog looks anything up
+    await page.waitFor(`document.querySelectorAll('dialog[open]').length === 0`);
+    const before = await page.eval<number>(`__snap.lookups`);
+    await page.eval(`(async () => __snap.stream.dispatchEvent(await ${snapshotEvent}))()`);
+    await sleep(100);
+    expect(await page.eval<number>(`__snap.lookups`)).toBe(before);
+  });
+
+  it("only the open dialog follows a snapshot, and one already on its way when the dialog closes changes nothing", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    await editor(page);
+    await page.eval(openShare);
+    await page.waitFor(`document.querySelector('dialog.dialog-share[open] [data-share=requests] li')`, 3000);
+    await sleep(100); // the opening's own lookups are done
+    let before = await page.eval<number>(`__snap.lookups`);
+    await page.eval(`(async () => __snap.stream.dispatchEvent(await ${snapshotEvent}))()`);
+    await page.waitFor(`__snap.lookups === ${before + 2}`, 3000); // invitations and requests, once each
+    await sleep(100);
+    expect(await page.eval<number>(`__snap.lookups`)).toBe(before + 2);
+
+    // a snapshot arrives and the dialog closes in the same moment: its follow-up is dropped
+    before = await page.eval<number>(`__snap.lookups`);
+    await page.eval(`(async () => { const ev = await ${snapshotEvent}; __snap.stream.dispatchEvent(ev); document.querySelector('dialog.dialog-share[open]').close(); })()`);
+    await sleep(150);
+    expect(await page.eval<number>(`__snap.lookups`)).toBe(before);
+    expect(await page.eval<number>(`__snap.live.size`)).toBe(1);
+  });
+});
+
+// After publishing, updating or unpublishing, the editor reloads the trip. A
+// newer change can reach it on the live stream before that reload answers;
+// the reload must not put the older plan back. The publication's own state
+// changes the trip's revision not at all, so that reload is still shown.
+describe.skipIf(!chromePath)("reloading the trip after publishing", () => {
+  // holds the editor's next plain GET of the trip until released, after the
+  // server has already answered it: an old response arriving late
+  const holdNextReload = `(() => {
+    window.__reload = { held: false, release: null };
+    const f = window.fetch;
+    window.fetch = async function (url, opts) {
+      const plain = (!opts || !opts.method || opts.method === 'GET') && /^\\/api\\/trips\\/[0-9a-f-]{36}$/.test(String(url));
+      const res = await f.call(this, url, opts);
+      if (!plain || !window.__reload || window.__reload.done) return res;
+      window.__reload.done = true;
+      window.__reload.held = true;
+      await new Promise((r) => (window.__reload.release = r));
+      return res;
+    };
+  })()`;
+  const timeline = `[...document.querySelectorAll('.timeline .stop h3')].map(e => e.textContent)`;
+
+  async function publishedTrip(page: Page) {
+    await signUpIn(page, baseUrl, uniqueName("rel"));
+    const trip = await tripWithStops(page);
+    await inPage(page, "PUT", `/api/trips/${trip.id}/publication`, { description: "Harbour day" });
+    await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await page.waitFor(`document.querySelector('.conn-live') && document.querySelector('.trip-bar [data-publish=published]')`, 8000);
+    return trip;
+  }
+  // the reload is out and held; meanwhile a newer change arrives on the stream
+  async function racePastReload(page: Page, trip: any, title: string) {
+    await page.waitFor(`window.__reload.held`, 5000);
+    await inPage(page, "POST", `/api/trips/${trip.id}/activities`, { clientId: `race-${Math.random()}`, dayId: trip.days[0].id, title, kind: "attraction", startMin: 1000, durationMin: 60 });
+    await page.waitFor(`${timeline}.includes(${JSON.stringify(title)})`, 3000);
+    await page.eval(`window.__reload.release()`);
+    await sleep(200); // the late, older answer is handled now
+    expect(await page.eval<string[]>(timeline)).toContain(title);
+  }
+
+  for (const vp of VIEWPORTS) {
+    it(`keeps a newer change when updating the published version, and shows the new state (${vp.name})`, async () => {
+      const page = await browser!.newPage();
+      await page.viewport(vp.width, vp.height, vp.mobile);
+      const trip = await publishedTrip(page);
+      // the plan moved on since publishing
+      await inPage(page, "POST", `/api/trips/${trip.id}/activities`, { clientId: `moved-${Math.random()}`, dayId: trip.days[0].id, title: "Changed since", kind: "attraction", startMin: 900, durationMin: 30 });
+      await page.waitFor(`document.querySelector('.trip-bar [data-publish]').textContent === 'Update published'`, 3000);
+      await page.eval(holdNextReload);
+      await page.click(".trip-bar [data-publish]");
+      await page.waitFor(`document.querySelector('dialog[open] [data-publish=submit]')`, 3000);
+      await page.click("dialog[open] [data-publish=submit]");
+      await racePastReload(page, trip, "Arrived first");
+      // still in the editor, and the stream's newer snapshot says the publication is out of date again
+      expect(await page.eval(`location.pathname`)).toBe(`/trips/${trip.id}`);
+      expect(await page.eval<string>(`document.querySelector('.trip-bar [data-publish]').dataset.publish`)).toBe("published");
+    });
+  }
+
+  it("keeps a newer change when unpublishing, and shows the trip as unpublished", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    const trip = await publishedTrip(page);
+    await page.eval(holdNextReload);
+    await page.click(".trip-bar [data-publish]");
+    await page.waitFor(`document.querySelector('dialog[open] [data-publish=unpublish]')`, 3000);
+    await page.eval(`window.confirm = () => true; document.querySelector('dialog[open] [data-publish=unpublish]').click()`);
+    await racePastReload(page, trip, "Added meanwhile");
+    // the stream's snapshot came after the unpublish, so it already says so
+    expect(await page.eval<string>(`document.querySelector('.trip-bar [data-publish]').dataset.publish`)).toBe("unpublished");
+  });
+
+  it("shows a publication change that leaves the trip's revision as it was", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    const trip = await publishedTrip(page);
+    const rev = (await inPage(page, "GET", `/api/trips/${trip.id}`)).rev;
+    await page.click(".trip-bar [data-publish]");
+    await page.waitFor(`document.querySelector('dialog[open] [data-publish=unpublish]')`, 3000);
+    await page.eval(`window.confirm = () => true; document.querySelector('dialog[open] [data-publish=unpublish]').click()`);
+    await page.waitFor(`!document.querySelector('dialog[open]') && document.querySelector('.trip-bar [data-publish]').dataset.publish === 'unpublished'`, 5000);
+    expect((await inPage(page, "GET", `/api/trips/${trip.id}`)).rev).toBe(rev); // the same revision, a new publication state
+    expect(await page.eval<string[]>(timeline)).toEqual(["Zoo", "Lunch", "Opera House"]);
+  });
+});
