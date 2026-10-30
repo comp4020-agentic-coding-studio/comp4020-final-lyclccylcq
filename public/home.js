@@ -79,6 +79,31 @@ export function itineraryCard(t, { navigate }) {
 
 const hue = (s) => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
 
+// the band shows the trip's cover photo when there is one (credited on
+// /credits), else its colour; a photo that fails to load leaves the colour
+export function tripCard(t, { cls = "trip-card" } = {}) {
+  const photo = photoFor(t.cover);
+  return h(
+    "a",
+    { class: cls, href: `/trips/${t.id}`, "data-link": true, style: `--hue:${hue(t.destination)}` },
+    h("div", { class: `trip-card-band${photo ? " has-photo" : ""}` }, coverImg(photo, { decorative: true }), h("span", { class: "trip-card-dest" }, t.destination)),
+    h(
+      "div",
+      { class: "trip-card-body" },
+      h("h3", {}, t.title),
+      h("p", { class: "trip-card-dates" }, fmtRange(t.startDate, t.endDate)),
+      t.basedOn && h("p", { class: "trip-card-origin small muted" }, `Based on a trip by ${t.basedOn}`),
+      h(
+        "p",
+        { class: "trip-card-meta" },
+        h("span", {}, `${t.people} ${t.people === 1 ? "traveller" : "travellers"}`),
+        t.role !== "owner" && h("span", {}, `Owner: ${t.ownerName}`),
+        h("span", {}, `Updated ${relTime(t.updatedAt)}`),
+      ),
+    ),
+  );
+}
+
 export function renderHome(app, ctx) {
   const { me, config, navigate } = ctx;
   const S = {
@@ -124,7 +149,7 @@ export function renderHome(app, ctx) {
       "div",
       { class: "geo-prompt-text" },
       h("strong", {}, "See what's near you?"),
-      h("p", {}, "Wayline can use your location to recommend nearby attractions, restaurants and itineraries. Your browser asks first, and Wayline keeps only a rough copy (about 1 km) on this device."),
+      h("p", {}, "Your browser asks first. Wayline keeps only a rough copy (about 1 km), on this device."),
     ),
     h(
       "div",
@@ -510,7 +535,7 @@ export function renderHome(app, ctx) {
   const regions = h(
     "section",
     { class: "home-section rx", id: "explore" },
-    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, "Curated by Wayline"), h("h2", {}, "Explore ready-made trips"), h("p", { class: "section-sub" }, "Itineraries the Wayline team wrote, by region. Open a city to see its routes, or preview one and copy it into your own trip."))),
+    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "03"), "Curated by Wayline"), h("h2", {}, "Explore ready-made trips"), h("p", { class: "section-sub" }, "Written by the Wayline team. Preview one, then copy it into your own trip."))),
     h("div", { class: "rx-filters" }, regionTabs, countryTabs),
     destGrid,
   );
@@ -590,7 +615,7 @@ export function renderHome(app, ctx) {
     .catch((err) => destGrid.replaceChildren(h("p", { class: "form-error" }, err.message)));
 
   // --- travel photo stream ---
-  const streamHead = h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, "Travel stream"), h("h2", {}, "Moments from the road"), h("p", { class: "section-sub" }, "Every photo opens a real destination or itinerary.")));
+  const streamHead = h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "02"), "Destinations"), h("h2", {}, "Where people are going")));
   const stream = photoStream([], { onCity: openCity, navigate });
   const streamSection = h("section", { class: "ps", "aria-labelledby": "ps-h" }, h("div", { class: "home-section ps-head" }, streamHead), stream.el);
   streamHead.querySelector("h2").id = "ps-h";
@@ -598,7 +623,9 @@ export function renderHome(app, ctx) {
     // Follows what the visitor picked (region, then country), never the
     // hero's scenes. Too few photos for a country: its region's; too few for
     // the region: everywhere, so the row never looks empty.
-    const all = streamItems(D.destinations, D.itineraries);
+    // itinerary photos only: the city cards just below already show each
+    // city's own photo, and the same picture twice on one page cheapens both
+    const all = streamItems(D.destinations, D.itineraries).filter((x) => !x.key.startsWith("dest-"));
     const inArea = S.area === AREA_ALL ? all : all.filter((x) => x.dest.area === S.area);
     const inCountry = S.country ? inArea.filter((x) => x.dest.country === S.country) : inArea;
     stream.render(inCountry.length >= 4 ? inCountry : inArea.length >= 4 ? inArea : all);
@@ -641,7 +668,7 @@ export function renderHome(app, ctx) {
   const myTrips = h(
     "section",
     { class: "home-section", id: "my-trips" },
-    h("div", { class: "section-head" }, h("div", {}, h("h2", {}, "My trips"), h("p", { class: "section-sub" }, "Trips you plan, alone or with friends.")), me && h("a", { class: "btn btn-ghost btn-sm", href: "/trips", "data-link": true }, "View all")),
+    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "04"), "Yours"), h("h2", {}, "My trips")), me && h("a", { class: "btn btn-ghost btn-sm", href: "/trips", "data-link": true }, "View all")),
     tripsBox,
   );
   if (!me) {
@@ -656,13 +683,7 @@ export function renderHome(app, ctx) {
         tripsBox.replaceChildren(
           ...(all.length
             ? all.map((t) =>
-                h(
-                  "a",
-                  { class: "mini-trip", href: `/trips/${t.id}`, "data-link": true, style: `--hue:${hue(t.destination)}` },
-                  h("strong", {}, t.title),
-                  h("span", {}, `${t.destination} · ${fmtRange(t.startDate, t.endDate)}`),
-                  h("small", { class: "muted" }, `${t.people} ${t.people === 1 ? "traveller" : "travellers"} · updated ${relTime(t.updatedAt)}`),
-                ),
+  tripCard(t, { cls: "trip-card mini-trip" }),
               )
             : [h("div", { class: "empty-inline" }, h("p", {}, "No trips yet. Preview an itinerary above and copy it into a trip, or start from scratch."), h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: ctx.createTrip }, "Create a trip"))]),
         );

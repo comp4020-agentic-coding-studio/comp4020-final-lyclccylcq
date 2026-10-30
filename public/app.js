@@ -1,5 +1,5 @@
 import { openEditor } from "/editor.js";
-import { renderHome } from "/home.js";
+import { renderHome, tripCard } from "/home.js";
 import { CREDITS as JOURNEY_CREDITS } from "/journey.js";
 import { HERO_CLIPS } from "/media.js";
 import { coverImg, PHOTOS, photoFor } from "/photos.js";
@@ -379,30 +379,7 @@ async function renderDashboard() {
     if (err.status === 401) return signOut();
     return app.querySelector(".dash").replaceChildren(h("p", { class: "form-error" }, err.message));
   }
-  // the band shows the trip's cover photo when there is one (credited on
-  // /credits), else its colour; a photo that fails to load leaves the colour
-  const card = (t) => {
-    const photo = photoFor(t.cover);
-    return h(
-      "a",
-      { class: "trip-card", href: `/trips/${t.id}`, "data-link": true, style: `--hue:${hue(t.destination)}` },
-      h("div", { class: `trip-card-band${photo ? " has-photo" : ""}` }, coverImg(photo, { decorative: true }), h("span", { class: "trip-card-dest" }, t.destination)),
-      h(
-        "div",
-        { class: "trip-card-body" },
-        h("h3", {}, t.title),
-        h("p", { class: "trip-card-dates" }, fmtRange(t.startDate, t.endDate)),
-        t.basedOn && h("p", { class: "trip-card-origin small muted" }, `Based on a trip by ${t.basedOn}`),
-        h(
-          "p",
-          { class: "trip-card-meta" },
-          h("span", {}, `${t.people} ${t.people === 1 ? "traveller" : "travellers"}`),
-          t.role !== "owner" && h("span", {}, `Owner: ${t.ownerName}`),
-          h("span", {}, `Updated ${relTime(t.updatedAt)}`),
-        ),
-      ),
-    );
-  };
+  const card = (t) => tripCard(t);
   const section = (title, list, empty) =>
     h("section", { class: "dash-section" }, h("h2", {}, title), list.length ? h("div", { class: "trip-grid" }, list.map(card)) : empty);
 
@@ -556,7 +533,7 @@ async function renderDashboard() {
     h(
       "div",
       { class: "dash-hero" },
-      h("div", {}, h("p", { class: "eyebrow" }, "Your trips"), h("h1", {}, `Where to next, ${state.me.displayName}?`)),
+      h("div", {}, h("p", { class: "eyebrow" }, "Your trips"), h("h1", {}, "Where to next?")),
       h("button", { class: "btn btn-primary", type: "button", onclick: newTripDialog }, icon("plus"), "New trip"),
     ),
     requestsBox,

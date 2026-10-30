@@ -95,8 +95,8 @@ export function journeyHero({ start, onSearch }) {
     h(
       "div",
       { class: "jh-copy" },
-      h("p", { class: "jh-brand" }, "WAYLINE"),
       h("h1", { class: "jh-title" }, "Every journey begins somewhere."),
+      h("p", { class: "jh-lede" }, "Plan a trip together on one map and one timeline, with real travel times between every stop."),
       h("div", { class: "jh-actions" }, h("button", { type: "button", class: "btn btn-primary btn-lg", onclick: start }, "Start Planning"), explore),
     ),
     h(

@@ -106,7 +106,7 @@ export async function openEditor(root, tripId, ctx) {
   const planFoot = h(
     "div",
     { class: "plan-foot" },
-    h("button", { class: "btn btn-ghost", type: "button", onclick: () => activityDialog({}) }, icon("plus"), "Add custom activity"),
+    h("button", { class: "btn btn-quiet", type: "button", onclick: () => activityDialog({}) }, icon("plus"), "Add custom activity"),
   );
   const copilotPane = h("aside", { class: "pane pane-copilot", "aria-label": "Planning assistant" });
   const mobileTabs = h("nav", { class: "mobile-tabs", "aria-label": "Workspace" });
@@ -368,7 +368,8 @@ export async function openEditor(root, tripId, ctx) {
     const idx = S.trip.days.indexOf(d);
     const conflicts = d.analysis.issues.filter((x) => x.severity === "conflict").length;
     dayHead.replaceChildren(
-      h("h2", {}, `Day ${idx + 1}`, h("span", {}, ` · ${fmtDay(d.date, { weekday: "long", day: "numeric", month: "long" })}`)),
+      h("p", { class: "day-kicker" }, `Day ${String(idx + 1).padStart(2, "0")} / ${String(S.trip.days.length).padStart(2, "0")}`),
+      h("h2", {}, fmtDay(d.date, { weekday: "long", day: "numeric", month: "long" })),
       h(
         "p",
         { class: conflicts ? "day-sum day-sum-bad" : "day-sum" },
@@ -383,7 +384,7 @@ export async function openEditor(root, tripId, ctx) {
         h(
           "p",
           { class: "day-routes" },
-          h("button", { class: "btn btn-sm btn-outline", type: "button", disabled: missing.some(([a, b]) => S.busyLegs.has(`${a.id}>${b.id}`)), onclick: () => calcMissing(d) }, `Calculate ${missing.length} missing routes`),
+          h("button", { class: "btn btn-sm btn-primary", type: "button", disabled: missing.some(([a, b]) => S.busyLegs.has(`${a.id}>${b.id}`)), onclick: () => calcMissing(d) }, icon("transit"), `Calculate ${missing.length} missing routes`),
         ),
       );
     }
@@ -552,7 +553,7 @@ export async function openEditor(root, tripId, ctx) {
     if (gap?.status === "no_places") {
       body.push(h("p", { class: "leg-line muted" }, "No travel time: ", !prev.place ? prev.title : next.title, " has no place on the map."));
     } else if (gap?.status === "not_calculated") {
-      body.push(h("div", { class: "leg-line" }, h("span", { class: "muted" }, "Travel time not calculated"), routeButton(prev, next, busy, "Calculate")));
+      body.push(h("div", { class: "leg-line leg-pending" }, h("span", { class: "muted" }, "Travel time not calculated"), routeButton(prev, next, busy, "Calculate")));
     } else if (seg) {
       body.push(
         h(
@@ -571,7 +572,7 @@ export async function openEditor(root, tripId, ctx) {
 
     return h(
       "li",
-      { class: `leg${issues.some((x) => x.severity === "conflict") ? " leg-bad" : ""}`, "aria-label": `Travel from ${prev.title} to ${next.title}` },
+      { class: `leg${issues.some((x) => x.severity === "conflict") ? " leg-bad" : ""}${gap?.status === "not_calculated" || gap?.status === "no_places" ? " leg-open" : ""}${sel ? ` leg-${sel.mode.toLowerCase()}` : ""}`, "aria-label": `Travel from ${prev.title} to ${next.title}` },
       ...body,
       issues.map((x) =>
         h(

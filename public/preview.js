@@ -139,7 +139,7 @@ export async function renderPreview(app, id, ctx) {
     const transit = (r.steps ?? []).filter((s) => s.kind === "transit");
     return h(
       "li",
-      { class: "pv-leg" },
+      { class: `pv-leg pv-leg-${S.mode.toLowerCase()}` },
       icon(S.mode === "WALK" ? "walk" : S.mode === "TRANSIT" ? "transit" : "drive"),
       h("span", {}, `${MODE_LABEL[S.mode]} · ${dur(Math.max(1, Math.ceil(r.durationSec / 60)))}${r.distanceM ? ` · ${(r.distanceM / 1000).toFixed(1)} km` : ""}`),
       transit.length > 0 && h("span", { class: "lines" }, transit.map((s) => h("span", { class: "line-chip", style: s.color ? `--lc:${s.color};--lt:${s.textColor ?? "#fff"}` : "" }, [s.vehicle, s.line].filter(Boolean).join(" ") || "Transit"))),
@@ -169,7 +169,7 @@ export async function renderPreview(app, id, ctx) {
             ),
             s.note && h("p", { class: "muted small" }, s.note),
           ),
-          h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => inspect(s) }, "Inspect"),
+          h("button", { class: "btn btn-ghost btn-quiet btn-sm pv-inspect", type: "button", onclick: () => inspect(s) }, "Inspect"),
         ),
       );
       if (i + 1 < stops.length) items.push(legLine(s, stops[i + 1]));

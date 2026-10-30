@@ -45,7 +45,7 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
   const el = h(
     "section",
     { class: "home-section", id: "explore-map" },
-    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, "Plan a trip"), h("h2", {}, "Where would you like to go?"), h("p", { class: "section-sub xm-lede" }, "Search a destination and start planning your trip."))),
+    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "01"), "Plan a trip"), h("h2", {}, "Where would you like to go?"))),
     finder,
     h("div", { class: "xm-grid" }, h("div", { class: "xm-map" }, mapHost), side),
     sub,
@@ -145,7 +145,7 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
   function render() {
     sub.textContent = S.origin
       ? `Places around ${S.origin.source === "location" ? "your location" : S.origin.label}${S.source === "demo" ? " (demo data: Google isn't configured)" : ", from Google Maps"}. These are individual places, not itineraries.`
-      : "Search a destination (or use your location), then browse attractions, restaurants and more around it on the map.";
+      : "Search a city, or use your location, to browse what's around it.";
     paintMap();
     if (!S.origin) {
       side.replaceChildren(

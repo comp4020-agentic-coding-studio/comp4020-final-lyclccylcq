@@ -25,7 +25,7 @@ function loadGoogle(key) {
   return loader;
 }
 
-const MODE_COLOUR = { WALK: "#0F7C8C", TRANSIT: "#7A5AF8", DRIVE: "#F2603D" };
+const MODE_COLOUR = { WALK: "#1F6F5C", TRANSIT: "#2B4DB8", DRIVE: "#8A5A16" };
 const distanceKm = (a, b) => {
   const rad = Math.PI / 180;
   const x = Math.sin(((b.lat - a.lat) * rad) / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(((b.lng - a.lng) * rad) / 2) ** 2;
@@ -34,7 +34,8 @@ const distanceKm = (a, b) => {
 const formatKm = (k) => (k < 1 ? `${Math.round(k * 1000)} m` : `${k < 10 ? k.toFixed(1) : Math.round(k)} km`);
 // the start shows "S"; the stops after it are numbered from 1, as in the timeline
 const stopLabel = (stops, i) => (stops[i].start ? "S" : String(i + 1 - (stops[0]?.start ? 1 : 0)));
-const KIND_COLOUR = { attraction: "#F2603D", food: "#E08A00", shopping: "#7A5AF8", accommodation: "#0F7C8C", custom: "#5F6B7A" };
+// a category is a small dot on the stop; the stop itself is always the line's ink
+const KIND_COLOUR = { attraction: "#C2563A", food: "#B98216", shopping: "#6D5BB5", accommodation: "#2E7C88", custom: "#7A8290" };
 
 // onPlaceClick(placeId, latLng): one of Google's own place icons was clicked.
 // onMapClick(latLng): anywhere else. onViewChange({ lat, lng, zoom, heading }):
@@ -238,14 +239,15 @@ async function googleMap(el, config, handlers) {
       line?.setMap(null);
       for (const r of routeLines) r.setMap(null);
       // real route geometry from the Routes API, drawn solid
-      routeLines = (data.routes ?? []).map((r) => new Polyline({ map, path: r.path, strokeColor: MODE_COLOUR[r.mode] ?? "#1C2430", strokeOpacity: 0.85, strokeWeight: 5, zIndex: 5 }));
+      routeLines = (data.routes ?? []).map((r) => new Polyline({ map, path: r.path, strokeColor: MODE_COLOUR[r.mode] ?? "#15171A", strokeOpacity: 0.92, strokeWeight: 6, zIndex: 5 }));
 
       stops.forEach((s, i) => {
         const label = stopLabel(stops, i);
         const pin = h(
           "button",
-          { class: `pin${s.start ? " pin-start" : ""}${s.selected ? " pin-on" : ""}`, type: "button", style: `--c:${KIND_COLOUR[s.kind]}`, "aria-label": s.start ? `Start: ${s.title}` : `Stop ${label}: ${s.title}` },
+          { class: `pin${s.start ? " pin-start" : ""}${s.selected ? " pin-on" : ""}`, type: "button", style: `--k:${KIND_COLOUR[s.kind]}`, "aria-label": s.start ? `Start: ${s.title}` : `Stop ${label}: ${s.title}` },
           h("span", {}, label),
+          !s.start && h("i", { class: "pin-kind", "aria-hidden": "true" }),
         );
         pin.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -272,7 +274,7 @@ async function googleMap(el, config, handlers) {
           map,
           path: stops.map((s) => ({ lat: s.lat, lng: s.lng })),
           strokeOpacity: 0,
-          icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 0.7, strokeColor: "#1C2430", scale: 2.5 }, offset: "0", repeat: "12px" }],
+          icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 0.55, strokeColor: "#15171A", scale: 2 }, offset: "0", repeat: "10px" }],
         });
       }
 
@@ -401,7 +403,7 @@ async function schematic(el, handlers, problem) {
 
       if (stops.length > 1) node("polyline", { points: stops.map((s) => at(s).join(",")).join(" "), class: "schematic-path" });
       for (const r of data.routes ?? []) {
-        node("polyline", { points: r.path.map((q) => at(q).join(",")).join(" "), class: "schematic-route", style: `stroke:${MODE_COLOUR[r.mode] ?? "#1C2430"}` });
+        node("polyline", { points: r.path.map((q) => at(q).join(",")).join(" "), class: "schematic-route", style: `stroke:${MODE_COLOUR[r.mode] ?? "#15171A"}` });
       }
       results.forEach((r) => {
         const [x, y] = at(r);
@@ -417,7 +419,7 @@ async function schematic(el, handlers, problem) {
       stops.forEach((s, i) => {
         const [x, y] = at(s);
         const label = stopLabel(stops, i);
-        const g = node("g", { class: `schematic-stop${s.start ? " start" : ""}${s.selected ? " on" : ""}`, tabindex: 0, role: "button", "aria-label": s.start ? `Start: ${s.title}` : `Stop ${label}: ${s.title}`, style: `--c:${KIND_COLOUR[s.kind]}` });
+        const g = node("g", { class: `schematic-stop${s.start ? " start" : ""}${s.selected ? " on" : ""}`, tabindex: 0, role: "button", "aria-label": s.start ? `Start: ${s.title}` : `Stop ${label}: ${s.title}`, style: `--k:${KIND_COLOUR[s.kind]}` });
         node("circle", { cx: x, cy: y, r: 14 }, g);
         const n = node("text", { x, y: y + 4.5, "text-anchor": "middle", class: "num" }, g);
         n.textContent = label;
