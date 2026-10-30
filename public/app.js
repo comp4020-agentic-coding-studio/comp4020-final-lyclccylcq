@@ -98,7 +98,7 @@ function topbar(active = "") {
             { class: "me" },
             avatar({ id: state.me.id, displayName: state.me.displayName }, "sm"),
             h("span", { class: "me-name" }, state.me.displayName),
-            h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: signOut }, "Sign out"),
+            h("button", { class: "btn btn-ghost btn-sm signout", type: "button", "aria-label": "Sign out", onclick: signOut }, icon("signout"), h("span", { class: "hide-xs" }, "Sign out")),
           )
         : h("a", { class: "btn btn-ghost btn-sm", href: `/login?next=${encodeURIComponent(location.pathname)}`, "data-link": true }, "Sign in"),
     ),

@@ -642,6 +642,13 @@ textarea { resize: vertical; }
   .topbar-nav { gap: 8px; }
   .dialog { padding: 20px; }
 }
+/* short screens (a zoomed-in browser): the day tabs, heading and footer
+   would leave the timeline no height, so the whole plan pane scrolls */
+@media (max-height: 620px) {
+  .pane-plan { overflow-y: auto; }
+  .pane-plan .timeline { flex: none; min-height: auto; overflow: visible; }
+  .plan-foot { position: sticky; bottom: 0; z-index: 2; }
+}
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
@@ -654,6 +661,11 @@ textarea { resize: vertical; }
 .topbar-nav a { white-space: nowrap; }
 .place-dialog .demo-note { margin: 0; }
 .topbar-nav .me { gap: 10px; }
+.signout svg { display: none; }
+@media (max-width: 520px) {
+  .signout { padding: 6px; width: 32px; height: 32px; }
+  .signout svg { display: block; }
+}
 
 .home { display: flex; flex-direction: column; }
 .hero {
@@ -800,7 +812,6 @@ textarea { resize: vertical; }
   .hero-search { padding-left: 14px; }
   .hero-search .btn { padding: 10px 14px; }
   .topbar-nav { gap: 8px; }
-  .topbar-nav .me .btn { display: none; }
   .preview-grid { grid-template-columns: 1fr; }
   .preview-map { position: relative; top: 0; height: 46vh; }
   .preview-panel { border-left: 0; padding: 18px 16px 40px; }
@@ -1257,7 +1268,7 @@ textarea { resize: vertical; }
 .jh-place { margin: 0; font: 800 18px/1.1 var(--sans); letter-spacing: .16em; color: #fff; }
 .jh-place-row { display: flex; align-items: baseline; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
 .jh-sub { margin: 0; font: 500 italic 15px/1.2 var(--serif); color: rgba(255, 255, 255, .9); }
-.jh-stops { display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(10, 12, 16, .32); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); }
+.jh-stops { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; padding: 3px; border-radius: 18px; background: rgba(10, 12, 16, .32); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); }
 .jh-stop { display: inline-flex; gap: 6px; align-items: center; padding: 7px 12px; border: 0; border-radius: 999px; background: transparent; color: rgba(255, 255, 255, .9); font: 600 13px/1 var(--sans); cursor: pointer; white-space: nowrap; }
 .jh-stop:hover { background: rgba(255, 255, 255, .14); color: #fff; }
 .jh-stop[aria-current="true"] { background: #fff; color: var(--ink); }
@@ -1279,7 +1290,7 @@ textarea { resize: vertical; }
 .jh-portrait .jh-actions .btn { flex: 1; justify-content: center; text-align: center; padding: 12px 8px; font-size: 15px; }
 .jh-portrait .jh-dest { text-align: left; }
 .jh-portrait .jh-place-row { justify-content: flex-start; }
-.jh-portrait .jh-stops { overflow-x: auto; scrollbar-width: none; }
+.jh-portrait .jh-stops { flex-wrap: nowrap; border-radius: 999px; overflow-x: auto; scrollbar-width: none; }
 .jh-portrait .jh-stop { flex: 1 1 auto; justify-content: center; min-height: 44px; padding: 9px 6px; gap: 0; font-size: 11px; }
 .jh-portrait .jh-stop-n { display: none; }
 .jh-portrait .jh-credit { white-space: normal; color: rgba(255, 255, 255, .65); }
