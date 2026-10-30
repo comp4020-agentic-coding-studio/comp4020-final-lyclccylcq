@@ -427,9 +427,51 @@ contradict the README, stop and ask. Don't quietly change the product.
 
 ## Before calling something done
 
-- Start the app on a fresh `DATA_DIR` (`pnpm start`) and run `pnpm check`;
-  both must be green. `pnpm check:evidence` too before a crit.
-- `pnpm check` assumes the optional-key-off path: several specs
+- Run the tests the change can affect, not the whole suite each time. The
+  browser specs start real Chrome and take minutes; a CSS tweak doesn't need
+  them. By what changed:
+  - **Styles, copy or images only** (`public/styles.css`, `public/img/`, wording
+    no spec pins): no tests. Look at it at 1920×1080 and 390×844 in a real
+    browser (screenshots).
+  - **Client JS or DOM for one page**: `pnpm typecheck`, then that page's spec
+    file, narrowed with `-t "<test name>"` where it helps (table below).
+  - **Server or data logic** (`src/`): `pnpm typecheck`, then its spec files.
+  - **Before a commit, push or deploy**: the whole suite except voice calls,
+    `pnpm typecheck && pnpm test:fast`.
+  - **Voice calls** (`public/call*.js`, `src/calls.ts`, TURN, the call UI):
+    only then `spec/browser-call.test.ts` (or the full `pnpm check`). It holds
+    the machine's speakers and microphone for the whole run and proves nothing
+    about unrelated work.
+  Say what ran and what was skipped. Screenshots alone aren't "tests pass",
+  and a style-only change has no spec behind it until the pre-commit run.
+- Which spec covers what (run one with `pnpm exec vitest run <file>`):
+
+  | Changed | Spec |
+  |---|---|
+  | Homepage hero (`journey*.js`) | `spec/pixel-train.test.ts` |
+  | Homepage discovery, map, location, cards (`home.js`, `explore-map.js`) | `spec/browser.test.ts -t "homepage\|location\|explore places"`, `spec/discovery.test.ts`, `spec/photos.test.ts` |
+  | Editor (`editor.js`, `map.js`) | `spec/browser.test.ts -t "in a real browser\|starting a trip\|collaborating"`, `spec/browser-suggest.test.ts` |
+  | Share dialog, nicknames, publishing | `spec/browser.test.ts -t "share\|nickname\|publishing\|reloading"` |
+  | My Trips | `spec/browser.test.ts -t "My Trips"` |
+  | `ui.js` `h()` / `fill()` | `spec/dom-children.test.ts` |
+  | Scheduling, order, start (`src/schedule.ts`, `src/trips.ts`) | `spec/schedule.test.ts`, `spec/order.test.ts`, `spec/start.test.ts`, `spec/itinerary.test.ts` |
+  | Planner, review, copilot, AI budget | `spec/planner.test.ts`, `spec/review.test.ts`, `spec/plan-cancel.test.ts`, `spec/copilot.test.ts`, `spec/aiusage.test.ts` |
+  | Access, accounts, permissions | `spec/access.test.ts`, `spec/accounts.test.ts`, `spec/permissions.test.ts` |
+  | Realtime sync | `spec/realtime.test.ts` |
+  | Curated library | `spec/curated.test.ts`, `spec/photos.test.ts` |
+  | Google calls, hours | `spec/google-mock.test.ts`, `spec/hours.test.ts` |
+  | Logging | `spec/logging.test.ts`, `spec/request-log.test.ts` |
+  | Server start, config, restart | `spec/restart.test.ts`, `spec/invariants.test.ts` |
+  | Call signalling | `spec/calls.test.ts` (no audio) |
+
+  In the `-t` patterns `\|` is only the table's escape: type a plain `|`
+  (`-t "homepage|location|explore places"`), or the pattern matches nothing.
+
+- Every spec runs against a running app (`spec/global-setup.ts` finds it via
+  `APP_URL`). Start one on a fresh `DATA_DIR` with the optional keys cleared:
+  `GOOGLE_MAPS_BROWSER_KEY= GOOGLE_MAPS_SERVER_KEY= CLOUDFLARE_TURN_KEY_ID= CLOUDFLARE_TURN_API_TOKEN= pnpm start`
+  in one shell, the tests in another. `pnpm check:evidence` too before a crit.
+- The tests assume the optional-key-off path: several specs
   (`spec/order.test.ts`, `spec/browser.test.ts`, the "forced relay without
   TURN" cases in `spec/browser-call.test.ts`) test what the app does with
   `GOOGLE_MAPS_BROWSER_KEY`/`GOOGLE_MAPS_SERVER_KEY`/`CLOUDFLARE_TURN_KEY_ID`/
@@ -438,10 +480,8 @@ contradict the README, stop and ask. Don't quietly change the product.
   key the matching feature switches off and the app says so"), not a
   leftover from before Google Maps was wired up. A real `.env` with those
   keys set makes the app actually call Google/Cloudflare, which breaks those
-  assertions. Run `pnpm check` with them cleared, e.g.
-  `GOOGLE_MAPS_BROWSER_KEY= GOOGLE_MAPS_SERVER_KEY= CLOUDFLARE_TURN_KEY_ID= CLOUDFLARE_TURN_API_TOKEN= pnpm start`
-  in one shell and `pnpm check` in another; keep the keys in `.env` for your
-  own manual testing of the real integrations.
+  assertions. Keep the keys in `.env` for your own manual testing of the real
+  integrations.
 - For UI changes, look at it at 1920×1080 and 390×844 in a real browser.
   `spec/browser.test.ts` checks layout at both, keyboard reordering,
   persistence after reload, and two browsers seeing each other's changes.

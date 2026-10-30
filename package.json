@@ -10,6 +10,7 @@
     "check": "pnpm typecheck && pnpm test",
     "check:evidence": "node scripts/check-evidence.ts",
     "test": "vitest run",
+    "test:fast": "vitest run --exclude spec/browser-call.test.ts",
     "check:google": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/live-google-check.ts",
     "check:ai": "node --disable-warning=ExperimentalWarning scripts/live-ai-check.ts",
     "check:map": "node --disable-warning=ExperimentalWarning scripts/live-map-check.ts"
