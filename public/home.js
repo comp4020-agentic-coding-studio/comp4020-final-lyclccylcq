@@ -40,7 +40,7 @@ const kmApart = (a, b) => {
 const permissionState = () =>
   navigator.permissions?.query({ name: "geolocation" }).then((p) => p.state, () => null) ?? Promise.resolve(null);
 
-export function itineraryCard(t, { navigate }) {
+export function itineraryCard(t, { navigate }, n = null) {
   const shared = t.source === "user";
   const primary = t.categories.find((c) => !["half-day", "one-day", "weekend"].includes(c)) ?? t.categories[0];
   const length = t.days > 1 ? `${t.days} days` : `About ${dur(Math.round(t.durationMin / 30) * 30)}`;
@@ -49,6 +49,7 @@ export function itineraryCard(t, { navigate }) {
   return h(
     "article",
     { class: "it-card", dataset: { id: t.id } },
+    n !== null && h("span", { class: "it-n", "aria-hidden": "true" }, String(n + 1).padStart(2, "0")),
     h(
       "div",
       { class: `it-cover cover-${primary}${photo ? " has-photo" : ""}`, style: `--hue:${(CATEGORY_HUE[primary] ?? 260) + (hue(t.title) % 28)}` },
@@ -642,7 +643,7 @@ export function renderHome(app, ctx) {
   // "All destinations": the featured ones, with a way to see every one. A
   // region or country: every itinerary there. Never ranked by popularity.
   const featTitle = h("h3", { class: "rx-sub" });
-  const featGrid = h("div", { class: "it-grid", "aria-live": "polite" }, ...skeletons());
+  const featGrid = h("div", { class: "it-grid it-index", "aria-live": "polite" }, ...skeletons());
   const featMore = h("button", { class: "btn btn-ghost btn-sm", type: "button", hidden: true, onclick: () => { S.showAll = true; renderFeatured(); } }, "Show all itineraries");
   const featured = h("div", { class: "rx-its", id: "itineraries" }, featTitle, featGrid, featMore);
   let featuredIds = null;
@@ -658,7 +659,7 @@ export function renderHome(app, ctx) {
     const inPlace = D.itineraries.filter((t) => t.source !== "user" && (S.area === AREA_ALL || t.area === S.area) && (!S.country || t.country === S.country));
     const list = where || S.showAll ? inPlace : featuredIds.map((id) => D.itineraries.find((t) => t.id === id)).filter(Boolean);
     featTitle.textContent = where ? `Itineraries in ${where}` : S.showAll ? "All itineraries" : "Featured itineraries";
-    featGrid.replaceChildren(...(list.length ? list.map((t) => itineraryCard(t, ctx)) : [h("p", { class: "muted" }, "No itineraries here yet.")]));
+    featGrid.replaceChildren(...(list.length ? list.map((t, i) => itineraryCard(t, ctx, i)) : [h("p", { class: "muted" }, "No itineraries here yet.")]));
     featMore.hidden = Boolean(where || S.showAll) || inPlace.length <= list.length;
     featMore.textContent = `Show all ${inPlace.length} itineraries`;
   }

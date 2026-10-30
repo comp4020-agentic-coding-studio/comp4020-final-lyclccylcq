@@ -19,6 +19,11 @@ import { h } from "/ui.js";
 
 const IMG = "/img/train";
 
+// The stations' places on the line, in % of its box: a route with a bend
+// at every stop, alternating so the names above and below never collide.
+const LINE = [[6, 72], [28, 30], [50, 72], [72, 30], [94, 72]];
+
+
 // on a metered or "save data" connection, keep the hero still (fewer photos)
 const saveData = () => Boolean(navigator.connection?.saveData) || /(^|-)2g$/.test(navigator.connection?.effectiveType ?? "");
 
@@ -89,27 +94,48 @@ export function journeyHero({ start, onSearch }) {
     else kick();
   }, "aria-pressed": "false" }, "Pause scenery");
   const credit = h("p", { class: "jh-credit" });
-  const ui = h(
-    "div",
-    { class: "jh-ui" },
+  // the line: the five destinations as stations on one route, drawn up to
+  // the one on view (an SVG path, its stations ordinary buttons over it)
+  const svg = (tag, attrs) => {
+    const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    return n;
+  };
+  const pts = LINE.map(([x, y]) => `${x},${y}`).join(" ");
+  const track = svg("polyline", { class: "jh-track", points: pts, "vector-effect": "non-scaling-stroke" });
+  const drawn = svg("polyline", { class: "jh-drawn", points: "", "vector-effect": "non-scaling-stroke" });
+  const map = svg("svg", { class: "jh-line-svg", viewBox: "0 0 100 100", preserveAspectRatio: "none", "aria-hidden": "true" });
+  map.append(track, drawn);
+  stops.forEach((b, i) => {
+    b.style.left = `${LINE[i][0]}%`;
+    b.style.top = `${LINE[i][1]}%`;
+    b.classList.add(LINE[i][1] < 50 ? "jh-stop-up" : "jh-stop-down");
+  });
+  const ui = h("div", { class: "jh-ui" }, credit, pause, live);
+  const el = h("div", { class: "jh" }, picture, ui);
+  const root = h(
+    "section",
+    { class: "hx", id: "jh", "aria-label": "Wayline" },
     h(
       "div",
-      { class: "jh-copy" },
-      h("h1", { class: "jh-title" }, "Every journey begins somewhere."),
-      h("p", { class: "jh-lede" }, "Plan a trip together on one map and one timeline, with real travel times between every stop."),
-      h("div", { class: "jh-actions" }, h("button", { type: "button", class: "btn btn-primary btn-lg", onclick: start }, "Start Planning"), explore),
+      { class: "hx-copy" },
+      h(
+        "div",
+        { class: "jh-copy" },
+        h("p", { class: "hx-kicker" }, h("span", { class: "eyebrow-n" }, "00"), "Collaborative trip planner"),
+        h("h1", { class: "jh-title" }, "Every journey begins somewhere."),
+        h("p", { class: "jh-lede" }, "Plan a trip together on one map and one timeline, with real travel times between every stop."),
+        h("div", { class: "jh-actions" }, h("button", { type: "button", class: "btn btn-primary btn-lg", onclick: start }, "Start Planning"), explore),
+      ),
+      h(
+        "div",
+        { class: "jh-bar" },
+        h("div", { class: "jh-dest" }, h("p", { class: "jh-kicker" }, count, " · Now passing"), h("div", { class: "jh-place-row" }, place, sub)),
+        h("div", { class: "jh-line" }, map, h("nav", { class: "jh-stops", "aria-label": "Choose a destination" }, stops)),
+      ),
     ),
-    h(
-      "div",
-      { class: "jh-bar" },
-      h("div", { class: "jh-dest" }, h("p", { class: "jh-kicker" }, count, " · Now passing"), h("div", { class: "jh-place-row" }, place, sub)),
-      h("nav", { class: "jh-stops", "aria-label": "Choose a destination" }, stops),
-    ),
-    credit,
-    pause,
-    live,
+    el,
   );
-  const el = h("section", { class: "jh", "aria-label": "Wayline" }, picture, ui);
 
   // --- state ---
   const playback = createPlayback();
@@ -211,7 +237,12 @@ export function journeyHero({ start, onSearch }) {
     picture.setAttribute("aria-label", s.alt);
     const c = CREDITS.find((x) => x.scene === s.id);
     credit.replaceChildren(`${s.place}. Photo: `, h("a", { href: c.page, rel: "noopener", target: "_blank" }, c.author), ", ", h("a", { href: c.licenseUrl, rel: "noopener license", target: "_blank" }, c.license));
-    stops.forEach((b, k) => (k === i ? b.setAttribute("aria-current", "true") : b.removeAttribute("aria-current")));
+    stops.forEach((b, k) => {
+      if (k === i) b.setAttribute("aria-current", "true");
+      else b.removeAttribute("aria-current");
+      b.classList.toggle("jh-stop-past", k < i);
+    });
+    drawn.setAttribute("points", LINE.slice(0, i + 1).map(([x, y]) => `${x},${y}`).join(" "));
     const go = exploreFor(s);
     explore.href = go.href ?? "/#explore-map";
     // an in-app link goes through the router; a map search is handled here
@@ -299,7 +330,7 @@ export function journeyHero({ start, onSearch }) {
   pause.hidden = still();
 
   return {
-    el,
+    el: root,
     destroy() {
       destroyed = true;
       halt();
