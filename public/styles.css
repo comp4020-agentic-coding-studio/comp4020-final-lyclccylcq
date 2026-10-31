@@ -2014,3 +2014,4 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
   .it-index .it-card:is(:hover, :focus-within) h3 { transform: none; }
 }
 @media (hover: none), (max-width: 1080px) { .it-index .it-source { white-space: nowrap; font-size: 9.5px; } }
+.jh-head { position: absolute; left: 0; top: 0; z-index: 1; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; will-change: transform; border-radius: 50%; background: var(--coral); box-shadow: 0 0 0 3px var(--paper); pointer-events: none; }

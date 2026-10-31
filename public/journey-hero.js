@@ -14,7 +14,7 @@
 // clock in a requestAnimationFrame loop, which runs only while the hero is
 // on screen in a visible tab, and never with reduced motion (or Save-Data),
 // where the scene is still until someone picks another.
-import { band, BAND_W, CREDITS, createPlayback, exploreFor, fitWindow, PHONE_VIEW, placePhoto, SCENES } from "/journey.js";
+import { band, BAND_W, CREDITS, createPlayback, exploreFor, fitWindow, PHONE_VIEW, placePhoto, SCENES, sceneStart, TIMING } from "/journey.js";
 import { h } from "/ui.js";
 
 const IMG = "/img/train";
@@ -22,6 +22,30 @@ const IMG = "/img/train";
 // The stations' places on the line, in % of its box: a route with a bend
 // at every stop, alternating so the names above and below never collide.
 const LINE = [[6, 72], [28, 30], [50, 72], [72, 30], [94, 72]];
+const LAST = LINE.length - 1;
+const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
+const clamp01 = (t) => Math.min(1, Math.max(0, t));
+
+// How far along the line playback is, in stations (0 = the first, 1.5 =
+// halfway from the second to the third): it travels on through each hold
+// like a progress bar and reaches the next station as the window names it
+// (halfway through the tunnel). From the last station it runs back to the
+// first during that tunnel. A picked destination glides there from
+// wherever the line was, arriving as the window names it.
+function linePos(st, from) {
+  if (st.jumping) return from + (st.next - from) * ease(clamp01(st.t * 2));
+  if (st.kind === "scene" && st.scene === LAST) return LAST;
+  if (st.kind !== "scene" && st.scene === LAST) return LAST * (1 - ease(clamp01(st.t * 2)));
+  return Math.min(st.scene + 1, st.scene + clamp01((st.clock - sceneStart(st.scene)) / (TIMING.hold + TIMING.move / 2)));
+}
+// the line from the first station to position p, as SVG points
+function linePoints(p) {
+  const n = Math.floor(p);
+  const pts = LINE.slice(0, n + 1);
+  const f = p - n;
+  if (f > 0 && n < LAST) pts.push([LINE[n][0] + (LINE[n + 1][0] - LINE[n][0]) * f, LINE[n][1] + (LINE[n + 1][1] - LINE[n][1]) * f]);
+  return pts.map(([x, y]) => `${x},${y}`).join(" ");
+}
 
 
 // on a metered or "save data" connection, keep the hero still (fewer photos)
@@ -106,6 +130,14 @@ export function journeyHero({ start, onSearch }) {
   const drawn = svg("polyline", { class: "jh-drawn", points: "", "vector-effect": "non-scaling-stroke" });
   const map = svg("svg", { class: "jh-line-svg", viewBox: "0 0 100 100", preserveAspectRatio: "none", "aria-hidden": "true" });
   map.append(track, drawn);
+  // the head of the line: a dot travelling with it (its own element, so it
+  // stays round however the line's box is stretched)
+  const head = h("span", { class: "jh-head", "aria-hidden": "true" });
+  let lineBox = null;
+  // the line's size in px, so the dot moves by transform (sub-pixel, no
+  // layout) rather than by percentages snapped to whole pixels
+  let lineW = 0;
+  let lineH = 0;
   stops.forEach((b, i) => {
     b.style.left = `${LINE[i][0]}%`;
     b.style.top = `${LINE[i][1]}%`;
@@ -131,7 +163,7 @@ export function journeyHero({ start, onSearch }) {
         "div",
         { class: "jh-bar" },
         h("div", { class: "jh-dest" }, h("p", { class: "jh-kicker" }, count, " · Now passing"), h("div", { class: "jh-place-row" }, place, sub)),
-        h("div", { class: "jh-line" }, map, h("nav", { class: "jh-stops", "aria-label": "Choose a destination" }, stops)),
+        lineBox = h("div", { class: "jh-line" }, map, head, h("nav", { class: "jh-stops", "aria-label": "Choose a destination" }, stops)),
       ),
     ),
     el,
@@ -226,6 +258,25 @@ export function journeyHero({ start, onSearch }) {
     const night = SCENES[layers.at(-1)?.scene ?? shown].night;
     el.classList.toggle("jh-night", (night && dark < 0.5) || dark > 0.5);
     el.style.setProperty("--jh-dark", String(Math.max(dark * 0.85, night ? 0.6 : 0)));
+    drawLine(st);
+  }
+
+  // the line follows the playback clock, frame by frame; still, it sits at
+  // the station on view
+  let linePosNow = 0;
+  let jumpFrom = null;
+  function drawLine(st) {
+    if (st.jumping) jumpFrom ??= linePosNow;
+    else jumpFrom = null;
+    const p = still() ? shown : linePos(st, jumpFrom ?? linePosNow);
+    if (Math.abs(p - linePosNow) < 1e-4 && drawn.hasAttribute("points")) return;
+    linePosNow = p;
+    const pts = linePoints(p);
+    drawn.setAttribute("points", pts);
+    const [x, y] = pts.split(" ").at(-1).split(",");
+    head.style.transform = `translate3d(${(x / 100) * lineW}px,${(y / 100) * lineH}px,0)`;
+    head.hidden = Number.isInteger(p);
+    stops.forEach((b, k) => b.classList.toggle("jh-stop-past", k <= p + 1e-6 && k !== shown));
   }
 
   function label(i) {
@@ -240,9 +291,7 @@ export function journeyHero({ start, onSearch }) {
     stops.forEach((b, k) => {
       if (k === i) b.setAttribute("aria-current", "true");
       else b.removeAttribute("aria-current");
-      b.classList.toggle("jh-stop-past", k < i);
     });
-    drawn.setAttribute("points", LINE.slice(0, i + 1).map(([x, y]) => `${x},${y}`).join(" "));
     const go = exploreFor(s);
     explore.href = go.href ?? "/#explore-map";
     // an in-app link goes through the router; a map search is handled here
@@ -312,6 +361,13 @@ export function journeyHero({ start, onSearch }) {
     resizeTimer = setTimeout(resize, fit ? 80 : 0);
   });
   ro.observe(el);
+  const lineRo = new ResizeObserver(([e]) => {
+    lineW = e.contentRect.width;
+    lineH = e.contentRect.height;
+    linePosNow = -1; // redraw at the new size
+    draw();
+  });
+  lineRo.observe(lineBox);
   document.addEventListener("visibilitychange", onVisibility);
   reducedMotion.addEventListener("change", onMotion);
   navigator.connection?.addEventListener("change", onMotion);
@@ -337,6 +393,7 @@ export function journeyHero({ start, onSearch }) {
       clearTimeout(resizeTimer);
       io.disconnect();
       ro.disconnect();
+      lineRo.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
       reducedMotion.removeEventListener("change", onMotion);
       navigator.connection?.removeEventListener("change", onMotion);
