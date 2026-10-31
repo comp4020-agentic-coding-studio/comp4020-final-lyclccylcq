@@ -11,29 +11,25 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
   const linkBox = h("div", { class: "stack" });
   const expiry = (link) => {
     const left = link.expiresAt - Date.now();
-    if (left <= 0) return "Expired. Create a new link to invite more people.";
+    if (left <= 0) return "Link expired.";
     const mins = Math.max(1, Math.ceil(left / 60_000));
     const h_ = Math.floor(mins / 60);
     const m = mins % 60;
     const when = new Date(link.expiresAt).toLocaleString("en-AU", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-    return `Expires ${when} (in ${h_ ? `${h_} h` : ""}${h_ && m ? " " : ""}${m || !h_ ? `${m} min` : ""}).`;
+    return `Active until ${when} (${h_ ? `${h_} h` : ""}${h_ && m ? " " : ""}${m || !h_ ? `${m} min` : ""} left)`;
   };
   // token: shown once, right after it's made; link: its times, from the server
   const renderLink = (token, link) => {
     linkBox.replaceChildren();
     if (!isOwner) return;
-    linkBox.append(h("p", { class: "small", "data-share": "approval-note" }, "Links last 24 hours. Opening one doesn't let anyone in: each person asks to join, and you approve or reject them below."));
+    linkBox.append(h("p", { class: "small", "data-share": "approval-note" }, "Lasts 24 hours. People ask to join; you approve them."));
     if (token) {
       const url = `${location.origin}/join/${token}`;
       const input = h("input", { readonly: true, value: url, "aria-label": "Invite link", onfocus: (e) => e.target.select() });
       linkBox.append(
         h("div", { class: "copy-row" }, input, h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: async () => { await navigator.clipboard?.writeText(url).catch(() => {}); input.select(); toast("Invite link copied."); } }, "Copy")),
-        h("p", { class: "small muted" }, "Shown only now. A new link replaces this one."),
+        h("p", { class: "small muted" }, "Copy it now; it's shown once."),
       );
-    } else if (link && !link.expired) {
-      linkBox.append(h("p", { class: "small muted" }, "An invite link is active. For safety it can't be shown again; create a new one if you need it."));
-    } else if (link?.expired) {
-      linkBox.append(h("p", { class: "small leg-warn", "data-share": "expired" }, "The last invite link has expired."));
     }
     if (link) linkBox.append(h("p", { class: `small ${link.expired ? "leg-warn" : "muted"}`, "data-share": "expiry" }, expiry(link)));
     const live = link && !link.expired;
@@ -122,7 +118,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
   const STATUS = { you: "You", member: "Already a member", invited: "Invited", available: null };
   const nameInput = h("input", { type: "search", class: "invitee-input", placeholder: "Search by nickname", "aria-label": "Search by nickname", autocomplete: "off", spellcheck: "false", maxlength: 80 });
   const results = h("ul", { class: "invitee-results", role: "listbox", "aria-label": "Matching accounts" });
-  const searchNote = h("p", { class: "small muted", role: "status", "aria-live": "polite" }, "Enter their nickname. A single character matches that exact nickname.");
+  const searchNote = h("p", { class: "small muted", role: "status", "aria-live": "polite" }, "");
   const sent = h("ul", { class: "invitations" });
   let chosen = null;
   let seq = 0;
@@ -159,7 +155,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
     results.replaceChildren();
     const q = nameInput.value.trim();
     if (!q) {
-      searchNote.textContent = "Enter their nickname. A single character matches that exact nickname.";
+      searchNote.textContent = "";
       return;
     }
     if ([...q].length > 40) {
@@ -172,7 +168,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
         const r = await api(`${base}/invitees?${new URLSearchParams({ q })}`);
         if (mine !== seq || !dialog.open) return;
         results.replaceChildren(...r.results.map(resultRow));
-        searchNote.textContent = r.results.length ? "Check the nickname and @username, then choose an account and press Invite." : `No nickname matches “${q}”.`;
+        searchNote.textContent = r.results.length ? "" : `No nickname matches “${q}”.`;
       } catch (err) {
         if (mine !== seq || !dialog.open) return;
         results.replaceChildren();
@@ -228,7 +224,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
       nameInput.value = "";
       results.replaceChildren();
       choose(null);
-      searchNote.textContent = `Invitation sent to ${who.displayName} (@${who.username}). They'll see it in My Trips.`;
+      searchNote.textContent = `Invitation sent to ${who.displayName}.`;
       await loadSent();
     } catch (err) {
       searchNote.textContent = err.message;
@@ -240,7 +236,6 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
     "section",
     { class: "share-method", "aria-labelledby": "share-by-name" },
     h("h3", { id: "share-by-name" }, "Invite by nickname"),
-    h("p", { class: "small muted" }, "Search for the nickname they entered as “Your name” when registering. Check the @username shown below each result to confirm the account. They join when they accept in My Trips."),
     h("div", { class: "invitee-search" }, nameInput, inviteBtn),
     searchNote,
     results,
@@ -284,8 +279,8 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
         { class: "stack" },
         h("h2", {}, "People on this trip"),
         list,
-        h("p", { class: "small muted", "data-share": "view-note" }, "While others have this trip open, they see roughly where your map is looking (its centre and zoom, never your location), and you see theirs. Your “My spot” stays on your screen only."),
-        isOwner ? byName : h("p", { class: "small muted" }, "Only the owner can invite people. As a collaborator you can add stops and change the ones you added."),
+        h("p", { class: "small muted", "data-share": "view-note" }, "Others here see where your map is looking, never your location."),
+        isOwner ? byName : h("p", { class: "small muted" }, "Only the owner can invite people."),
         byLink,
         h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-primary", type: "button", onclick: () => dialog.close() }, "Done")),
       ),
@@ -322,7 +317,7 @@ export async function publishDialog({ S, base, applySnapshot, navigate }) {
     h(
       "p",
       { class: "small muted" },
-      "Publishing shares a read-only copy of this plan: title, destination, stops, times and places, with you named as the author. Notes, the people on this trip and invite links stay private. Anyone can view it, rate it and copy it into their own trip; nobody can edit yours.",
+      "A read-only copy anyone can view and copy. Notes and people stay private.",
     ),
     live &&
       h(
@@ -333,7 +328,7 @@ export async function publishDialog({ S, base, applySnapshot, navigate }) {
         " ",
         h("a", { href: `/itineraries/${pub.id}`, "data-link": true, onclick: () => dialog.close() }, "View public page"),
       ),
-    pub?.status === "unpublished" && h("p", { class: "small muted" }, "Unpublished: hidden from others. Copies people already made are theirs to keep."),
+    pub?.status === "unpublished" && h("p", { class: "small muted" }, "Unpublished: hidden from others."),
     h("label", { class: "field" }, h("span", {}, "Description"), h("textarea", { name: "description", required: true, maxlength: 600, rows: 3, placeholder: "What makes this trip worth copying?" }, pub?.description ?? "")),
     !hasStops && h("p", { class: "small leg-warn" }, "Add at least one stop before publishing."),
     error,

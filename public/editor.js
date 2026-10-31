@@ -19,7 +19,7 @@ import {
   km,
   openDialog,
   parseTime,
-  personColour,
+  memberColour,
   relTime,
   toast,
   uid,
@@ -65,7 +65,7 @@ export async function openEditor(root, tripId, ctx) {
   let voice = null;
   S.mealEdits = {}; // a suggestion's time or length, changed before adding
   S.hoursProblem = null; // an hours refusal from the server, shown on its card
-  api("/api/me/preferences").then((r) => { S.prefs = r.preferences; renderTimeline(); }).catch(() => {});
+  api("/api/me/preferences").then((r) => { S.prefs = r.preferences; renderTimeline(); renderCopilot(); }).catch(() => {});
   const params = new URLSearchParams(location.search);
   if (params.has("new")) history.replaceState(history.state, "", location.pathname);
   const startOf = () => S.trip.days.flatMap((d) => d.activities).find((a) => a.role === "start") ?? null;
@@ -85,6 +85,7 @@ export async function openEditor(root, tripId, ctx) {
   const canEdit = (a) => isOwner() || (a.role !== "start" && a.createdBy === me.id);
   const day = () => S.trip.days.find((d) => d.id === S.dayId) ?? S.trip.days[0];
   const memberName = (id) => (id === me.id ? "you" : S.trip.members.find((m) => m.id === id)?.displayName ?? "someone");
+  const colourOf = (id) => memberColour(S.trip.members, id);
 
   // --- skeleton ---
 
@@ -103,6 +104,8 @@ export async function openEditor(root, tripId, ctx) {
   const dayTabs = h("nav", { class: "day-tabs", role: "tablist", "aria-label": "Trip days" });
   const dayHead = h("div", { class: "day-head" });
   const timeline = h("ol", { class: "timeline", "aria-label": "Itinerary for the selected day" });
+  // under the timeline: the day in four numbers, and who put what on it
+  const daySummary = h("aside", { class: "day-summary", "aria-label": "This day at a glance" });
   const planFoot = h(
     "div",
     { class: "plan-foot" },
@@ -110,14 +113,21 @@ export async function openEditor(root, tripId, ctx) {
   );
   const copilotPane = h("aside", { class: "pane pane-copilot", "aria-label": "Planning assistant" });
   const mobileTabs = h("nav", { class: "mobile-tabs", "aria-label": "Workspace" });
+  // the day as a line across the top: its stations left to right by time,
+  // the legs between them coloured by how you go. An overview and a way to
+  // pick a stop; the timeline beside the map stays where editing happens.
+  const lineDays = h("div", { class: "line-days" });
+  const lineTrack = h("ol", { class: "line-track", "aria-label": "The selected day as a line" });
+  const lineBand = h("section", { class: "line-band", "aria-label": "Day overview" }, lineDays, lineTrack);
   const workspace = h(
     "main",
     { class: "workspace" },
     h("section", { class: "pane pane-map", "aria-label": "Map and place search" }, searchForm, searchPanel, mapHost),
-    h("section", { class: "pane pane-plan", "aria-label": "Itinerary" }, dayTabs, dayHead, timeline, planFoot),
+    h("section", { class: "pane pane-plan", "aria-label": "Itinerary" }, dayTabs, dayHead, h("div", { class: "plan-scroll" }, timeline, daySummary), planFoot),
     copilotPane,
   );
-  root.replaceChildren(h("div", { class: "editor" }, bar, workspace, mobileTabs));
+  const editorEl = h("div", { class: "editor" }, bar, lineBand, workspace, mobileTabs);
+  root.replaceChildren(editorEl);
   if (S.starting && matchMedia("(max-width: 899px)").matches) S.tab = "map";
 
   const map = await createMap(mapHost, {
@@ -165,6 +175,7 @@ export async function openEditor(root, tripId, ctx) {
   // map keeps this person's zoom and position
   function applySnapshot(snap, { remote = false } = {}) {
     if (!snap || typeof snap.rev !== "number" || snap.rev < S.trip.rev) return;
+    if (remote) noticeChanges(S.trip, snap);
     S.trip = snap;
     voice?.membersChanged();
     S.keepView = remote;
@@ -173,6 +184,34 @@ export async function openEditor(root, tripId, ctx) {
     S.editing?.onSnapshot(snap);
     render();
   }
+
+  // What someone else just did, seen by comparing snapshots: each stop they
+  // added or changed glows in their colour for a few seconds, and one line
+  // says who did what. Only for changes made by another person; your own
+  // edits (in this tab or another) stay quiet.
+  S.glow = new Map(); // activity id -> { by, until }
+  function noticeChanges(before, after) {
+    const was = new Map(before.days.flatMap((d) => d.activities).map((a) => [a.id, a]));
+    const now = after.days.flatMap((d) => d.activities);
+    const said = [];
+    for (const a of now) {
+      const prev = was.get(a.id);
+      const by = prev ? a.updatedBy : a.createdBy;
+      if (!by || by === me.id || (prev && prev.version === a.version)) continue;
+      S.glow.set(a.id, { by, until: Date.now() + 4000 });
+      said.push(`${memberName(by)} ${prev ? "changed" : "added"} ${a.title}`);
+    }
+    for (const [id, a] of was) if (!now.some((x) => x.id === id) && a.createdBy !== me.id && a.updatedBy !== me.id) said.push(`${a.title} was removed`);
+    if (said.length) {
+      toast(said.length > 2 ? `${said[0]} and ${said.length - 1} more changes` : said.join(" · "));
+      clearTimeout(S.glowTimer);
+      S.glowTimer = setTimeout(() => { S.glow.clear(); renderTimeline(); renderLine(); }, 4100);
+    }
+  }
+  const glowOf = (a) => {
+    const g = S.glow.get(a.id);
+    return g && g.until > Date.now() ? g : null;
+  };
 
   async function act(promise, { quiet = false } = {}) {
     try {
@@ -237,7 +276,7 @@ export async function openEditor(root, tripId, ctx) {
       .filter((v) => here.has(v.userId))
       .map((v) => {
         const name = v.userId === me.id ? `${v.displayName} (another tab)` : v.displayName;
-        return { displayName: name, initials: initials(v.displayName), colour: personColour(v.userId), lat: v.lat, lng: v.lng, zoom: v.zoom };
+        return { displayName: name, initials: initials(v.displayName), colour: colourOf(v.userId), lat: v.lat, lng: v.lng, zoom: v.zoom };
       });
     map.setPeers(list);
   }
@@ -274,9 +313,13 @@ export async function openEditor(root, tripId, ctx) {
   // --- rendering ---
 
   function render() {
+    // colour by person only when more than one person is on the trip
+    editorEl.classList.toggle("is-shared", S.trip.members.length > 1);
     renderBar();
     renderDays();
+    renderLine();
     if (!S.dragging) renderTimeline();
+    renderSummary();
     renderSearch();
     renderMap();
     renderCopilot();
@@ -300,7 +343,20 @@ export async function openEditor(root, tripId, ctx) {
       h(
         "div",
         { class: "presence", title: online.map((p) => p.displayName).join(", ") },
-        h("span", { class: "avatars" }, online.slice(0, 4).map((p) => avatar(p, "sm"))),
+        h(
+          "span",
+          { class: "avatars crew" },
+          // everyone on the trip: here now in full colour with a live dot, the rest faded
+          [...online, ...t.members.filter((m) => !online.some((p) => p.id === m.id))].slice(0, 6).map((p) => {
+            const here = online.some((o) => o.id === p.id);
+            const a = avatar(p, "sm");
+            a.style.setProperty("--c", colourOf(p.id));
+            a.classList.toggle("is-here", here);
+            a.classList.toggle("is-away", !here);
+            a.title = `${p.displayName}${p.id === me.id ? " (you)" : ""}${here ? " · here now" : " · not here"}`;
+            return a;
+          }),
+        ),
         h("span", { class: "presence-label" }, online.length > 1 ? `${online.length} people are planning this trip` : "Just you right now"),
       ),
       h("span", { class: `conn ${S.live ? "conn-live" : "conn-off"}`, role: "status" }, S.live ? "Live" : "Reconnecting…"),
@@ -315,6 +371,102 @@ export async function openEditor(root, tripId, ctx) {
         "Assistant",
         issues > 0 && h("span", { class: "badge badge-danger", "aria-label": `${issues} issues` }, String(issues)),
       ),
+    );
+  }
+
+  // the band: Day 1 · Day 2 … then the selected day's stations, placed by
+  // the hour they start (untimed ones after, evenly), each one a button
+  function renderLine() {
+    lineDays.replaceChildren(
+      ...S.trip.days.map((d, i) =>
+        h(
+          "button",
+          { type: "button", class: `line-day${d.id === S.dayId ? " on" : ""}`, "aria-pressed": String(d.id === S.dayId), onclick: () => setDay(d.id) },
+          h("b", {}, String(i + 1).padStart(2, "0")),
+          h("span", {}, fmtDay(d.date)),
+        ),
+      ),
+    );
+    const d = day();
+    const stops = d?.activities ?? [];
+    if (!stops.length) {
+      lineTrack.replaceChildren(h("li", { class: "line-empty" }, "Nothing on this day yet. Search the map to add a first stop."));
+      return;
+    }
+    const timed = stops.filter((a) => a.startMin !== null);
+    const lo = timed.length ? Math.min(...timed.map((a) => a.startMin)) : 0;
+    const hi = timed.length ? Math.max(...timed.map((a) => a.startMin + (a.durationMin ?? 0))) : 1;
+    const untimed = stops.length - timed.length;
+    // timed stations share the first 100% (or 80% when untimed ones follow)
+    const span = untimed ? 80 : 100;
+    let u = 0;
+    const pos = stops.map((a) => (a.startMin !== null && hi > lo ? ((a.startMin - lo) / (hi - lo)) * span : timed.length ? span + ((++u) / (untimed + 1)) * (100 - span) : (stops.indexOf(a) / Math.max(1, stops.length - 1)) * 100));
+    // stations too close to read apart are nudged right, keeping the order
+    for (let i = 1; i < pos.length; i++) pos[i] = Math.max(pos[i], pos[i - 1] + Math.min(12, 100 / stops.length));
+    const scale = pos.at(-1) > 100 ? 100 / pos.at(-1) : 1;
+    const legMode = (a, b) => {
+      const seg = d.segments.find((x) => x.fromId === a.id && x.toId === b.id);
+      return seg?.options.find((o) => o.mode === seg.selectedMode)?.mode?.toLowerCase() ?? null;
+    };
+    const first = stops[0]?.role === "start" ? 1 : 0;
+    lineTrack.replaceChildren(
+      ...stops.flatMap((a, i) => {
+        const x = pos[i] * scale;
+        const items = [];
+        if (i > 0) {
+          const mode = legMode(stops[i - 1], a);
+          const from = pos[i - 1] * scale;
+          items.push(h("li", { class: `line-leg${mode ? ` line-leg-${mode}` : " line-leg-open"}`, style: `left:${from}%;width:${x - from}%`, "aria-hidden": "true" }));
+        }
+        const isStart = a.role === "start";
+        items.push(
+          h(
+            "li",
+            { class: `line-stop${a.id === S.selectedId ? " on" : ""}${glowOf(a) ? " line-stop-glow" : ""}`, style: `left:${x}%;--who:${colourOf(a.createdBy ?? me.id)}` },
+            h(
+              "button",
+              { type: "button", "aria-label": `${a.title}${a.startMin !== null ? `, ${hhmm(a.startMin)}` : ""}`, onclick: () => select(a.id, { scroll: true, focusMap: !isPhone() }) },
+              h("span", { class: "line-dot" }, isStart ? "S" : String(i + 1 - first)),
+              h("span", { class: "line-time" }, a.startMin !== null ? hhmm(a.startMin) : "—"),
+              h("span", { class: "line-name" }, a.title),
+            ),
+          ),
+        );
+        return items;
+      }),
+    );
+  }
+
+  function renderSummary() {
+    const d = day();
+    const stops = (d?.activities ?? []).filter((a) => a.role !== "start");
+    if (!stops.length) return void daySummary.replaceChildren();
+    const timed = stops.filter((a) => a.startMin !== null);
+    const visit = stops.reduce((n, a) => n + (a.durationMin ?? 0), 0);
+    const travel = d.segments.reduce((n, sg) => n + Math.ceil((sg.options.find((o) => o.mode === sg.selectedMode)?.durationSec ?? 0) / 60), 0);
+    const from = timed.length ? Math.min(...timed.map((a) => a.startMin)) : null;
+    const to = timed.length ? Math.max(...timed.map((a) => a.startMin + (a.durationMin ?? 0))) : null;
+    const unrouted = d.analysis.gaps.filter((g) => g.status === "not_calculated").length;
+    // who added what, by person, in their colour
+    const by = new Map();
+    for (const a of stops) if (a.createdBy) by.set(a.createdBy, (by.get(a.createdBy) ?? 0) + 1);
+    const stat = (n, label) => h("div", { class: "ds-stat" }, h("b", {}, n), h("span", {}, label));
+    daySummary.replaceChildren(
+      h("p", { class: "ds-kicker" }, "This day at a glance"),
+      h(
+        "div",
+        { class: "ds-stats" },
+        stat(from === null ? "—" : `${hhmm(from)}–${hhmm(to)}`, "Out and about"),
+        stat(dur(visit), "At the stops"),
+        stat(travel ? dur(travel) : "—", unrouted ? `Travel, ${unrouted} leg${unrouted === 1 ? "" : "s"} not routed` : "Travelling"),
+        stat(String(stops.length), stops.length === 1 ? "Stop" : "Stops"),
+      ),
+      by.size > 0 ? h(
+        "div",
+        { class: "ds-people" },
+        h("p", { class: "ds-kicker" }, "Added by"),
+        h("ul", {}, [...by].map(([id, n]) => h("li", { style: `--c:${colourOf(id)}` }, h("i", { "aria-hidden": "true" }), h("span", {}, memberName(id) === "you" ? "You" : memberName(id)), h("b", {}, String(n))))),
+      ) : "",
     );
   }
 
@@ -449,9 +601,14 @@ export async function openEditor(root, tripId, ctx) {
     const firstUntimed = d.activities.findIndex((x) => x.role !== "start" && x.startMin === null);
     const timed = a.startMin !== null;
     const mine = canEdit(a);
+    // Someone else edited it lately; a fresh add (version 1) reads as "Added by".
+    const touched = a.version > 1 && a.updatedBy && a.updatedBy !== me.id && Date.now() - a.updatedAt < 120_000;
     const li = h(
       "li",
-      { class: `stop kind-${a.kind}${isStart ? " stop-start" : ""}${timed ? "" : " stop-untimed"}${a.id === S.selectedId ? " selected" : ""}`, dataset: { id: a.id }, draggable: isStart || !mine ? "false" : "true" },
+      {
+        class: `stop kind-${a.kind}${isStart ? " stop-start" : ""}${timed ? "" : " stop-untimed"}${a.id === S.selectedId ? " selected" : ""}${glowOf(a) ? " stop-glow" : ""}`,
+        style: `--who:${colourOf(a.createdBy ?? me.id)}${glowOf(a) ? `;--glow:${colourOf(glowOf(a).by)}` : ""}`,
+        dataset: { id: a.id }, draggable: isStart || !mine ? "false" : "true" },
       h(
         "div",
         { class: "stop-rail" },
@@ -475,8 +632,8 @@ export async function openEditor(root, tripId, ctx) {
           !a.place && h("span", { class: "muted" }, "No place"),
         ),
         a.notes && h("p", { class: "stop-notes" }, a.notes),
-        a.updatedBy && a.updatedBy !== me.id && Date.now() - a.updatedAt < 120_000 && h("p", { class: "stop-touched" }, `Changed by ${memberName(a.updatedBy)} ${relTime(a.updatedAt)}`),
-        !mine && a.createdBy && a.createdBy !== me.id && !(a.updatedBy && a.updatedBy !== me.id && Date.now() - a.updatedAt < 120_000) && h("p", { class: "stop-added-by small muted" }, `Added by ${memberName(a.createdBy)}`),
+        touched && h("p", { class: "stop-touched", style: `--c:${colourOf(a.updatedBy)}` }, h("i", { "aria-hidden": "true" }), `Changed by ${memberName(a.updatedBy)} ${relTime(a.updatedAt)}`),
+        a.createdBy && a.createdBy !== me.id && !touched && h("p", { class: "stop-added-by small muted", style: `--c:${colourOf(a.createdBy)}` }, h("i", { "aria-hidden": "true" }), `Added by ${memberName(a.createdBy)}${a.version === 1 && Date.now() - a.updatedAt < 120_000 ? ` ${relTime(a.updatedAt)}` : ""}`),
         mine && h(
           "div",
           { class: "stop-actions" },
@@ -1782,6 +1939,7 @@ export async function openEditor(root, tripId, ctx) {
     return h(
       "div",
       { class: "pa-body" },
+      prefsCard(),
       h(
         "section",
         { class: "pa-status", "data-testid": "copilot-day", "aria-label": "This day at a glance" },
@@ -1817,7 +1975,36 @@ export async function openEditor(root, tripId, ctx) {
           );
         }),
       ),
-      h("button", { class: "linklike pa-prefs", type: "button", "data-plan-action": "prefs", onclick: () => preferencesDialog({ then: null }) }, "Travel preferences"),
+    );
+  }
+
+  // The preferences the assistant plans with, at the top of the panel: what
+  // they are now, as chips, and one click to change them. Before any are
+  // set, a clear invitation instead.
+  function prefsCard() {
+    const p = S.prefs;
+    const t = p?.travel ?? {};
+    const f = p?.food ?? {};
+    const chips = [
+      t.transport && t.transport !== "any" && PREF.transport[t.transport],
+      t.pace && PREF.paces[t.pace],
+      t.budget && t.budget !== "any" && `${PREF.prices[t.budget]} budget`,
+      t.maxWalkMin && `Walks under ${t.maxWalkMin} min`,
+      ...(t.avoidModes ?? []).map((m) => `No ${PREF.modes[m]?.toLowerCase()}`),
+      ...(t.interests ?? []).slice(0, 3).map((k) => PREF.interests[k]),
+      (t.interests ?? []).length > 3 && `+${t.interests.length - 3} interests`,
+      ...(f.diets ?? []).map((k) => PREF.diets[k]),
+      ...(f.cuisines ?? []).slice(0, 2).map((k) => PREF.cuisines[k]),
+    ].filter(Boolean);
+    // never saved: the defaults aren't choices anyone made, so invite instead
+    const unset = !p?.saved;
+    return h(
+      "button",
+      { class: `pa-prefs${unset ? " pa-prefs-unset" : ""}`, type: "button", "data-plan-action": "prefs", onclick: () => preferencesDialog({ first: unset, then: null }) },
+      h("span", { class: "pa-prefs-head" }, h("span", { class: "pa-prefs-kicker" }, "Planning for"), h("span", { class: "pa-prefs-edit" }, icon("edit"), unset ? "Set up" : "Change")),
+      unset
+        ? h("span", { class: "pa-prefs-empty" }, h("strong", {}, "Tell the assistant how you travel"), h("small", {}, "Pace, getting around, budget, interests and food. Takes a minute; everything is optional."))
+        : h("span", { class: "pa-prefs-chips" }, chips.length ? chips.map((c) => h("span", { class: "pa-chip" }, c)) : h("span", { class: "pa-chip pa-chip-plain" }, "No particular preferences")),
     );
   }
 
@@ -2139,32 +2326,56 @@ export async function openEditor(root, tripId, ctx) {
     }
     const food = mine.preferences.food;
     const travel = { ...mine.preferences.travel, ...trip.trip };
-    const checks = (name, options, chosen) =>
-      h("div", { class: "pref-chips", role: "group" }, Object.entries(options).map(([k, label]) => h("label", { class: "star-opt" }, h("input", { type: "checkbox", name, value: k, checked: chosen.includes(k) }), h("span", {}, label))));
-    const select = (name, options, value) => h("select", { name }, Object.entries(options).map(([k, label]) => h("option", { value: k, selected: k === value }, label)));
+    // every choice is a visible pill: chips pick several, a segmented row picks one
+    const chip = (name, value, label, checked) => h("label", { class: "pref-chip" }, h("input", { type: "checkbox", name, value, checked }), h("span", {}, label));
+    const checks = (name, options, chosen) => h("div", { class: "pref-chips", role: "group" }, Object.entries(options).map(([k, label]) => chip(name, k, label, chosen.includes(k))));
+    const seg = (name, options, value) =>
+      h("div", { class: "pref-seg", role: "radiogroup" }, (Array.isArray(options) ? options : Object.entries(options)).map(([k, label]) => h("label", { class: "seg-opt" }, h("input", { type: "radio", name, value: k, checked: k === value }), h("span", {}, label))));
+    const row = (label, ...control) => h("div", { class: "pref-row" }, h("p", { class: "pref-label" }, label), ...control);
+    const section = (cls, ic, title, badge, ...rows) =>
+      h("section", { class: `pref-sec ${cls}` }, h("header", { class: "pref-sec-head" }, icon(ic), h("h3", {}, title), h("span", { class: "pref-badge" }, badge)), ...rows);
     const error = h("p", { class: "form-error", role: "alert", hidden: true });
     const form = h(
       "form",
-      { method: "dialog", class: "stack pref-form" },
-      h("h2", {}, "Travel preferences"),
-      first && h("p", { class: "small muted" }, "A few choices so the AI plans for you. Everything is optional; you can change it later from Preferences."),
-      h("h3", { class: "small" }, "This trip (shared with everyone on it)"),
-      h("div", { class: "row-2" }, h("label", { class: "field" }, h("span", {}, "Getting around"), select("transport", PREF.transport, travel.transport)), h("label", { class: "field" }, h("span", {}, "Pace"), select("pace", PREF.paces, travel.pace))),
-      h("div", { class: "row-2" }, h("label", { class: "field" }, h("span", {}, "Budget"), select("budget", PREF.prices, travel.budget)), h("label", { class: "field" }, h("span", {}, "Longest walk"), h("select", { name: "maxWalkMin" }, [["", "No limit"], ["10", "10 min"], ["20", "20 min"], ["30", "30 min"], ["45", "45 min"]].map(([v, l]) => h("option", { value: v, selected: String(travel.maxWalkMin ?? "") === v }, l))))),
-      h("p", { class: "small" }, "Never use"),
-      checks("avoidModes", PREF.modes, travel.avoidModes),
-      h("label", { class: "small" }, h("input", { type: "checkbox", name: "fewerTransfers", checked: travel.fewerTransfers }), " Fewer transfers"),
-      h("p", { class: "small" }, "Interests"),
-      checks("interests", PREF.interests, travel.interests),
-      h("h3", { class: "small" }, "Food (private to you)"),
-      checks("cuisines", PREF.cuisines, food.cuisines),
-      checks("diets", PREF.diets, food.diets),
-      h("div", { class: "row-2" }, h("label", { class: "field" }, h("span", {}, "Restaurant price"), select("price", PREF.prices, food.price)), h("label", { class: "field" }, h("span", {}, "Allergies"), h("input", { name: "allergies", maxlength: 200, value: food.allergies, placeholder: "e.g. peanuts" }))),
-      h("p", { class: "tiny muted" }, "Google can't confirm allergens or whether a restaurant is halal, kosher or vegan. Suggestions will say to check with the restaurant. Your allergies aren't sent to the AI or shown to others; only that you have some."),
-      error,
-      h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, "Cancel"), h("button", { class: "btn btn-primary", type: "submit", "data-pref": "save" }, then ? "Save and plan" : "Save")),
+      { method: "dialog", class: "pref-form" },
+      h(
+        "header",
+        { class: "pref-head" },
+        h("p", { class: "pref-kicker" }, icon("spark"), "Planning assistant"),
+        h("h2", {}, "Travel preferences"),
+        h("p", { class: "small muted" }, first ? "A few choices so the AI plans for you. Everything is optional; you can change it later." : "What the AI plans with. Everything is optional."),
+      ),
+      h(
+        "div",
+        { class: "pref-body" },
+        section(
+          "pref-sec-trip",
+          "share",
+          "This trip",
+          "Shared with everyone on it",
+          row("Getting around", seg("transport", PREF.transport, travel.transport)),
+          row("Pace", seg("pace", PREF.paces, travel.pace)),
+          row("Budget", seg("budget", PREF.prices, travel.budget)),
+          row("Longest walk", seg("maxWalkMin", [["", "No limit"], ["10", "10 min"], ["20", "20 min"], ["30", "30 min"], ["45", "45 min"]], String(travel.maxWalkMin ?? ""))),
+          row("Never use", h("div", { class: "pref-chips" }, Object.entries(PREF.modes).map(([k, label]) => chip("avoidModes", k, label, travel.avoidModes.includes(k))), chip("fewerTransfers", "on", "Fewer transfers", travel.fewerTransfers))),
+          row("Interests", checks("interests", PREF.interests, travel.interests)),
+        ),
+        section(
+          "pref-sec-food",
+          "food",
+          "Food",
+          "Only you",
+          row("Cuisines", checks("cuisines", PREF.cuisines, food.cuisines)),
+          row("Dietary needs", checks("diets", PREF.diets, food.diets)),
+          row("Restaurant price", seg("price", PREF.prices, food.price)),
+          h("label", { class: "pref-row" }, h("span", { class: "pref-label" }, "Allergies"), h("input", { name: "allergies", maxlength: 200, value: food.allergies, placeholder: "e.g. peanuts" })),
+          h("p", { class: "tiny muted" }, "Google can't confirm allergens or whether a restaurant is halal, kosher or vegan. Suggestions will say to check with the restaurant. Your allergies aren't sent to the AI or shown to others; only that you have some."),
+        ),
+        error,
+      ),
+      h("footer", { class: "dialog-actions pref-foot" }, h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, "Cancel"), h("button", { class: "btn btn-primary", type: "submit", "data-pref": "save" }, then ? "Save and plan" : "Save")),
     );
-    const dialog = openDialog(h("dialog", { class: "dialog" }, form));
+    const dialog = openDialog(h("dialog", { class: "dialog dialog-prefs" }, form));
     const all = (name) => [...form.querySelectorAll(`input[name=${name}]:checked`)].map((x) => x.value);
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -2175,8 +2386,9 @@ export async function openEditor(root, tripId, ctx) {
         await api(`${base}/preferences`, { method: "PUT", body: { travel: shared } });
         dialog.close();
         toast("Preferences saved.");
-        S.prefs = { ...mine.preferences, travel: { ...mine.preferences.travel, ...shared } };
+        S.prefs = { ...mine.preferences, saved: true, food: { ...mine.preferences.food, cuisines: all("cuisines"), diets: all("diets"), price: form.price.value }, travel: { ...mine.preferences.travel, ...shared } };
         renderTimeline();
+        renderCopilot();
         then?.();
       } catch (err) {
         error.textContent = err.message;

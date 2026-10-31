@@ -150,6 +150,11 @@ export const initials = (name) =>
 // A stable colour per person, so the same collaborator looks the same everywhere.
 const PEOPLE = ["#F2603D", "#0F7C8C", "#7A5AF8", "#D99A00", "#3E9B6B", "#C2417A"];
 export const personColour = (id) => PEOPLE[[...id].reduce((s, c) => s + c.charCodeAt(0), 0) % PEOPLE.length];
+// Inside one trip, colour by join order instead, so collaborators never share a colour.
+export const memberColour = (members, id) => {
+  const i = members.findIndex((m) => m.id === id);
+  return i < 0 ? personColour(id) : PEOPLE[i % PEOPLE.length];
+};
 
 export function avatar(person, size = "md") {
   return h("span", { class: `avatar avatar-${size}`, style: `--c:${personColour(person.id)}`, title: person.displayName }, initials(person.displayName));
