@@ -38,6 +38,16 @@ Nothing is composited over them: each scene's only motion is a slow drift
 within its own photo, and the window's edge is CSS. Each landscape stays whole,
 never repeated or split into independently moving strips.
 
+The split hero's window is nearly square, so a 2.8:1–4.1:1 panorama sized
+to fill its height shows only a quarter to a half of its width at once.
+Each photo is sized for its scene's least drift (`pan`); the view then
+sweeps over the spare width already beyond the glass, up to 0.6 glass
+widths a scene (`DRIFT.max`; Maldives 0.4), without enlarging the photo.
+That is at most about 5% of the window a second (London pans from the
+Eye to Westminster, Sydney from the city to the Opera House and the
+bridge). `spec/pixel-train.test.ts` checks the real speed at five window
+sizes.
+
 Playback uses one animation clock, holds each scene for 8.4 seconds and
 runs a 1.8-second tunnel to the next (every boundary, Shanghai back to
 Switzerland included; never a crossfade), looping after Shanghai. A

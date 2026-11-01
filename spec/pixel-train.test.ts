@@ -103,14 +103,22 @@ describe("automatic journey playback", () => {
   // Regression: drawn trees, masts, railings and palms composited over the
   // photos looked like stickers. Nothing moves over a photo now: each
   // scene's only motion is a gentle drift within its own photo, never
-  // faster than a few percent of the window a second, and every scene has
+  // faster than about five percent of the window a second, and every scene has
   // some.
   it("moves each scene only by a gentle drift within its photo", () => {
+    const stretch = J.TIMING.hold + 2 * J.TIMING.move;
     for (const s of J.SCENES) {
       expect(s.track, s.id).toBeUndefined();
-      const persec = s.photo.pan / (J.TIMING.hold + 2 * J.TIMING.move);
-      expect(persec, s.id).toBeGreaterThan(0.005);
-      expect(persec, s.id).toBeLessThan(0.03);
+      expect(s.photo.pan / stretch, s.id).toBeGreaterThan(0.005);
+      // the view sweeps over the photo's spare width, but never faster than
+      // about a twentieth of the window a second, at any size
+      for (const [w, h] of sizes) {
+        const f = J.fitWindow(w, h);
+        const at = (u: number) => J.placePhoto(s, f.glass, u, f.portrait, f.portrait ? J.PHONE_VIEW : 1).x;
+        const persec = (at(-1) - at(1)) / f.glass.w / stretch;
+        expect(persec, `${s.id} ${w}x${h}`).toBeGreaterThanOrEqual(s.photo.pan / stretch - 1e-9);
+        expect(persec, `${s.id} ${w}x${h}`).toBeLessThanOrEqual(0.051);
+      }
     }
     expect(existsSync("public/journey-track.js")).toBe(false);
     expect(existsSync("public/img/train/pass-spruce.webp")).toBe(false);

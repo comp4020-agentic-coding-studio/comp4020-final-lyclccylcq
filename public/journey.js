@@ -14,9 +14,13 @@
 //   w, h    the photo's pixel size
 //   focus   picture x (0..1) at the window's centre in the middle of the
 //           scene's stretch: the landmark (`phoneFocus` on a narrow window)
-//   pan     how far the view drifts across the scene's whole stretch, in
-//           glass widths: the scene's only motion, a slow camera drift within
-//           the photo, never past its edges
+//   pan     the least the view drifts across the scene's whole stretch, in
+//           glass widths, which the photo is sized to allow: the scene's
+//           only motion, a slow camera drift within the photo, never past
+//           its edges. Where the photo is wider than that needs (a wide
+//           panorama in a squarer window), the view sweeps further over
+//           what's there, up to `drift` (DRIFT.max by default), without
+//           growing the photo
 //   ay, gy  photo row `ay` (0..1, the horizon or the skyline's base) sits at
 //           glass row `gy` (0..1); the photo grows if that would leave any
 //           of the glass uncovered
@@ -68,7 +72,7 @@ export const SCENES = [
     search: { label: "Maldives", lat: 4.1755, lng: 73.5093 },
     night: false,
     // symmetrical round its jetty, so the view drifts only a little
-    photo: { w: 4000, h: 1840, focus: 0.5, phoneZoom: 1.8, pan: 0.16, ay: 0.66, gy: 0.6, tip: 0.5 },
+    photo: { w: 4000, h: 1840, focus: 0.5, phoneZoom: 1.8, pan: 0.16, drift: 0.4, ay: 0.66, gy: 0.6, tip: 0.5 },
     place: "Thudufushi, Ari Atoll, from its jetty",
     alt: "Through a window: a small palm-covered island with white sand in a turquoise lagoon, a wooden jetty leading to it.",
   },
@@ -79,7 +83,8 @@ export const SCENES = [
     explore: "/itineraries/shanghai-bund-gardens",
     night: true,
     // the Pearl Tower is 0.4 of the photo's width tall, so a wider drift
-    // would scale it past the window's top: this view moves least
+    // would scale it past the window's top: its least drift is the smallest
+    // (it still sweeps over whatever width the window leaves spare)
     photo: { w: 3840, h: 1920, focus: 0.5, phoneFocus: 0.33, pan: 0.1, ay: 0.86, gy: 0.93, tip: 0.06 },
     place: "Pudong from the Bund",
     alt: "Through a window at night: the Pudong skyline across the Huangpu, with the Oriental Pearl Tower and Shanghai Tower lit up.",
@@ -241,7 +246,10 @@ export function createPlayback() {
 // of the part of the glass the view is framed in (its top `viewShare`: on a
 // phone the controls take the bottom of the window), (b) covers the whole
 // glass top to bottom, and (c) is wide enough on both sides of `focus` for
-// the whole pan, so no position in the stretch ever shows its edge.
+// the whole pan, so no position in the stretch ever shows its edge. The
+// view then sweeps over as much of the photo's spare width as `drift`
+// allows, centred on the focus where the photo has room on both sides.
+export const DRIFT = { max: 0.6 }; // glass widths across a scene's stretch
 export function placePhoto(s, glass, u, portrait = false, viewShare = 1) {
   const P = s.photo;
   const focus = portrait && P.phoneFocus !== undefined ? P.phoneFocus : P.focus;
@@ -257,7 +265,12 @@ export function placePhoto(s, glass, u, portrait = false, viewShare = 1) {
     (need / (1 - focus)) * (P.h / P.w), // and right of it
   );
   const w = h * (P.w / P.h);
-  const moved = (clamp01((u + 1) / 2) - 0.5) * P.pan * glass.w;
+  // photo px beyond the glass on each side when the view is centred on the focus
+  const spareL = focus * w - glass.w / 2;
+  const spareR = (1 - focus) * w - glass.w / 2;
+  const travel = Math.max(P.pan * glass.w, Math.min((P.drift ?? DRIFT.max) * glass.w, spareL + spareR));
+  const centre = Math.min(spareR - travel / 2, Math.max(travel / 2 - spareL, 0));
+  const moved = centre + (clamp01((u + 1) / 2) - 0.5) * travel;
   const x = glass.x + glass.w / 2 - focus * w - moved;
   const y = Math.max(glass.y + anchor - P.ay * h,
     P.tip === undefined ? -Infinity : glass.y + Math.min(8, glass.h * 0.01) - P.tip * h);
