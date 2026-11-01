@@ -865,9 +865,6 @@ textarea { resize: vertical; }
 }
 .it-cover.has-photo > :not(.cover-img), .dest-card.has-photo > :not(.cover-img), .postcard.has-photo > :not(.cover-img) { position: relative; z-index: 2; }
 .it-cover.has-photo > .it-cover-glyph { position: absolute; }
-.cover-credit { position: absolute; z-index: 2; left: 10px; top: 10px; max-width: calc(100% - 80px); font-size: 10px; line-height: 1.3; color: #fff; background: rgba(0,0,0,.38); padding: 2px 7px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cover-credit a { color: inherit; }
-.it-cover.has-photo > .cover-credit { position: absolute; }
 .dest-card { position: relative; }
 .postcard .cover-img { border-radius: 10px; }
 
@@ -1273,9 +1270,6 @@ textarea { resize: vertical; }
 .jh-stop:hover { background: rgba(255, 255, 255, .14); color: #fff; }
 .jh-stop[aria-current="true"] { background: #fff; color: var(--ink); }
 .jh-stop-n { font-size: 11px; opacity: .65; font-variant-numeric: tabular-nums; }
-/* the photo's credit, small, in the view's bottom-left corner */
-.jh-credit { position: absolute; left: calc(var(--jh-gx) + max(12px, var(--jh-radius) * .6)); bottom: calc(100% - var(--jh-gy) - var(--jh-gh) + 6px); margin: 0; max-width: calc(var(--jh-gw) * .6); font: 500 10.5px/1.3 var(--sans); color: rgba(255, 255, 255, .75); text-shadow: 0 1px 3px rgba(0, 0, 0, .9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.jh-credit a { color: inherit; }
 /* phones and portrait tablets: the window still fills the hero; the
    controls stack at the bottom of the view, full width, and the scenery is
    framed above them */
@@ -1283,7 +1277,7 @@ textarea { resize: vertical; }
 /* (padding percentages are of the width, so use the margin itself: it's the
    same on every side) */
 .jh-portrait .jh-ui { display: flex; flex-direction: column; justify-content: flex-end; gap: 14px; padding: 0 calc(var(--jh-frame) + 14px) calc(var(--jh-frame) + 10px); }
-.jh-portrait :is(.jh-copy, .jh-bar, .jh-credit) { position: relative; left: auto; right: auto; bottom: auto; max-width: none; }
+.jh-portrait :is(.jh-copy, .jh-bar) { position: relative; left: auto; right: auto; bottom: auto; max-width: none; }
 .jh-portrait .jh-bar { order: -1; align-items: stretch; gap: 10px; }
 .jh-portrait .jh-title { font-size: clamp(26px, 7vw, 36px); margin-bottom: 14px; }
 .jh-portrait .jh-actions { flex-wrap: nowrap; }
@@ -1293,7 +1287,6 @@ textarea { resize: vertical; }
 .jh-portrait .jh-stops { flex-wrap: nowrap; border-radius: 999px; overflow-x: auto; scrollbar-width: none; }
 .jh-portrait .jh-stop { flex: 1 1 auto; justify-content: center; min-height: 44px; padding: 9px 6px; gap: 0; font-size: 11px; }
 .jh-portrait .jh-stop-n { display: none; }
-.jh-portrait .jh-credit { white-space: normal; color: rgba(255, 255, 255, .65); }
 /* short landscape screens: a smaller headline */
 @media (max-height: 820px) and (min-aspect-ratio: 1/1) {
   .jh-title { font-size: clamp(26px, 2.6vw, 40px); margin-bottom: 14px; }
@@ -1344,7 +1337,6 @@ textarea { resize: vertical; }
 .rx-card:hover .rx-photo .cover-img { transform: scale(1.04); }
 .rx-media { position: relative; }
 .rx-media > .rx-photo { width: 100%; }
-.rx-media > .cover-credit { top: auto; left: 8px; bottom: 8px; }
 .rx-body { padding: 10px 13px 13px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .rx-country { font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .rx-body h3 { font-family: var(--serif); font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
@@ -1374,7 +1366,6 @@ textarea { resize: vertical; }
 .ps-cap b { font-family: var(--serif); font-size: 21px; font-weight: 600; }
 .ps-cap small { font-size: 12px; font-weight: 700; opacity: .9; }
 .ps-tile::after { content: ""; position: absolute; inset: 0; z-index: 1; background: linear-gradient(180deg, transparent 50%, rgba(0, 0, 0, .5)); pointer-events: none; }
-.ps-tile .cover-credit { top: 10px; left: 10px; bottom: auto; }
 @media (hover: hover) and (min-width: 900px) and (prefers-reduced-motion: no-preference) {
   .ps-scroller { overflow-x: hidden; }
   .ps-track { animation: ps-drift calc(var(--ps-count, 10) * 7s) linear infinite; }
@@ -1688,7 +1679,6 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
 .jh-stop-n { font-family: var(--mono); }
 .jh-stop[aria-current="true"] { background: #fff; color: var(--ink); }
 .jh-pause { font: 500 12px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; border-radius: 8px; min-height: 36px; padding: 8px 12px; background: rgba(8,10,14,.4); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-.jh-credit { font-family: var(--mono); font-size: 10px; letter-spacing: .01em; }
 .jh-portrait .jh-title { font-size: clamp(34px, 10vw, 44px); max-width: none; }
 .jh-portrait .jh-lede { font-size: 15px; margin-bottom: 16px; }
 .jh-portrait .jh-copy { max-width: none; }
@@ -1725,12 +1715,6 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
 .ps-cap b { font: 600 20px/1.1 var(--sans); letter-spacing: -.02em; }
 .ps-cap small { font: 500 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; opacity: .85; }
 
-/* credits: kept on every photo, as a small mono line that doesn't shout */
-.cover-credit { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0; background: rgba(0,0,0,.32); border-radius: 4px; padding: 2px 6px; opacity: .8; }
-.cover-credit:hover, :focus-within > .cover-credit { opacity: 1; }
-.ps-tile .cover-credit, .rx-media > .cover-credit, .it-cover > .cover-credit { top: auto; bottom: auto; }
-.ps-tile .cover-credit { top: 10px; left: 10px; }
-
 /* ready-made trips */
 .rx { padding-top: 96px; }
 .rx-filters { background: color-mix(in srgb, var(--paper) 92%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid transparent; }
@@ -1739,7 +1723,6 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
 .rx-card:hover { transform: none; box-shadow: none; }
 .rx-photo { border-radius: 10px; aspect-ratio: 4 / 5; }
 .rx-card:hover .rx-photo .cover-img { transform: scale(1.03); }
-.rx-media > .cover-credit { bottom: 8px; }
 .rx-body { padding: 12px 2px 4px; gap: 4px; }
 .rx-body h3 { font-family: var(--sans); font-size: 18px; font-weight: 600; letter-spacing: -.02em; }
 .rx-blurb { font-size: 13px; color: var(--muted); }
@@ -1758,7 +1741,6 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
 .it-cover .cover-img { transition: transform .5s ease; }
 .it-cover-glyph { display: none; }
 .it-cover-dest { font: 500 11px/1 var(--mono); letter-spacing: .1em; }
-.it-cover > .cover-credit { top: 10px; left: 10px; }
 .it-body { padding: 14px 2px 0; gap: 6px; }
 .it-tags { order: 3; gap: 4px 12px; }
 .it-body h3 { font-family: var(--sans); font-size: 18px; font-weight: 600; letter-spacing: -.02em; line-height: 1.25; }
@@ -1935,10 +1917,9 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
 .hx .jh-stop[aria-current="true"]::before { background: var(--coral); box-shadow: 0 0 0 4px var(--paper), 0 0 0 5px var(--coral); transform: scale(1.15); }
 .hx .jh-stop-n { font: 500 10.5px/1 var(--mono); opacity: 1; color: var(--muted); }
 
-/* the window: only the credit and the pause control sit on the photo */
+/* the window: only the pause control sits on the photo */
 .hx .jh-ui::before { height: 90px; background: linear-gradient(rgba(8, 10, 14, 0), rgba(8, 10, 14, .45)); }
 .hx .jh-portrait .jh-ui { display: block; padding: 0; }
-.hx .jh-portrait .jh-credit { position: absolute; left: calc(var(--jh-gx) + 12px); bottom: calc(100% - var(--jh-gy) - var(--jh-gh) + 8px); max-width: calc(var(--jh-gw) - 24px); }
 .hx .jh-portrait .jh-ui::before { height: 90px; }
 
 @media (prefers-reduced-motion: reduce) { .hx .jh-stop::before { transition: none; } }
@@ -1963,7 +1944,7 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
 /* ---------------------------------------------------------------------
    Featured itineraries as an index: one numbered row each, the title set
    large, the facts in mono beside it. The photo stays out of the way until
-   you reach for a row, then rises over the list (still credited on it).
+   you reach for a row, then rises over the list.
    --------------------------------------------------------------------- */
 .it-grid.it-index { display: block; border-bottom: 1px solid var(--line); counter-reset: none; }
 .it-index .it-card {
@@ -2009,7 +1990,6 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
   .it-index .it-foot { grid-column: 2; grid-row: 3; display: flex; justify-content: space-between; align-items: center; }
   .it-index .it-cover { grid-column: 3; grid-row: 1 / 4; width: 112px; aspect-ratio: 1; margin: 0; padding: 6px; opacity: 1; transform: none; pointer-events: auto; box-shadow: none; }
   .it-index .it-cover:not(.has-photo) { display: block; }
-  .it-index .it-cover > .cover-credit { display: none; }
   .it-index .it-cover-dest { display: none; }
   .it-index .it-card:is(:hover, :focus-within) h3 { transform: none; }
 }

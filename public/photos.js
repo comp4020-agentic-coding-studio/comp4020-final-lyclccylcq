@@ -2,7 +2,7 @@ import { h } from "/ui.js";
 
 // Photos of the curated destinations, from Wikimedia Commons, resized (800 or 1200px)
 // and served from /img/covers/. Each is freely licensed and needs its credit;
-// /credits lists them all. The gradient stays underneath as the fallback, so a
+// /credits (linked from every page's footer) lists them all. The gradient stays underneath as the fallback, so a
 // photo that fails to load just disappears.
 export const PHOTOS = {
   "tpl-canberra-national-institutions": {"src":"/img/covers/canberra-national-institutions.jpg","w":800,"h":533,"alt":"Parliament House, Canberra, at dusk","author":"Thennicke","license":"CC BY-SA 4.0","licenseUrl":"https://creativecommons.org/licenses/by-sa/4.0","page":"https://commons.wikimedia.org/wiki/File:Parliament_House_at_dusk,_Canberra_ACT.jpg"},
@@ -71,17 +71,4 @@ export function coverImg(photo, { eager = false, decorative = false } = {}) {
     decoding: "async",
     onerror: (e) => e.currentTarget.remove(),
   });
-}
-
-export function photoCredit(photo, { short = false } = {}) {
-  if (!photo) return null;
-  return h(
-    "span",
-    { class: "cover-credit" },
-    "Photo: ",
-    h("a", { href: photo.page, target: "_blank", rel: "noopener" }, photo.author ?? "Wikimedia Commons"),
-    ", ",
-    h("a", { href: photo.licenseUrl, target: "_blank", rel: "noopener license" }, photo.license),
-    short ? null : " (resized), via Wikimedia Commons",
-  );
 }

@@ -1,7 +1,7 @@
 import { createExploreMap } from "/explore-map.js";
 import { journeyHero } from "/journey-hero.js";
 import { photoStream, streamItems } from "/media.js";
-import { coverImg, photoCredit, photoFor } from "/photos.js";
+import { coverImg, photoFor } from "/photos.js";
 import { placeDialog } from "/places.js";
 import { api, CATEGORY_LABEL, dur, fmtRange, h, icon, km, relTime, uid } from "/ui.js";
 
@@ -56,7 +56,6 @@ export function itineraryCard(t, { navigate }, n = null) {
       coverImg(photo),
       h("span", { class: "it-cover-glyph", "aria-hidden": "true" }, icon(CATEGORY_ICON[primary] ?? "spark")),
       h("span", { class: "it-cover-dest", "aria-hidden": "true" }, t.destination),
-      photoCredit(photo, { short: true }),
     ),
     h(
       "div",
@@ -574,12 +573,10 @@ export function renderHome(app, ctx) {
     return h(
       "article",
       { class: "rx-card", id: `city-${d.id}`, "data-dest": d.id },
-      // the credit's links sit beside the button, not inside it
       h(
         "div",
         { class: "rx-media" },
         h("button", { type: "button", class: `rx-photo${photo ? " has-photo" : ""}`, style: `--hue:${hue(d.name)}`, "aria-label": `Show itineraries for ${d.name}`, onclick: () => openCity(d) }, coverImg(photo, { decorative: true })),
-        photoCredit(photo, { short: true }),
       ),
       h(
         "div",

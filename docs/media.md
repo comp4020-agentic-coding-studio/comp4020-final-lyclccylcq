@@ -3,8 +3,11 @@
 Every photo and video clip on the homepage is a freely licensed Wikimedia
 Commons file, resized (and, for video, shortened and muted) and served from
 the app itself. Nothing is hotlinked. Each item's credit is in code next to
-the file (`public/photos.js`, `public/journey.js`, `public/media.js`) and shown on `/credits`; the
-journey window credits its visible photograph and the photo stream shows each photo's.
+the file (`public/photos.js`, `public/journey.js`, `public/media.js`) and shown on `/credits`,
+which every page's footer links to. Since November 2026 the photos on the
+homepage (journey window, photo stream, city and itinerary cards) carry no
+credit line of their own: the full author, licence and source for each is
+on `/credits`, which is how these licences' attribution is met.
 `spec/photos.test.ts` checks every item has a free licence, an author where
 the licence needs one, a Commons page, and that the files exist and are
 served.
@@ -57,7 +60,7 @@ a destination restarts its hold. Playback stops off screen and in hidden
 tabs. Reduced motion and Save-Data show a still view with manual choices.
 Only the current and next photos load during playback; still mode loads
 only the selected scene. An unavailable photo leaves the previous view
-and its matching credit visible. Route changes destroy the observers and
+and its matching label visible. Route changes destroy the observers and
 animation loop. `spec/pixel-train.test.ts` covers this final homepage
 behaviour, replacing the superseded scroll-prototype checks.
 

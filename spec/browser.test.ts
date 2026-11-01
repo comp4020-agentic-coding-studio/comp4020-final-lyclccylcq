@@ -377,7 +377,7 @@ describe.skipIf(!chromePath)("location on the homepage", () => {
     expect(await page.eval(`localStorage.getItem('wayline.destination')`)).toBe(null);
   });
 
-  it("shows destination photos, credits them, and falls back to the gradient when one fails", async () => {
+  it("shows destination photos, credits them on /credits, and falls back to the gradient when one fails", async () => {
     const page = await browser!.newPage();
     await page.viewport(1920, 1080);
     await page.goto(new URL("/", baseUrl).href);
@@ -386,7 +386,9 @@ describe.skipIf(!chromePath)("location on the homepage", () => {
     await page.waitFor(`[...document.querySelectorAll('img.cover-img')].every(i => i.complete)`, 8000);
     const broken = await page.eval<number>(`[...document.querySelectorAll('img.cover-img')].filter(i => !i.naturalWidth).length`);
     expect(broken).toBe(0);
-    expect(await page.eval<number>(`document.querySelectorAll('#itineraries .it-cover.has-photo .cover-credit a[href*="commons.wikimedia.org"]').length`)).toBe(await page.eval<number>(`document.querySelectorAll('#itineraries .it-cover.has-photo').length`));
+    // photos carry no credit line of their own; every page's footer links to /credits
+    expect(await page.eval<number>(`document.querySelectorAll('main.home .cover-credit, main.home .jh-credit').length`)).toBe(0);
+    expect(await page.eval<boolean>(`!!document.querySelector('.site-footer a[href="/credits"]')`)).toBe(true);
     await page.eval(`document.querySelector('#itineraries .it-cover .cover-img').src = '/img/covers/no-such-photo.jpg'`);
     await page.waitFor(`!document.querySelector('#itineraries .it-card .it-cover > img') || document.querySelectorAll('#itineraries .it-cover > img').length < document.querySelectorAll('#itineraries .it-cover').length`);
     expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);

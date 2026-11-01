@@ -2,7 +2,7 @@
 // own through five destinations (journey.js has the plan and the playback
 // state machine; this file only draws it). It's decoration over a page that
 // works without it: the heading and both buttons are ordinary controls, and
-// the photos are credited on the window and on /credits.
+// the photos are credited on /credits (linked from the footer).
 //
 // Each scene is one real photograph and its only motion is a slow camera
 // drift within it, never past its edges: nothing is drawn or composited
@@ -117,7 +117,6 @@ export function journeyHero({ start, onSearch }) {
     if (paused) halt();
     else kick();
   }, "aria-pressed": "false" }, "Pause scenery");
-  const credit = h("p", { class: "jh-credit" });
   // the line: the five destinations as stations on one route, drawn up to
   // the one on view (an SVG path, its stations ordinary buttons over it)
   const svg = (tag, attrs) => {
@@ -155,7 +154,7 @@ export function journeyHero({ start, onSearch }) {
     b.style.top = `${LINE[i][1]}%`;
     b.classList.add(LINE[i][1] < 50 ? "jh-stop-up" : "jh-stop-down");
   });
-  const ui = h("div", { class: "jh-ui" }, credit, pause, live);
+  const ui = h("div", { class: "jh-ui" }, pause, live);
   const el = h("div", { class: "jh" }, picture, ui);
   const root = h(
     "section",
@@ -237,8 +236,8 @@ export function journeyHero({ start, onSearch }) {
     let layers = still() ? [{ scene: st.label, u: 0, opacity: 1 }] : playback.layers();
     want(st.label);
     if (!still()) want((st.label + 1) % SCENES.length);
-    // Keep the last successful view if a download fails. Its label and
-    // credit stay with that photograph until another scene can be shown.
+    // Keep the last successful view if a download fails. Its label stays
+    // with that photograph until another scene can be shown.
     const named = sceneEls[st.label].ready ? st.label : shown;
     layers = layers.filter((l) => sceneEls[l.scene].ready);
     if (!layers.length && sceneEls[shown]?.ready) layers = [{ scene: shown, u: 0, opacity: 1 }];
@@ -302,8 +301,6 @@ export function journeyHero({ start, onSearch }) {
     sub.textContent = s.subtitle;
     count.textContent = `${String(i + 1).padStart(2, "0")} / ${String(SCENES.length).padStart(2, "0")}`;
     picture.setAttribute("aria-label", s.alt);
-    const c = CREDITS.find((x) => x.scene === s.id);
-    credit.replaceChildren(`${s.place}. Photo: `, h("a", { href: c.page, rel: "noopener", target: "_blank" }, c.author), ", ", h("a", { href: c.licenseUrl, rel: "noopener license", target: "_blank" }, c.license));
     stops.forEach((b, k) => {
       if (k === i) b.setAttribute("aria-current", "true");
       else b.removeAttribute("aria-current");

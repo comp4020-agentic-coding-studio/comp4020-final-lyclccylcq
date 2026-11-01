@@ -85,9 +85,10 @@ contradict the README, stop and ask. Don't quietly change the product.
   a pause control; stop off screen, in hidden tabs, with reduced motion or
   Save-Data. Manual destination choices restart their hold without moving
   the page. Each photo stays one whole layer, never tiled or split.
-  Credits follow the visible photo and all sources appear on `/credits`
-  and in `public/img/train/CREDITS.md`. Missing photos retain the last
-  successful view and its credit. Load only the current and next photos,
+  Photos carry no credit line (November 2026, the student's call); all
+  sources appear on `/credits`, linked from every page's footer, and in
+  `public/img/train/CREDITS.md`. Missing photos retain the last
+  successful view and its label. Load only the current and next photos,
   or only a chosen photo with reduced motion/Save-Data. The old experiment
   address renders the same homepage. The stream's drift runs only on wide
   hover-capable screens without reduced motion. The former video hero in
@@ -135,7 +136,7 @@ contradict the README, stop and ask. Don't quietly change the product.
   `public/img/covers/` (clips into `public/video/`) and listed in
   `public/photos.js` / `public/media.js` with author, license and source page
   (`docs/media.md`). An itinerary without its own photo borrows its city's
-  (`SHARED_COVERS`). Every one is credited on its card or on `/credits`. Never hotlink or scrape images. A
+  (`SHARED_COVERS`). Every one is credited on `/credits` (the cards carry no credit line). Never hotlink or scrape images. A
   missing photo falls back to the gradient, never a broken image. My Trips
   cards use the same photos (`cover` from `trips.list`): the curated
   itinerary a trip was copied from (`dest_place_id` `tpl:`), else the curated

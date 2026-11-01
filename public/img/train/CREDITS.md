@@ -3,9 +3,8 @@
 The homepage and its preview at `/experiments/pixel-train` show five
 freely licensed Wikimedia Commons photographs through one window. Every
 image is self-hosted, cropped, resized and encoded as WebP by
-`scripts/train-photo/build.py`. `public/journey.js` records each source;
-the current photograph is credited on the window, and all five appear
-on `/credits`.
+`scripts/train-photo/build.py`. `public/journey.js` records each source,
+and all five are credited on `/credits` (linked from every page's footer).
 
 | Used as | File on Commons | Author | Licence |
 |---|---|---|---|

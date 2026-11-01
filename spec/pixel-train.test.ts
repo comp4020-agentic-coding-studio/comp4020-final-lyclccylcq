@@ -231,7 +231,6 @@ describe.skipIf(!chromePath)("homepage journey in a real browser", () => {
     await page.waitFor("window.__journey.state().shown === 2");
     expect(await page.eval("window.__journey.state().layers")).toEqual(["sydney"]);
     expect(await page.eval("scrollY")).toBe(0);
-    expect(await page.eval("document.querySelector('.jh-credit').textContent")).toContain("Dietmar Rabich");
     await page.click(".jh-pause");
     await page.waitFor("window.__journey.state().clock > " + Number(J.sceneStart(2) + 0.1));
     await page.click(".jh-actions a");
@@ -282,7 +281,7 @@ describe.skipIf(!chromePath)("homepage journey in a real browser", () => {
     await page.offline(false);
     await page.click(".jh-stop:nth-child(3)");
     await page.waitFor("window.__journey.state().shown === 2");
-    expect(await page.eval("document.querySelector('.jh-credit').textContent")).toContain("Dietmar Rabich");
+    expect(await page.eval("document.querySelector('.jh-place').textContent")).toBe("SYDNEY");
   });
 
   it("fits desktop and phone layouts and shows each replacement image without overflow", async () => {

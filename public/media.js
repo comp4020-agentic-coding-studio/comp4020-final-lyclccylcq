@@ -198,8 +198,6 @@ export function photoStream(items, { onCity, navigate }) {
       },
       coverImg(it.photo, { decorative: true }),
       h("span", { class: "ps-cap" }, h("b", {}, it.dest.name), h("small", {}, it.dest.country)),
-      // plain text: the tile is already a link (the linked credit is on /credits)
-      h("span", { class: "cover-credit" }, `Photo: ${it.photo.author ?? "Wikimedia Commons"}, ${it.photo.license}`),
     );
   const render = (list) => {
     // the row twice, so the slow loop is seamless; the copy is hidden from readers
