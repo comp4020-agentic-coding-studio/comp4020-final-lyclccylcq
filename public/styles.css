@@ -2033,6 +2033,9 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
   --serif: var(--sans);
 }
 body { background: var(--paper); }
+/* the homepage (and the bar over it) draws its rules and card edges firmer than the editor's:
+   on the deeper paper the shared hairlines read as soft, blurred edges */
+main.home, body:has(main.home) .topbar { --line: #c3bfb3; --line-2: #a29d90; }
 
 /* the display face only for big page and section names, there to be looked
    at. Anything read while working (a day's date, a list of trips, numbers,
@@ -2080,6 +2083,42 @@ body { background: var(--paper); }
    hero (it has its own edge) and out of phones (too close to the text) */
 .hx .jh-title { font-size: min(clamp(56px, 6vw, 108px), 8.2vh); max-width: 9ch; margin-bottom: 20px; }
 @media (max-height: 940px) and (min-width: 961px) { .hx .jh-title { font-size: clamp(52px, 5.2vw, 88px); } .hx-copy { padding-top: 40px; } .hx-kicker { margin-bottom: 18px; } }
+
+/* The opening page of a travel journal. "THE JOURNEY" is the set headline;
+   "written by" is a small italic aside on the next line, and "us." is signed
+   after it in the page's one red, on the same baseline, so the three read
+   as one phrase. Below the lede, two pencilled routes start apart and meet,
+   then go on as one. Everything stays inside the words' column. */
+.hx-copy { --serif-art: "Cormorant Garamond", "Iowan Old Style", Georgia, serif; --script: "Mrs Saint Delafield", "Snell Roundhand", cursive; }
+.hx-kicker { gap: 12px; margin-bottom: 22px; font: italic 500 clamp(15px, 1.05vw, 18px)/1.2 var(--serif-art); letter-spacing: .01em; text-transform: none; color: var(--muted); }
+.hx-kicker-rule { width: 28px; height: 1px; background: currentColor; opacity: .55; }
+.hx .jh-title.hx-poem {
+  display: flex; flex-direction: column; align-items: flex-start; max-width: none; margin: 0 0 20px;
+  font: 500 min(clamp(50px, 5vw, 88px), 8.4vh)/.9 var(--serif-art); letter-spacing: .01em; text-transform: uppercase;
+}
+.hx-poem-the { display: block; max-width: 7ch; }
+/* the aside and the signature share a baseline; the signature leans back
+   over the gap so the phrase runs on without a seam */
+.hx-poem-sign { display: flex; align-items: baseline; height: .82em; margin: 0 0 0 .08em; text-transform: none; letter-spacing: 0; white-space: nowrap; }
+.hx-poem-by { font: italic 400 .56em/1 var(--serif-art); letter-spacing: .01em; color: var(--ink-2); }
+.hx-poem-us { margin-left: .1em; font: 400 1.75em/0 var(--script); color: var(--coral); transform: translateY(.04em); }
+.hx .jh-lede.hx-verse { max-width: 40ch; margin-bottom: 6px; font: italic 400 clamp(18px, 1.3vw, 22px)/1.5 var(--serif-art); color: var(--ink-2); }
+.hx-verse em { font-style: italic; font-weight: 500; color: var(--ink); }
+.hx-verse-end { white-space: nowrap; }
+.hx-routes { display: block; width: min(280px, 70%); height: auto; margin: 0 0 20px; overflow: visible; color: var(--ink-2); }
+.hx-route { fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; stroke-dasharray: .5 5; opacity: .6; }
+.hx-route-one { stroke: var(--coral); stroke-width: 1.3; stroke-dasharray: 5 4; opacity: .85; }
+.hx-route-from { fill: none; stroke: currentColor; stroke-width: 1; opacity: .6; }
+.hx-route-meet { fill: var(--paper); stroke: var(--coral); stroke-width: 1.2; }
+.hx-route-meet-dot, .hx-route-to { fill: var(--coral); }
+@media (max-height: 940px) and (min-width: 961px) { .hx .jh-title.hx-poem { font-size: clamp(46px, 4.8vw, 80px); } .hx-kicker { margin-bottom: 16px; } .hx-routes { margin-bottom: 14px; } }
+@media (max-width: 960px) {
+  .hx .jh-title.hx-poem { font-size: clamp(44px, 12.5vw, 72px); margin-bottom: 14px; }
+  .hx-kicker { margin-bottom: 14px; }
+  .hx .jh-lede.hx-verse { font-size: 18px; }
+  .hx-routes { width: 220px; margin-bottom: 14px; }
+}
+}
 .home .rx .it-foot .btn { border-color: transparent; }
 
 /* =====================================================================

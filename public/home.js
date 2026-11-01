@@ -586,13 +586,8 @@ export function renderHome(app, ctx) {
         { class: "rx-body" },
         h("p", { class: "rx-country" }, d.country),
         h("h3", {}, d.name),
-        h("p", { class: "rx-blurb" }, d.blurb),
-        h(
-          "p",
-          { class: "rx-meta" },
-          `${d.itineraries} ${d.itineraries === 1 ? "itinerary" : "itineraries"}`,
-          d.days ? ` · up to ${d.days} ${d.days === 1 ? "day" : "days"}` : "",
-        ),
+        // how long its trips run, and nothing else: the photo and name say the rest
+        d.days > 0 && h("p", { class: "rx-meta" }, d.days === 1 ? "1 day" : `Up to ${d.days} days`),
         h("button", { class: "linklike rx-go", type: "button", onclick: () => openCity(d) }, "See itineraries →"),
       ),
     );

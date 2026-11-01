@@ -232,7 +232,7 @@ describe.skipIf(!chromePath)("homepage discovery in a real browser", () => {
     await page.viewport(390, 844, true);
     await page.geolocation(baseUrl, { lat: -35.2835, lng: 149.1281 }); // central Canberra
     await page.goto(new URL("/", baseUrl).href);
-    await page.waitFor(`document.querySelector('.jh-title')?.textContent === 'Every journey begins somewhere.'`);
+    await page.waitFor(`document.querySelector('.jh-title')?.textContent === 'The journey written by us.'`);
     await page.waitFor(`${general}.length > 4 && document.querySelector('#near').hidden`); // general content before any location
     await page.eval(`[...document.querySelectorAll('button')].find(b => b.textContent.includes('Use my location')).click()`);
     await page.waitFor(`document.querySelector('.chip-place') && ${cards}.length === 4`);

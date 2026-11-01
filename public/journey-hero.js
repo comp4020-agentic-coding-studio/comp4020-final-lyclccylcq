@@ -133,6 +133,18 @@ export function journeyHero({ start, onSearch }) {
   // the head of the line: a dot travelling with it (its own element, so it
   // stays round however the line's box is stretched)
   const head = h("span", { class: "jh-head", "aria-hidden": "true" });
+  // two pencilled routes from different places, meeting and going on as one
+  const routes = svg("svg", { class: "hx-routes", viewBox: "0 0 280 64", "aria-hidden": "true" });
+  routes.append(
+    svg("path", { class: "hx-route", d: "M6,12 C44,4 70,26 104,24 S150,30 168,34" }),
+    svg("path", { class: "hx-route", d: "M18,56 C52,60 82,40 116,46 S152,38 168,34" }),
+    svg("path", { class: "hx-route hx-route-one", d: "M168,34 C196,30 214,18 240,22 S264,30 272,28" }),
+    svg("circle", { class: "hx-route-from", cx: 6, cy: 12, r: 2.6 }),
+    svg("circle", { class: "hx-route-from", cx: 18, cy: 56, r: 2.6 }),
+    svg("circle", { class: "hx-route-meet", cx: 168, cy: 34, r: 5 }),
+    svg("circle", { class: "hx-route-meet-dot", cx: 168, cy: 34, r: 1.8 }),
+    svg("circle", { class: "hx-route-to", cx: 272, cy: 28, r: 2.2 }),
+  );
   let lineBox = null;
   // the line's size in px, so the dot moves by transform (sub-pixel, no
   // layout) rather than by percentages snapped to whole pixels
@@ -154,9 +166,13 @@ export function journeyHero({ start, onSearch }) {
       h(
         "div",
         { class: "jh-copy" },
-        h("p", { class: "hx-kicker" }, h("span", { class: "eyebrow-n" }, "00"), "Collaborative trip planner"),
-        h("h1", { class: "jh-title" }, "Every journey begins somewhere."),
-        h("p", { class: "jh-lede" }, "Plan a trip together on one map and one timeline, with real travel times between every stop."),
+        h("p", { class: "hx-kicker" }, h("span", { class: "hx-kicker-rule", "aria-hidden": "true" }), "For all the places we\u2019ll go."),
+        // one phrase in three voices: the headline, an aside, and "us." signed
+        h("h1", { class: "jh-title hx-poem" },
+          h("span", { class: "hx-poem-the" }, "The journey"), " ",
+          h("span", { class: "hx-poem-sign" }, h("span", { class: "hx-poem-by" }, "written by"), " ", h("span", { class: "hx-poem-us" }, "us."))),
+        h("p", { class: "jh-lede hx-verse" }, "It starts with a little ", h("em", {}, "“what if”"), ".", h("br"), "Somewhere along the way, ", h("span", { class: "hx-verse-end" }, "it becomes our story.")),
+        routes,
         h("div", { class: "jh-actions" }, h("button", { type: "button", class: "btn btn-primary btn-lg", onclick: start }, "Start Planning"), explore),
       ),
       h(
