@@ -48,7 +48,9 @@ export const SCENES = [
     subtitle: "Across the Thames",
     explore: "/itineraries/london-royal-riverside",
     night: false,
-    photo: { w: 4600, h: 1641, focus: 0.36, phoneFocus: 0.52, phoneZoom: 2, pan: 0.3, ay: 0.76, gy: 0.68 },
+    // the horizon sits a little above the middle, so the river and the
+    // Eye fill the view rather than the open sky
+    photo: { w: 4600, h: 1641, focus: 0.36, phoneFocus: 0.52, phoneZoom: 2, pan: 0.3, ay: 0.76, gy: 0.6 },
     place: "The Thames from Hungerford Bridge: the London Eye and Westminster",
     alt: "Through a window: the Thames, with the London Eye, Westminster Bridge and Big Ben.",
   },
@@ -58,9 +60,9 @@ export const SCENES = [
     subtitle: "Around the harbour",
     explore: "/itineraries/sydney-harbour-highlights",
     night: false,
-    // a very wide panorama (4.1:1): the view drifts from the city towers
-    // towards the Opera House and the Harbour Bridge
-    photo: { w: 5200, h: 1268, focus: 0.5, phoneFocus: 0.6, phoneZoom: 1.5, pan: 0.34, ay: 0.64, gy: 0.62, tip: 0.36 },
+    // a very wide panorama (4.1:1): the view is centred near the Opera
+    // House and drifts on to the Harbour Bridge
+    photo: { w: 5200, h: 1268, focus: 0.6, phoneFocus: 0.6, phoneZoom: 1.5, pan: 0.34, ay: 0.64, gy: 0.62, tip: 0.36 },
     place: "Sydney Harbour from Yurong Point: the city, the Opera House and the Harbour Bridge",
     alt: "Through a window: Sydney Harbour on a summer day, the city's towers, the Opera House and the Harbour Bridge across the water.",
   },

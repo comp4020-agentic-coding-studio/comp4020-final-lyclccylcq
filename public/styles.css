@@ -2085,18 +2085,47 @@ main.home, body:has(main.home) .topbar { --line: #c3bfb3; --line-2: #a29d90; }
 .hx .jh-lede.hx-verse { max-width: 40ch; margin-bottom: 6px; font: italic 400 clamp(18px, 1.3vw, 22px)/1.5 var(--serif-art); color: var(--ink-2); }
 .hx-verse em { font-style: italic; font-weight: 500; color: var(--ink); }
 .hx-verse-end { white-space: nowrap; }
-.hx-routes { display: block; width: min(280px, 70%); height: auto; margin: 0 0 20px; overflow: visible; color: var(--ink-2); }
+.hx-routes { display: block; width: min(300px, 74%); height: auto; margin: 4px 0 2px; overflow: visible; color: var(--ink-2); }
 .hx-route { fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; stroke-dasharray: .5 5; opacity: .6; }
-.hx-route-one { stroke: var(--coral); stroke-width: 1.3; stroke-dasharray: 5 4; opacity: .85; }
+.hx-route-one { stroke: var(--coral); stroke-width: 1.3; stroke-dasharray: 5 4; opacity: .9; }
 .hx-route-from { fill: none; stroke: currentColor; stroke-width: 1; opacity: .6; }
 .hx-route-meet { fill: var(--paper); stroke: var(--coral); stroke-width: 1.2; }
-.hx-route-meet-dot, .hx-route-to { fill: var(--coral); }
-@media (max-height: 940px) and (min-width: 961px) { .hx .jh-title.hx-poem { font-size: clamp(46px, 4.8vw, 80px); } .hx-kicker { margin-bottom: 16px; } .hx-routes { margin-bottom: 14px; } }
+.hx-route-meet-dot { fill: var(--coral); }
+.hx-route-tip { fill: none; stroke: var(--coral); stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+
+/* the actions close the column: one confident red button, and the
+   destination on view as a quiet text link beside it */
+.hx .jh-actions { align-items: center; gap: 10px 28px; }
+.hx .jh-start { padding: 15px 30px; border-radius: 999px; font: 600 15px/1 var(--sans); letter-spacing: .01em; box-shadow: 0 1px 0 rgba(21, 23, 26, .08), 0 10px 22px -14px rgba(200, 64, 31, .7); transition: background .15s, box-shadow .15s, transform .15s; }
+.hx .jh-start:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 1px 0 rgba(21, 23, 26, .08), 0 14px 26px -14px rgba(200, 64, 31, .8); }
+.hx .jh-start:active { transform: none; }
+.jh-explore { display: inline-flex; align-items: baseline; gap: 8px; padding: 10px 0; font: italic 500 clamp(18px, 1.3vw, 21px)/1 var(--serif-art); color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line-2); transition: border-color .15s; }
+.jh-explore-arrow { font: 400 15px/1 var(--sans); color: var(--coral); transition: transform .15s; }
+.jh-explore:hover { border-bottom-color: var(--ink); }
+.jh-explore:hover .jh-explore-arrow { transform: translateX(3px); }
+.hx-copy .jh-explore:focus-visible { outline-offset: 4px; border-radius: 2px; }
+@media (prefers-reduced-motion: reduce) { .hx .jh-start, .jh-explore-arrow { transition: none; } .hx .jh-start:hover:not(:disabled) { transform: none; } }
+
+/* the window: the photographs graded as one set (a touch less saturation
+   and contrast, a little warmth), so the five read as one photographer's
+   pictures on the page's paper; the edge is the page's own rule, and the
+   only control on the glass is a paper-coloured pill */
+.hx .jh-photo { filter: saturate(.84) contrast(.95) sepia(.07) brightness(1.01); }
+.hx .jh-scene-shanghai .jh-photo { filter: saturate(.74) contrast(.96) sepia(.05); }
+.hx .jh-glass { background: linear-gradient(rgba(236, 235, 229, .06), rgba(236, 235, 229, 0) 40%); box-shadow: 0 0 0 1px var(--line-2), inset 0 0 0 1px rgba(255, 255, 255, .1); }
+.hx .jh-ui::before { display: none; }
+.hx .jh-pause { background: color-mix(in srgb, var(--paper) 86%, transparent); color: var(--ink); border: 1px solid var(--line-2); text-shadow: none; }
+.hx .jh-pause:hover { background: var(--paper); }
+@media (max-height: 940px) and (min-width: 961px) { .hx .jh-title.hx-poem { font-size: clamp(46px, 4.8vw, 80px); } .hx-kicker { margin-bottom: 16px; } }
 @media (max-width: 960px) {
   .hx .jh-title.hx-poem { font-size: clamp(44px, 12.5vw, 72px); margin-bottom: 14px; }
   .hx-kicker { margin-bottom: 14px; }
   .hx .jh-lede.hx-verse { font-size: 18px; }
-  .hx-routes { width: 220px; margin-bottom: 14px; }
+  .hx-routes { width: 240px; }
+}
+@media (max-width: 520px) {
+  .hx .jh-actions .jh-start { flex: none; padding: 14px 24px; }
+  .hx .jh-actions { flex-wrap: wrap; }
 }
 }
 .home .rx .it-foot .btn { border-color: transparent; }

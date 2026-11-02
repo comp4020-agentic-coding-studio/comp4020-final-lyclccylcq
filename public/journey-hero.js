@@ -98,7 +98,9 @@ export function journeyHero({ start, onSearch }) {
   const place = h("p", { class: "jh-place" });
   const sub = h("p", { class: "jh-sub" });
   const count = h("span", { class: "jh-count", "aria-hidden": "true" });
-  const explore = h("a", { class: "btn btn-lg jh-btn-light", href: SCENES[0].explore ?? "/#explore-map" }, "Explore This Destination");
+  // the quieter action: a text link naming the destination on view
+  const exploreName = h("span", {}, SCENES[0].name);
+  const explore = h("a", { class: "jh-explore", href: SCENES[0].explore ?? "/#explore-map" }, h("span", {}, "Explore ", exploreName), h("span", { class: "jh-explore-arrow", "aria-hidden": "true" }, "\u2192"));
   explore.addEventListener("click", (e) => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     const go = exploreFor(SCENES[shown]);
@@ -132,17 +134,19 @@ export function journeyHero({ start, onSearch }) {
   // the head of the line: a dot travelling with it (its own element, so it
   // stays round however the line's box is stretched)
   const head = h("span", { class: "jh-head", "aria-hidden": "true" });
-  // two pencilled routes from different places, meeting and going on as one
-  const routes = svg("svg", { class: "hx-routes", viewBox: "0 0 280 64", "aria-hidden": "true" });
+  // two pencilled routes from different places, coming in from the window's
+  // side, meeting, and going on as one red line that comes down to the
+  // primary button
+  const routes = svg("svg", { class: "hx-routes", viewBox: "0 0 300 76", "aria-hidden": "true" });
   routes.append(
-    svg("path", { class: "hx-route", d: "M6,12 C44,4 70,26 104,24 S150,30 168,34" }),
-    svg("path", { class: "hx-route", d: "M18,56 C52,60 82,40 116,46 S152,38 168,34" }),
-    svg("path", { class: "hx-route hx-route-one", d: "M168,34 C196,30 214,18 240,22 S264,30 272,28" }),
-    svg("circle", { class: "hx-route-from", cx: 6, cy: 12, r: 2.6 }),
-    svg("circle", { class: "hx-route-from", cx: 18, cy: 56, r: 2.6 }),
-    svg("circle", { class: "hx-route-meet", cx: 168, cy: 34, r: 5 }),
-    svg("circle", { class: "hx-route-meet-dot", cx: 168, cy: 34, r: 1.8 }),
-    svg("circle", { class: "hx-route-to", cx: 272, cy: 28, r: 2.2 }),
+    svg("path", { class: "hx-route", d: "M292,10 C258,4 236,22 204,22 S158,26 140,34" }),
+    svg("path", { class: "hx-route", d: "M262,58 C236,64 214,46 190,46 S158,40 140,34" }),
+    svg("path", { class: "hx-route hx-route-one", d: "M140,34 C112,40 88,36 78,50 S72,66 72,70" }),
+    svg("circle", { class: "hx-route-from", cx: 292, cy: 10, r: 2.4 }),
+    svg("circle", { class: "hx-route-from", cx: 262, cy: 58, r: 2.4 }),
+    svg("circle", { class: "hx-route-meet", cx: 140, cy: 34, r: 4.6 }),
+    svg("circle", { class: "hx-route-meet-dot", cx: 140, cy: 34, r: 1.7 }),
+    svg("path", { class: "hx-route-tip", d: "M68,67 L72,73 L76,67" }),
   );
   let lineBox = null;
   // the line's size in px, so the dot moves by transform (sub-pixel, no
@@ -172,7 +176,7 @@ export function journeyHero({ start, onSearch }) {
           h("span", { class: "hx-poem-sign" }, h("span", { class: "hx-poem-by" }, "written by"), " ", h("span", { class: "hx-poem-us" }, "us."))),
         h("p", { class: "jh-lede hx-verse" }, "It starts with a little ", h("em", {}, "“what if”"), ".", h("br"), "Somewhere along the way, ", h("span", { class: "hx-verse-end" }, "it becomes our story.")),
         routes,
-        h("div", { class: "jh-actions" }, h("button", { type: "button", class: "btn btn-primary btn-lg", onclick: start }, "Start Planning"), explore),
+        h("div", { class: "jh-actions" }, h("button", { type: "button", class: "btn btn-primary btn-lg jh-start", onclick: start }, "Start Planning"), explore),
       ),
       h(
         "div",
@@ -305,6 +309,7 @@ export function journeyHero({ start, onSearch }) {
       if (k === i) b.setAttribute("aria-current", "true");
       else b.removeAttribute("aria-current");
     });
+    exploreName.textContent = s.name;
     const go = exploreFor(s);
     explore.href = go.href ?? "/#explore-map";
     // an in-app link goes through the router; a map search is handled here
