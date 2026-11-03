@@ -286,6 +286,10 @@ body:has(.call-card:not([hidden]):not(.is-mini)) .toasts { bottom: auto; top: ca
 .conn::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .conn-live { color: var(--leaf); }
 .conn-off { color: var(--warn); }
+.conn-saving { color: var(--muted); }
+.conn-saving::before { animation: call-pulse 1s ease-in-out infinite; }
+.conn-failed { color: var(--danger); }
+@media (prefers-reduced-motion: reduce) { .conn-saving::before { animation: none; } }
 
 /* map : plan : assistant, about 45 : 33 : 22 on wide screens. The plan is
    the main editing space, so it gets real width; the map stays usable. With
@@ -2487,4 +2491,113 @@ main.home, body:has(main.home) .topbar { --line: #c3bfb3; --line-2: #a29d90; }
   .topbar-nav { gap: 7px; }
   .topbar-nav > a { padding: 5px 8px; }
   .topbar-nav > .btn, .topbar-nav .me > .btn { padding: 5px 9px; }
+}
+
+/* =====================================================================
+   Published journeys and the profile (November 2026). The journey
+   (/journeys/pub-…, public/journey-page.js) is the shareable one:
+   photograph first, editorial serif, the days as a journal. The profile
+   (/profile, public/profile.js) is plain and orderly: who you are, then
+   your journeys in three tabs.
+   ===================================================================== */
+.journey, .profile { --serif-art: "Cormorant Garamond", "Iowan Old Style", Georgia, serif; }
+.journey { width: 100%; }
+.jy-owner { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; max-width: 1180px; margin: 16px auto 0; padding: 10px 24px; font-size: 13.5px; color: var(--ink-2); }
+.jy-cover { position: relative; display: flex; align-items: flex-end; min-height: clamp(320px, 56vh, 560px); margin: 16px clamp(8px, 1.4vw, 24px) 0; border-radius: 16px; overflow: hidden; background: var(--paper-2); }
+.jy-cover .cover-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.jy-cover.has-photo::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(14, 14, 12, .72), rgba(14, 14, 12, .1) 62%, transparent); }
+.jy-cover-text { position: relative; z-index: 1; width: 100%; max-width: 1180px; margin: 0 auto; padding: clamp(28px, 5vw, 64px) clamp(20px, 4vw, 56px); color: var(--ink); }
+.jy-cover.has-photo .jy-cover-text { color: #fbf8f1; }
+.jy-kicker { margin-bottom: 14px; font: 500 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--coral-ink); }
+.jy-cover.has-photo .jy-kicker { color: #ffd2c2; }
+.jy-title { max-width: 18ch; font: 500 clamp(44px, 6.4vw, 96px)/.98 var(--serif-art); letter-spacing: -.01em; text-wrap: balance; overflow-wrap: anywhere; }
+.jy-byline { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 18px; font: italic 400 clamp(17px, 1.3vw, 21px)/1.3 var(--serif-art); }
+.jy-byline strong { font-weight: 600; font-style: normal; font-family: var(--sans); font-size: .82em; }
+.jy-body { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 40px clamp(32px, 5vw, 80px); max-width: 1180px; margin: 0 auto; padding: clamp(36px, 5vw, 64px) 24px 72px; }
+.jy-intro { grid-column: 1 / -1; max-width: 62ch; }
+.jy-desc { font: italic 400 clamp(21px, 1.8vw, 28px)/1.42 var(--serif-art); color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
+.jy-meta { margin-top: 14px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.jy-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.jy-map { position: sticky; top: calc(var(--bar-h) + 20px); align-self: start; height: min(68vh, 620px); border-radius: 14px; overflow: hidden; background: #e8e2d6; }
+.jy-days { display: flex; flex-direction: column; gap: 40px; min-width: 0; }
+.jy-day-h { display: flex; align-items: baseline; gap: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line-2); font: 500 clamp(28px, 2.4vw, 36px)/1.1 var(--serif-art); letter-spacing: 0; text-transform: none; }
+.jy-day-n { font: 500 12px/1 var(--mono); letter-spacing: .1em; color: var(--coral-ink); }
+.jy-stops { list-style: none; margin: 0; padding: 0; }
+.jy-stop { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 0 16px; padding: 16px 0; border-bottom: 1px dashed var(--line-2); }
+.jy-stop:last-child { border-bottom: 0; }
+.jy-time { padding-top: 3px; font: 500 14px/1.2 var(--mono); color: var(--ink); }
+.jy-stop h3 { font: 600 18px/1.3 var(--sans); letter-spacing: -.01em; overflow-wrap: anywhere; }
+.jy-stop-meta { margin-top: 4px; font-size: 13.5px; color: var(--muted); }
+.jy-stop-start h3 { font-weight: 500; color: var(--ink-2); }
+.jy-foot { grid-column: 1 / -1; padding-top: 24px; border-top: 1px solid var(--line); font: italic 400 18px/1.4 var(--serif-art); color: var(--ink-2); }
+@media (max-width: 900px) {
+  .jy-body { grid-template-columns: 1fr; }
+  .jy-map { position: relative; top: 0; height: 320px; }
+}
+@media (max-width: 520px) {
+  .jy-cover { margin: 8px 8px 0; border-radius: 12px; min-height: 380px; }
+  .jy-body { padding: 32px 18px 56px; gap: 32px; }
+  .jy-stop { grid-template-columns: 48px minmax(0, 1fr); gap: 0 12px; }
+}
+@media print {
+  .topbar, footer, .jy-owner, .jy-actions, .jy-map, #toasts { display: none !important; }
+  .jy-body { display: block; padding: 24px 0; }
+  .jy-cover { min-height: 260px; margin: 0; }
+  .jy-day { break-inside: avoid; margin-top: 28px; }
+}
+
+/* the publish dialog */
+.pub-live { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 10px; background: var(--paper); }
+.pub-link { display: flex; gap: 8px; align-items: center; }
+.pub-link input { flex: 1; min-width: 0; font: 13px var(--mono); }
+.pub-choices { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
+.pub-choices legend { margin-bottom: 4px; font-weight: 600; }
+.pub-choice { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 10px; cursor: pointer; }
+.pub-choice:has(input:checked) { border-color: var(--ink); background: var(--surface); }
+.pub-choice input { flex: none; width: 16px; height: 16px; margin: 3px 0 0; padding: 0; accent-color: var(--ink); }
+.pub-choice span { flex: 1; min-width: 0; }
+.pub-choice span { display: flex; flex-direction: column; gap: 2px; }
+
+/* the header's way to your profile */
+.me-link { display: inline-flex; align-items: center; gap: 8px; padding: 3px 8px 3px 3px; border-radius: 999px; color: inherit; text-decoration: none; }
+.me-link:hover, .me-link.on { background: var(--paper-2); }
+.me-link:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+@media (max-width: 760px) { .me-link { padding: 0; gap: 0; } .me-link:hover, .me-link.on { background: none; } .me-link.on .avatar { box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--coral); } }
+
+/* the profile */
+.profile { display: flex; flex-direction: column; gap: 48px; max-width: 1180px; margin: 0 auto; padding: 48px 24px 80px; }
+.pf-account { display: flex; gap: 24px; align-items: flex-start; padding-bottom: 36px; border-bottom: 1px solid var(--line); }
+.pf-account > .avatar { width: 84px; height: 84px; flex: none; font-size: 28px; }
+.pf-who { min-width: 0; flex: 1; max-width: 640px; }
+.pf-name { font: 500 clamp(36px, 4vw, 54px)/1.02 var(--serif-art); letter-spacing: -.01em; text-transform: none; overflow-wrap: anywhere; }
+.pf-handle { margin-top: 8px; font: 500 13px/1.4 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.pf-bio { margin-top: 14px; max-width: 58ch; font: italic 400 19px/1.45 var(--serif-art); color: var(--ink); white-space: pre-line; overflow-wrap: anywhere; }
+.pf-bio-empty { color: var(--muted); }
+.pf-account-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.pf-edit { max-width: 480px; }
+.pf-h { font: 500 clamp(28px, 2.6vw, 38px)/1.1 var(--serif-art); letter-spacing: 0; text-transform: none; }
+.pf-tabs { display: flex; flex-wrap: wrap; gap: 2px 24px; margin: 18px 0 28px; border-bottom: 1px solid var(--line); }
+.pf-tab { display: inline-flex; align-items: baseline; gap: 8px; margin-bottom: -1px; padding: 10px 0 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font: 600 14px/1 var(--sans); cursor: pointer; }
+.pf-tab:hover { color: var(--ink); }
+.pf-tab.on { color: var(--ink); border-bottom-color: var(--coral); }
+.pf-tab:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.pf-count { font: 500 11px/1 var(--mono); color: var(--muted); }
+.pf-state { margin-bottom: 6px; font: 500 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.pf-state.is-published { color: var(--coral-ink); }
+.pf-pubs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.pf-pub { display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 20px; padding: 20px 0; border-bottom: 1px solid var(--line); }
+.pf-pub:first-child { padding-top: 0; }
+.pf-pub-cover { position: relative; display: block; aspect-ratio: 4 / 3; border-radius: 10px; overflow: hidden; background: var(--paper-2); }
+.pf-pub-cover .cover-img { width: 100%; height: 100%; object-fit: cover; }
+.pf-pub.is-off .pf-pub-cover { opacity: .5; }
+.pf-pub h3 { font: 600 19px/1.3 var(--sans); letter-spacing: -.01em; overflow-wrap: anywhere; }
+.pf-pub h3 a { color: inherit; text-decoration: none; }
+.pf-pub h3 a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.pf-pub-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+@media (max-width: 640px) {
+  .profile { padding: 32px 18px 64px; gap: 36px; }
+  .pf-account { flex-direction: column; gap: 16px; }
+  .pf-account > .avatar { width: 64px; height: 64px; font-size: 22px; }
+  .pf-pub { grid-template-columns: 96px minmax(0, 1fr); gap: 14px; }
+  .pf-tabs { gap: 2px 18px; }
 }

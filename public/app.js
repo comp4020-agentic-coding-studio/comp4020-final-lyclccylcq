@@ -3,7 +3,9 @@ import { renderHome, tripCard } from "/home.js";
 import { CREDITS as JOURNEY_CREDITS } from "/journey.js";
 import { HERO_CLIPS } from "/media.js";
 import { coverImg, PHOTOS, photoFor } from "/photos.js";
+import { renderJourney } from "/journey-page.js";
 import { renderPreview } from "/preview.js";
+import { renderProfile } from "/profile.js";
 import { api, ApiError, avatar, fill, fmtRange, h, icon, openDialog, relTime, toast } from "/ui.js";
 
 const app = document.getElementById("app");
@@ -32,11 +34,14 @@ async function route() {
   const join = path.match(/^\/join\/([A-Za-z0-9_-]+)$/);
   const trip = path.match(/^\/trips\/([0-9a-f-]{36})$/);
   const itinerary = path.match(/^\/itineraries\/([a-z0-9-]{3,80})$/);
+  const journey = path.match(/^\/journeys\/(pub-[0-9a-f-]{36})$/);
   window.scrollTo(0, 0);
 
   // open to everyone
   if (path === "/") return void (cleanup = renderHome(app, ctx()));
   if (itinerary) return void (cleanup = await renderPreview(app, itinerary[1], ctx()));
+  // a published journey: read-only, for anyone with its link
+  if (journey) return void (cleanup = await renderJourney(app, journey[1], ctx()));
   if (path === "/privacy") return renderPrivacy();
   if (path === "/credits") return renderCredits();
   if (path === "/experiments/pixel-train") {
@@ -58,6 +63,7 @@ async function route() {
     }
     return;
   }
+  if (path === "/profile") return void (cleanup = await renderProfile(app, ctx()));
   if (path === "/trips") {
     cleanup = (await renderDashboard()) ?? null;
     if (new URLSearchParams(location.search).get("new") === "1") newTripDialog();
@@ -66,7 +72,13 @@ async function route() {
   renderMissing("There's no page at this address.");
 }
 
-const ctx = () => ({ me: state.me, config: state.config, navigate, signOut, topbar, footer, createTrip });
+const ctx = () => ({ me: state.me, config: state.config, navigate, signOut, topbar, footer, createTrip, refreshMe });
+
+// after a profile change: the session's account, read again
+async function refreshMe() {
+  state.me = (await api("/api/auth/me").catch(() => null))?.user ?? state.me;
+  document.querySelector(".topbar")?.replaceWith(topbar(location.pathname === "/profile" ? "profile" : ""));
+}
 
 // destination: a place picked on the homepage, filled in (still editable)
 function createTrip(destination = "") {
@@ -96,8 +108,13 @@ function topbar(active = "") {
         ? h(
             "span",
             { class: "me" },
-            avatar({ id: state.me.id, displayName: state.me.displayName }, "sm"),
-            h("span", { class: "me-name" }, state.me.displayName),
+            // the way to your profile: your avatar and name, as before
+            h(
+              "a",
+              { class: `me-link${active === "profile" ? " on" : ""}`, href: "/profile", "data-link": true, "aria-label": `Your profile (${state.me.displayName})`, title: "Your profile" },
+              avatar({ id: state.me.id, displayName: state.me.displayName }, "sm"),
+              h("span", { class: "me-name" }, state.me.displayName),
+            ),
             h("button", { class: "btn btn-ghost btn-sm signout", type: "button", "aria-label": "Sign out", onclick: signOut }, icon("signout"), h("span", { class: "hide-xs" }, "Sign out")),
           )
         : h("a", { class: "btn btn-ghost btn-sm", href: `/login?next=${encodeURIComponent(location.pathname)}`, "data-link": true }, "Sign in"),

@@ -21,6 +21,7 @@ import {
   parseTime,
   memberColour,
   relTime,
+  saves,
   toast,
   uid,
 } from "/ui.js";
@@ -326,6 +327,30 @@ export async function openEditor(root, tripId, ctx) {
     renderTabs();
   }
 
+  // One indicator for whether the plan is safely stored: every change is
+  // saved on the server as it's made (there is no separate Save), so this
+  // says when one is on its way, when one didn't make it, and when the live
+  // connection that brings others' changes is down.
+  function saveState() {
+    const [cls, label, title] = saves.pending
+      ? ["conn-saving", "Saving\u2026", "Your change is on its way to the server."]
+      : saves.failed
+        ? ["conn-failed", "Not saved", `${saves.failed} Make the change again when you're back online.`]
+        : !S.live
+          ? ["conn-off", "Reconnecting\u2026", "Your saved changes are safe; others' changes will appear when the connection is back."]
+          : ["conn-live", "Saved", "Every change is saved to your account as you make it, and shared live with the trip's members."];
+    return h("span", { class: `conn ${cls}`, role: "status", title, "data-save": cls.slice(5) }, label);
+  }
+  const onSaves = () => renderBar();
+  saves.listeners.add(onSaves);
+  // leaving while a change is still on its way (or just failed) could lose it
+  const onLeave = (e) => {
+    if (!saves.pending && !saves.failed) return;
+    e.preventDefault();
+    e.returnValue = "";
+  };
+  addEventListener("beforeunload", onLeave);
+
   function renderBar() {
     const t = S.trip;
     const online = S.presence.length ? S.presence : [{ id: me.id, displayName: me.displayName }];
@@ -359,7 +384,7 @@ export async function openEditor(root, tripId, ctx) {
         ),
         h("span", { class: "presence-label" }, online.length > 1 ? `${online.length} people are planning this trip` : "Just you right now"),
       ),
-      h("span", { class: `conn ${S.live ? "conn-live" : "conn-off"}`, role: "status" }, S.live ? "Live" : "Reconnecting…"),
+      saveState(),
       voice.render(),
       h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => shareDialog(sharing()) }, icon("share"), h("span", { class: "hide-sm" }, "Share"), isOwner() && t.pendingRequests > 0 && h("span", { class: "badge badge-danger", "aria-label": `${t.pendingRequests} requests to join` }, String(t.pendingRequests))),
       isOwner() && h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-publish": t.publication?.status ?? "none", onclick: () => publishDialog(sharing()) }, icon("spark"), h("span", { class: "hide-sm" }, t.publication?.status === "published" ? (t.publication.outdated ? "Update published" : "Published") : "Publish Trip")),
@@ -2729,6 +2754,9 @@ export async function openEditor(root, tripId, ctx) {
   if (isPhone() && !S.trip.days.some((d) => d.activities.length)) setTab("map");
 
   return () => {
+    saves.listeners.delete(onSaves);
+    removeEventListener("beforeunload", onLeave);
+    saves.failed = null;
     clearInterval(prune);
     S.aiPending?.controller.abort();
     voice.destroy();

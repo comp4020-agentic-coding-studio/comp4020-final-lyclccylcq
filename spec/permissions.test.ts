@@ -232,7 +232,7 @@ describe("publishing, forking and reviews", () => {
     expect((await owner.send("PUT", `/api/trips/${trip.id}/publication`, { description: "Ok" })).status).toBe(201);
   });
 
-  it("is public and read-only, without notes, members or links, and listed in discovery", async () => {
+  it("is readable by its link and read-only, without notes, members or links; listed in discovery only when the owner chooses", async () => {
     const { author, trip, pubId } = await published();
     const outsider = await signUp(baseUrl);
     await link(author, trip.id);
@@ -241,7 +241,16 @@ describe("publishing, forking and reviews", () => {
     expect(pub.author.displayName).toEqual(expect.any(String));
     expect(pub.stops.map((s: any) => s.title)).toEqual(["Opera House", "Botanic Garden"]);
     expect(JSON.stringify(pub)).not.toMatch(/private note|members|invite|token/i);
+    // link only by default: readable by id, listed nowhere, until the owner lists it
+    expect(pub.visibility).toBe("link");
+    expect((await anon(baseUrl).get("/api/publications")).data.publications.map((p: any) => p.id)).not.toContain(pubId);
+    expect((await outsider.send("PUT", `/api/trips/${trip.id}/publication`, { description: "x", visibility: "listed" })).status).toBe(404);
+    expect((await author.send("PUT", `/api/trips/${trip.id}/publication`, { description: "A lovely harbour day", visibility: "everyone" })).status).toBe(400);
+    expect((await author.send("PUT", `/api/trips/${trip.id}/publication`, { description: "A lovely harbour day", visibility: "listed" })).status).toBe(200);
     expect((await anon(baseUrl).get("/api/publications")).data.publications.map((p: any) => p.id)).toContain(pubId);
+    // republishing keeps the choice
+    await author.send("PUT", `/api/trips/${trip.id}/publication`, { description: "A lovely harbour day" });
+    expect((await anon(baseUrl).get(`/api/itineraries/${pubId}`)).data.visibility).toBe("listed");
     // the curated list stays curated
     expect((await anon(baseUrl).get("/api/itineraries")).data.itineraries.every((t: any) => t.source === "curated")).toBe(true);
     // a published trip gives the public no way into the original

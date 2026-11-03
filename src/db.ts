@@ -280,6 +280,14 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
   for (const [col, type] of [["forked_from_publication_id", "text"], ["forked_from_title", "text"], ["forked_from_author", "text"], ["forked_at", "integer"], ["cover_key", "text"]]) {
     if (!tripCols2.includes(col)) db.exec(`alter table trips add column ${col} ${type}`);
   }
+  // November 2026: a publication is either listed (on the homepage's
+  // "Shared by travellers") or link-only (anyone with its address, nowhere
+  // listed). Ones published before this were listed, and stay so; new ones
+  // start link-only. Profiles: an optional short bio.
+  const pubCols = db.prepare("pragma table_info(trip_publications)").all().map((c) => String(c.name));
+  if (!pubCols.includes("visibility")) db.exec("alter table trip_publications add column visibility text not null default 'listed' check (visibility in ('listed', 'link'))");
+  const userCols = db.prepare("pragma table_info(users)").all().map((c) => String(c.name));
+  if (!userCols.includes("bio")) db.exec("alter table users add column bio text not null default ''");
   // AI: one row per model call, written before the call (status 'running')
   // and finished after it. The app-wide limits count these rows, so they
   // survive restarts; a row left 'running' by a crash stops counting as

@@ -902,11 +902,16 @@ describe.skipIf(!chromePath)("publishing and trip settings", () => {
 
     await page.click(".trip-bar [data-publish]");
     await page.waitFor(`document.querySelector('dialog[open] [data-publish=submit]')`, 3000);
-    expect(await page.eval<string>(`document.querySelector('dialog[open] h2').textContent`)).toBe("Publish Trip");
+    expect(await page.eval<string>(`document.querySelector('dialog[open] h2').textContent`)).toBe("Publish as a journey");
     await page.eval(`(() => { const f = document.querySelector('dialog[open] form'); f.description.value = 'A day by the harbour'; f.requestSubmit(); })()`);
-    await page.waitFor(`location.pathname.startsWith('/itineraries/pub-')`, 5000);
-    const pubPath = await page.eval<string>(`location.pathname`);
+    // published: its link, ready to copy, then the journey page itself
+    await page.waitFor(`/\\/journeys\\/pub-/.test(document.querySelector('dialog[open] .pub-link input')?.value ?? '')`, 5000);
+    const pubPath = new URL(await page.eval<string>(`document.querySelector('dialog[open] .pub-link input').value`)).pathname.replace("/journeys/", "/itineraries/");
+    await page.eval(`document.querySelector('dialog[open] form').requestSubmit()`);
+    await page.goto(new URL(pubPath, baseUrl).href);
     await page.waitFor(`document.body.innerText.includes('A day by the harbour')`, 5000);
+    await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await page.waitFor(`document.querySelector('.conn-live')`, 8000);
 
     // a change after publishing leaves the public copy behind until the owner updates it
     await inPage(page, "POST", `/api/trips/${trip.id}/activities`, { clientId: `late-${Math.random()}`, dayId: trip.days[0].id, title: "Late stop", kind: "attraction", startMin: 1000, durationMin: 60 });

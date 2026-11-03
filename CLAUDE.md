@@ -376,6 +376,19 @@ contradict the README, stop and ask. Don't quietly change the product.
 - Publishing copies a snapshot; editing the trip never changes it until the
   owner republishes. Notes, members and links are never published. Forks copy
   the snapshot into a new private trip and nothing private (`docs/permissions.md`).
+  A publication is link only by default (`visibility = 'link'`, readable at
+  `/journeys/pub-…` by anyone with the address, listed nowhere); `listed`
+  also shows it under Shared by travellers. Reading a journey never grants
+  edit rights, and its link is separate from invite links: keep "Share"
+  (invite to edit), "Publish" (a read-only journey) and printing distinct.
+- Every change to a trip is stored on the server as it's made (`mutate()`);
+  there is no separate Save. The editor's indicator (`saves` in `ui.js`)
+  shows Saving, Saved, Not saved (a write that didn't reach the server) and
+  Reconnecting, and leaving with a write in flight or failed asks first.
+- `/profile` is the person's own page only (`/api/me/profile`,
+  `/api/me/publications`): display name, username, optional bio, joined
+  date; no email (accounts have none), initials for avatars, no public
+  profiles. The header's avatar and name lead there.
 - Usernames and display names are each unique. Usernames keep their ASCII
   rule and compare case-insensitively (`usernameKey`, the NOCASE column).
   Display names are stored as typed (trimmed) with a separate
@@ -427,7 +440,8 @@ contradict the README, stop and ask. Don't quietly change the product.
   step: `app.js` (routing, nav, auth, dashboard, join), `home.js` (the
   discovery homepage), `journey-hero.js` / `journey.js` (its automatic
   scenery), `media.js` (the photo stream and former video hero),
-  `preview.js` (itinerary preview), `places.js` (place inspector), `editor.js` (the trip workspace), `share.js` (its
+  `preview.js` (itinerary preview), `journey-page.js` (a published
+  journey), `profile.js` (your profile), `places.js` (place inspector), `editor.js` (the trip workspace), `share.js` (its
   people, invite and publish dialogs), `map.js` (Google map or
   labelled schematic), `ui.js` (helpers). Server-side Google calls live only
   in `src/google.ts`, behind `src/discovery.ts` and the trip routes.
@@ -476,6 +490,7 @@ contradict the README, stop and ask. Don't quietly change the product.
   | Editor (`editor.js`, `map.js`) | `spec/browser.test.ts -t "in a real browser\|starting a trip\|collaborating"`, `spec/browser-suggest.test.ts` |
   | Share dialog, nicknames, publishing | `spec/browser.test.ts -t "share\|nickname\|publishing\|reloading"` |
   | My Trips | `spec/browser.test.ts -t "My Trips"` |
+  | Published journeys, profile, save state | `spec/browser-journeys.test.ts`, `spec/permissions.test.ts` |
   | `ui.js` `h()` / `fill()` | `spec/dom-children.test.ts` |
   | Scheduling, order, start (`src/schedule.ts`, `src/trips.ts`) | `spec/schedule.test.ts`, `spec/order.test.ts`, `spec/start.test.ts`, `spec/itinerary.test.ts` |
   | Planner, review, copilot, AI budget | `spec/planner.test.ts`, `spec/review.test.ts`, `spec/plan-cancel.test.ts`, `spec/copilot.test.ts`, `spec/aiusage.test.ts` |

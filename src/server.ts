@@ -254,6 +254,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
 
   if (method === "GET" && path === "/api/auth/me") return json(res, 200, { user });
 
+  // a person's own profile and publications: only ever their own (the
+  // session decides whose), never another person's
+  if (path === "/api/me/profile") {
+    if (method === "GET") return json(res, 200, { profile: auth.profile(user.id) });
+    if (method === "PATCH") return json(res, 200, { profile: auth.updateProfile(user.id, await body(req)) });
+  }
+  if (method === "GET" && path === "/api/me/publications") return json(res, 200, { publications: publications.mine(user.id) });
+
   // a person's own travel preferences: private to them
   if (path === "/api/me/preferences") {
     if (method === "GET") return json(res, 200, { preferences: preferences.mine(user.id) });
@@ -582,7 +590,7 @@ async function refreshStalePlaces(tripId: string): Promise<void> {
   }
 }
 
-const APP_PAGES =/^\/(login|privacy|credits|trips|trips\/[0-9a-f-]{36}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80}|experiments\/pixel-train)?$/;
+const APP_PAGES =/^\/(login|privacy|credits|profile|journeys\/pub-[0-9a-f-]{36}|trips|trips\/[0-9a-f-]{36}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80}|experiments\/pixel-train)?$/;
 
 const server = createServer((req, res) => withRequest(shortId("req"), () => handle(req, res)));
 

@@ -13,6 +13,12 @@ import { type ForkStop, isFresh, type TripSnapshot, type TripStore } from "./tri
 // read a published one; nobody edits it except by republishing the trip.
 
 const DESCRIPTION_MAX = 600;
+export type Visibility = "listed" | "link";
+const visibilityInput = (v: unknown, fallback: Visibility): Visibility => {
+  if (v === undefined || v === null) return fallback;
+  if (v !== "listed" && v !== "link") throw bad("visibility must be listed or link.");
+  return v;
+};
 const COMMENT_MAX = 1000;
 
 export type Review = { id: string; rating: number; comment: string; createdAt: number; updatedAt: number; author: { id: string; displayName: string }; mine: boolean };
@@ -22,6 +28,7 @@ export type PublicationDetail = TemplateDetail & {
   firstPublishedAt: number;
   cover: string | null;
   status: "published" | "unpublished";
+  visibility: Visibility;
   mine: boolean;
   rating: { average: number | null; count: number };
   reviews: Review[];
@@ -41,7 +48,9 @@ export function createPublications(db: DatabaseSync, trips: TripStore, now = () 
   const q = (sql: string) => db.prepare(sql);
   const isPub = (id: unknown): id is string => typeof id === "string" && /^pub-[0-9a-f-]{36}$/.test(id);
 
-  // Published ones for everyone; an unpublished one only for its author.
+  // Published ones for anyone with the id (listed or link-only: the id is a
+  // random UUID, so knowing it is the permission); an unpublished one only
+  // for its author.
   function row(id: unknown, viewerId: string | null): Record<string, unknown> {
     const r = isPub(id) ? q("select p.*, u.display_name as author_name from trip_publications p left join users u on u.id = p.author_id where p.id = ?").get(id) : undefined;
     if (!r || (r.status !== "published" && (viewerId === null || r.author_id !== viewerId))) throw notFound("That itinerary doesn't exist.");
@@ -111,7 +120,7 @@ export function createPublications(db: DatabaseSync, trips: TripStore, now = () 
     return s ? { lat: s.lat as number, lng: s.lng as number } : null;
   }
 
-  function summary(r: Record<string, unknown>, stops = stopsOf(String(r.id))): TemplateSummary & { author: string; cover: string | null; rating: { average: number | null; count: number }; publishedAt: number } {
+  function summary(r: Record<string, unknown>, stops = stopsOf(String(r.id))): TemplateSummary & { author: string; cover: string | null; rating: { average: number | null; count: number }; publishedAt: number; visibility: Visibility } {
     return {
       id: String(r.id),
       title: String(r.title),
@@ -132,13 +141,14 @@ export function createPublications(db: DatabaseSync, trips: TripStore, now = () 
       cover: r.cover === null ? null : String(r.cover),
       rating: rating(String(r.id)),
       publishedAt: Number(r.published_at),
+      visibility: (r.visibility === "link" ? "link" : "listed") as Visibility,
     };
   }
 
   // Writes the trip's current plan into its publication, creating it the
   // first time. The publication id, its first-published time and its reviews
   // are kept; the stops are replaced.
-  function snapshotInto(userId: string, tripId: string, description: string): { id: string; republished: boolean } {
+  function snapshotInto(userId: string, tripId: string, description: string, visibility: Visibility): { id: string; republished: boolean } {
     const data = trips.publishable(userId, tripId);
     if (!data.stops.some((s) => s.role !== "start")) throw new HttpError(400, "Add at least one stop besides the starting point before publishing.", { code: "empty" });
     const existing = q("select id from trip_publications where trip_id = ?").get(tripId);
@@ -147,14 +157,14 @@ export function createPublications(db: DatabaseSync, trips: TripStore, now = () 
     transaction(db, () => {
       if (existing) {
         q(
-          "update trip_publications set author_id = ?, title = ?, description = ?, destination = ?, timezone = ?, days = ?, cover = ?, ref_lat = ?, ref_lng = ?, ref_cached_at = ?, status = 'published', published_at = ?, trip_rev = ? where id = ?",
-        ).run(userId, data.title, description, data.destination, data.timezone, data.days, data.cover, data.ref?.lat ?? null, data.ref?.lng ?? null, data.ref?.cachedAt ?? null, t, data.rev, id);
+          "update trip_publications set author_id = ?, title = ?, description = ?, destination = ?, timezone = ?, days = ?, cover = ?, ref_lat = ?, ref_lng = ?, ref_cached_at = ?, status = 'published', visibility = ?, published_at = ?, trip_rev = ? where id = ?",
+        ).run(userId, data.title, description, data.destination, data.timezone, data.days, data.cover, data.ref?.lat ?? null, data.ref?.lng ?? null, data.ref?.cachedAt ?? null, visibility, t, data.rev, id);
         q("delete from publication_stops where publication_id = ?").run(id);
       } else {
         q(
-          `insert into trip_publications (id, trip_id, author_id, title, description, destination, timezone, days, cover, ref_lat, ref_lng, ref_cached_at, status, first_published_at, published_at, trip_rev)
-           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?)`,
-        ).run(id, tripId, userId, data.title, description, data.destination, data.timezone, data.days, data.cover, data.ref?.lat ?? null, data.ref?.lng ?? null, data.ref?.cachedAt ?? null, t, t, data.rev);
+          `insert into trip_publications (id, trip_id, author_id, title, description, destination, timezone, days, cover, ref_lat, ref_lng, ref_cached_at, status, visibility, first_published_at, published_at, trip_rev)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?)`,
+        ).run(id, tripId, userId, data.title, description, data.destination, data.timezone, data.days, data.cover, data.ref?.lat ?? null, data.ref?.lng ?? null, data.ref?.cachedAt ?? null, visibility, t, t, data.rev);
       }
       const ins = q(
         `insert into publication_stops (id, publication_id, day, position, title, kind, start_min, duration_min, meal, role, place_id, place_source, lat, lng, cached_at)
@@ -178,10 +188,22 @@ export function createPublications(db: DatabaseSync, trips: TripStore, now = () 
       return r ? { ...summary(r), status: String(r.status), tripRev: Number(r.trip_rev) } : null;
     },
 
+    // A first publication is link-only unless the owner lists it;
+    // republishing keeps the choice unless they change it.
     publish(userId: string, tripId: string, input: Record<string, unknown>): { id: string; republished: boolean } {
       trips.require(tripId, userId, "publish");
       const description = text(input.description, "Description", DESCRIPTION_MAX, 1);
-      return snapshotInto(userId, tripId, description);
+      const current = q("select visibility from trip_publications where trip_id = ?").get(tripId);
+      const visibility = visibilityInput(input.visibility, current ? (current.visibility as Visibility) : "link");
+      return snapshotInto(userId, tripId, description, visibility);
+    },
+
+    // The publications a person made, published or not, for their profile
+    mine(userId: string) {
+      // only trips they still own: a publication follows its trip's owner
+      return q("select p.*, u.display_name as author_name, t.rev as current_rev from trip_publications p join trips t on t.id = p.trip_id left join users u on u.id = p.author_id where p.author_id = ? and t.owner_id = ? order by p.published_at desc")
+        .all(userId, userId)
+        .map((r) => ({ ...summary(r), tripId: String(r.trip_id), status: String(r.status) as "published" | "unpublished", outdated: Number(r.current_rev) !== Number(r.trip_rev) }));
     },
 
     // Taken out of discovery; reading it and new forks stop. The row, its
@@ -194,7 +216,7 @@ export function createPublications(db: DatabaseSync, trips: TripStore, now = () 
     },
 
     list(): ReturnType<typeof summary>[] {
-      return q("select p.*, u.display_name as author_name from trip_publications p left join users u on u.id = p.author_id where p.status = 'published' order by p.published_at desc limit 60")
+      return q("select p.*, u.display_name as author_name from trip_publications p left join users u on u.id = p.author_id where p.status = 'published' and p.visibility = 'listed' order by p.published_at desc limit 60")
         .all()
         .map((r) => summary(r))
         .filter((s) => s.stopCount > 0);
@@ -211,6 +233,7 @@ export function createPublications(db: DatabaseSync, trips: TripStore, now = () 
         author: { id: r.author_id === null ? null : String(r.author_id), displayName: r.author_name === null || r.author_name === undefined ? "a former Wayline user" : String(r.author_name) },
         firstPublishedAt: Number(r.first_published_at),
         status: r.status as "published" | "unpublished",
+        visibility: (r.visibility === "link" ? "link" : "listed") as Visibility,
         mine: viewerId !== null && r.author_id === viewerId,
         reviews,
         myReview: reviews.find((x) => x.mine) ?? null,

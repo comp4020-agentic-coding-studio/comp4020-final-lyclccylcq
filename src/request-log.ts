@@ -14,6 +14,7 @@ const ROUTES: [string, RegExp, Route][] = [
   ["POST", /^\/api\/auth\/signup$/, { event: "USER_SIGNED_UP", action: "signup", message: "New account created and signed in" }],
   ["POST", /^\/api\/auth\/login$/, { event: "USER_SESSION_CREATED", action: "login", message: "User signed in; new session started" }],
   ["POST", /^\/api\/auth\/logout$/, { event: "USER_SESSION_ENDED", action: "logout", message: "User signed out" }],
+  ["PATCH", /^\/api\/me\/profile$/, { event: "PROFILE_UPDATED", action: "update_profile", message: "User changed their display name or bio" }],
   ["POST", /^\/api\/trips$/, { event: "TRIP_CREATED", action: "create_trip", message: "User created a trip" }],
   ["POST", /^\/api\/itineraries\/pub-[0-9a-f-]{36}\/copy$/, { event: "TRIP_FORKED", action: "use_template", message: "User forked a published trip into a new private trip" }],
   ["POST", /^\/api\/itineraries\/[a-z0-9-]+\/copy$/, { event: "TRIP_CREATED", action: "copy_itinerary", message: "User created a trip from a curated itinerary" }],

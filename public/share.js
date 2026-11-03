@@ -297,9 +297,12 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
   });
 }
 
-// Publishing: a read-only snapshot for others to browse, review and copy.
-// Editing this trip afterwards never changes it until "Update published".
-export async function publishDialog({ S, base, applySnapshot, navigate }) {
+// Publishing: a read-only snapshot of the plan, a journey to share. It's a
+// different thing from inviting people to edit (shareDialog above): a
+// journey's link lets anyone read it and nobody change it. Link-only by
+// default; listing it puts it under Shared by travellers too. Editing this
+// trip afterwards never changes it until "Update published version".
+export async function publishDialog({ S, base, applySnapshot }) {
   const t = S.trip;
   let pub = null;
   try {
@@ -308,28 +311,27 @@ export async function publishDialog({ S, base, applySnapshot, navigate }) {
     return toast(err.message, { kind: "error" });
   }
   const live = pub?.status === "published";
+  const url = (id) => `${location.origin}/journeys/${id}`;
   const error = h("p", { class: "form-error", role: "alert", hidden: true });
   const hasStops = t.days.some((d) => d.activities.some((a) => a.role !== "start"));
+  const vis = pub?.visibility ?? "link";
+  const choice = (value, title, note) =>
+    h("label", { class: "pub-choice" }, h("input", { type: "radio", name: "visibility", value, checked: vis === value }), h("span", {}, h("strong", {}, title), h("small", { class: "muted" }, note)));
   const form = h(
     "form",
     { method: "dialog", class: "stack" },
-    h("h2", {}, live ? "Published trip" : "Publish Trip"),
-    h(
-      "p",
-      { class: "small muted" },
-      "A read-only copy anyone can view and copy. Notes and people stay private.",
-    ),
+    h("h2", {}, live ? "Your published journey" : "Publish as a journey"),
+    h("p", { class: "small muted" }, "A read-only page of this plan as it is now, to share with anyone. It never lets people edit: to plan together, use Share. Notes and the people on the trip stay private."),
     live &&
       h(
-        "p",
-        { class: "small", "data-publish": "state" },
-        `Published ${new Date(pub.publishedAt).toLocaleString()}. `,
-        t.publication?.outdated ? h("strong", {}, "You've changed the trip since; the public version still shows the earlier plan.") : "It matches the current plan.",
-        " ",
-        h("a", { href: `/itineraries/${pub.id}`, "data-link": true, onclick: () => dialog.close() }, "View public page"),
+        "div",
+        { class: "pub-live", "data-publish": "state" },
+        h("p", { class: "small" }, `Published ${new Date(pub.publishedAt).toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}. `, t.publication?.outdated ? h("strong", {}, "You've changed the trip since; the journey still shows the earlier plan.") : "It matches the current plan."),
+        h("div", { class: "pub-link" }, h("input", { type: "text", readonly: true, value: url(pub.id), "aria-label": "Journey link", onfocus: (e) => e.target.select() }), h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-publish": "copy", onclick: () => copy(url(pub.id)) }, "Copy link"), h("a", { class: "btn btn-quiet btn-sm", href: `/journeys/${pub.id}`, target: "_blank", rel: "noopener" }, "Preview")),
       ),
-    pub?.status === "unpublished" && h("p", { class: "small muted" }, "Unpublished: hidden from others."),
-    h("label", { class: "field" }, h("span", {}, "Description"), h("textarea", { name: "description", required: true, maxlength: 600, rows: 3, placeholder: "What makes this trip worth copying?" }, pub?.description ?? "")),
+    pub?.status === "unpublished" && h("p", { class: "small muted" }, "Unpublished: its link shows nothing until you publish again."),
+    h("fieldset", { class: "pub-choices" }, h("legend", { class: "small" }, "Who can find it"), choice("link", "Anyone with the link", "Not listed anywhere. Share the link with who you like."), choice("listed", "Listed on Wayline", "Also shown under Shared by travellers, where others can rate and copy it.")),
+    h("label", { class: "field" }, h("span", {}, "A line about it"), h("textarea", { name: "description", required: true, maxlength: 600, rows: 3, placeholder: "What made this trip special?" }, pub?.description ?? "")),
     !hasStops && h("p", { class: "small leg-warn" }, "Add at least one stop before publishing."),
     error,
     h(
@@ -342,12 +344,20 @@ export async function publishDialog({ S, base, applySnapshot, navigate }) {
     ),
   );
   const dialog = openDialog(h("dialog", { class: "dialog" }, form));
+  async function copy(link) {
+    try {
+      await navigator.clipboard.writeText(link);
+      toast("Link copied. It opens a read-only journey.");
+    } catch {
+      prompt("Copy this link:", link);
+    }
+  }
   async function unpublish() {
-    if (!confirm("Unpublish this trip? It disappears from Wayline for others; copies already made stay with their owners.")) return;
+    if (!confirm("Unpublish this journey? Its link stops showing it; your trip and copies others made stay as they are.")) return;
     try {
       await api(`${base}/publication`, { method: "DELETE" });
       dialog.close();
-      toast("Unpublished.");
+      toast("Unpublished. Your trip is untouched.");
       applySnapshot(await api(base));
     } catch (err) {
       error.textContent = err.message;
@@ -357,14 +367,33 @@ export async function publishDialog({ S, base, applySnapshot, navigate }) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      const r = await api(`${base}/publication`, { method: "PUT", body: { description: form.description.value } });
-      dialog.close();
-      toast(live ? "Published version updated." : "Published. Others can now find and copy it.");
+      const r = await api(`${base}/publication`, { method: "PUT", body: { description: form.description.value, visibility: form.visibility.value } });
       applySnapshot(await api(base));
-      if (!live) navigate(`/itineraries/${r.publication.id}`);
+      dialog.close();
+      if (live) return toast("Published version updated.");
+      // first publication: show its link, ready to copy
+      publishedDialog(url(r.publication.id), r.publication.id, copy);
     } catch (err) {
       error.textContent = err.message;
       error.hidden = false;
     }
   });
+}
+
+function publishedDialog(link, id, copy) {
+  const dialog = openDialog(
+    h(
+      "dialog",
+      { class: "dialog" },
+      h(
+        "form",
+        { method: "dialog", class: "stack" },
+        h("h2", {}, "Your journey is published"),
+        h("p", { class: "small muted" }, "Anyone with this link can read it. Nobody can edit it, and your trip keeps changing only for you and your crew until you update the journey."),
+        h("div", { class: "pub-link" }, h("input", { type: "text", readonly: true, value: link, "aria-label": "Journey link", onfocus: (e) => e.target.select() }), h("button", { class: "btn btn-primary btn-sm", type: "button", "data-publish": "copy", onclick: () => copy(link) }, "Copy link")),
+        h("div", { class: "dialog-actions" }, h("a", { class: "btn btn-ghost", href: `/journeys/${id}`, target: "_blank", rel: "noopener" }, "Preview the journey"), h("span", { class: "spacer" }), h("button", { class: "btn btn-ghost", type: "submit" }, "Done")),
+      ),
+    ),
+  );
+  return dialog;
 }

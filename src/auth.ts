@@ -159,6 +159,46 @@ export function createAuth(db: DatabaseSync, now = () => Date.now()) {
       return { user: toUser(row), token: startSession(String(row.id)) };
     },
 
+    // A person's own profile: what the account holds, nothing invented.
+    // Accounts have no email address, so none is shown or asked for.
+    profile(userId: string): { id: string; username: string; displayName: string; bio: string; createdAt: number } {
+      const r = db.prepare("select id, username, display_name, bio, created_at from users where id = ?").get(userId);
+      if (!r) throw new HttpError(404, "That account doesn't exist.");
+      return { id: String(r.id), username: String(r.username), displayName: String(r.display_name), bio: String(r.bio ?? ""), createdAt: Number(r.created_at) };
+    },
+
+    // Display name (same rules and uniqueness as at sign-up) and a short bio.
+    // The username, the sign-in name, doesn't change.
+    updateProfile(userId: string, input: Record<string, unknown>) {
+      const sets: string[] = [];
+      const args: (string | number)[] = [];
+      let nameKey: string | null = null;
+      if (input.displayName !== undefined) {
+        const displayName = displayNameInput(input.displayName);
+        nameKey = displayNameKey(displayName);
+        sets.push("display_name = ?", "display_name_key = ?");
+        args.push(displayName, nameKey);
+      }
+      if (input.bio !== undefined) {
+        if (typeof input.bio !== "string") throw new HttpError(400, "Bio must be text.", { field: "bio" });
+        const bio = input.bio.trim();
+        if ([...bio].length > 280) throw new HttpError(400, "Bio must be 280 characters or fewer.", { field: "bio" });
+        if (/[\p{Cc}\p{Cf}\u2028\u2029]/u.test(bio.replace(/\n/g, ""))) throw new HttpError(400, "Bio can't contain control or invisible characters.", { field: "bio" });
+        sets.push("bio = ?");
+        args.push(bio);
+      }
+      if (!sets.length) throw bad("Nothing to change.");
+      try {
+        transaction(db, () => {
+          if (nameKey !== null && db.prepare("select 1 from users where display_name_key = ? and id <> ?").get(nameKey, userId)) throw taken("displayName");
+          db.prepare(`update users set ${sets.join(", ")} where id = ?`).run(...args, userId);
+        });
+      } catch (err) {
+        throw constraintError(err);
+      }
+      return this.profile(userId);
+    },
+
     logout(token: string | undefined): void {
       if (token) db.prepare("delete from auth_sessions where token_hash = ?").run(sha256(token));
     },

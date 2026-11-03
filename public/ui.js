@@ -72,7 +72,35 @@ export class ApiError extends Error {
   }
 }
 
+// Every change to a trip is a request that the server stores before it
+// answers (src/trips.ts, mutate()). The editor's save indicator follows
+// them: how many are in flight, and whether the last one failed.
+export const saves = { pending: 0, failed: null, listeners: new Set() };
+const saveChanged = () => saves.listeners.forEach((f) => f());
+const isTripWrite = (path, method) =>
+  (method === "PATCH" && /^\/api\/trips\/[0-9a-f-]{36}$/.test(path)) ||
+  (method !== "GET" && /^\/api\/trips\/[0-9a-f-]{36}\/(activities|start|segments|routes|proposals\/apply|plan\/apply|preferences)(\/|$)/.test(path));
+
 export async function api(path, { method = "GET", body } = {}) {
+  if (!isTripWrite(path, method)) return request(path, method, body);
+  saves.pending++;
+  saveChanged();
+  try {
+    const data = await request(path, method, body);
+    saves.failed = null;
+    return data;
+  } catch (err) {
+    // refused for a reason the person can act on (a conflict, a rule): the
+    // trip itself is as the server has it, nothing is lost
+    saves.failed = err.status === 0 || err.status >= 500 ? err.message : null;
+    throw err;
+  } finally {
+    saves.pending--;
+    saveChanged();
+  }
+}
+
+async function request(path, method, body) {
   let res;
   try {
     res = await fetch(path, {

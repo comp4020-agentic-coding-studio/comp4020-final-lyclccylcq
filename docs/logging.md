@@ -47,7 +47,7 @@ also carry:
 
 | Category | Events |
 |---|---|
-| User / session | `USER_SIGNED_UP`, `USER_SESSION_CREATED` (login), `USER_SESSION_ENDED` (logout), `USER_CONNECTED` / `USER_DISCONNECTED` (first page opened / last page closed) |
+| User / session | `USER_SIGNED_UP`, `USER_SESSION_CREATED` (login), `USER_SESSION_ENDED` (logout), `PROFILE_UPDATED` (display name or bio; never their values), `USER_CONNECTED` / `USER_DISCONNECTED` (first page opened / last page closed) |
 | Trips | `TRIP_CREATED` (also from a curated itinerary), `TRIP_OPENED`, `TRIP_UPDATED`, `TRIP_DELETED` |
 | Sharing | `INVITATION_CREATED` / `_OPENED` / `_EXPIRED` / `_REVOKED` (24-hour links), `COLLAB_REQUEST_CREATED` / `_REPEATED` / `_APPROVED` / `_REJECTED`, `COLLABORATOR_ADDED` / `_REMOVED`, `TRIP_MEMBER_INVITED`, `TRIP_INVITATION_CANCELLED` / `_DECLINED`, `COLLAB_TRIP_JOINED` (accepted a username invitation), `COLLAB_TRIP_LEFT` |
 | Publishing | `TRIP_PUBLISHED`, `TRIP_REPUBLISHED`, `TRIP_UNPUBLISHED`, `TRIP_FORKED`, `REVIEW_CREATED`, `REVIEW_UPDATED`, `REVIEW_DELETED` (rules in `docs/permissions.md`) |
