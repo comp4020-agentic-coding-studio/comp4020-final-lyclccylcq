@@ -2496,21 +2496,21 @@ main.home, body:has(main.home) .topbar { --line: #c3bfb3; --line-2: #a29d90; }
    pressed; the page you're on stays pressed. Ink only, never coral.
    ===================================================================== */
 .topbar-nav > a, .topbar-nav > .btn, .topbar-nav .me > .btn {
-  --key: 3px;
-  position: relative; border: 1px solid var(--ink); border-radius: 8px;
-  box-shadow: 0 var(--key) 0 var(--ink);
+  --key: 2px; --key-ink: color-mix(in srgb, var(--ink) 38%, transparent); --key-edge: color-mix(in srgb, var(--ink) 55%, var(--line-2));
+  position: relative; border: 1px solid var(--key-edge); border-radius: 8px;
+  box-shadow: 0 var(--key) 0 var(--key-ink);
   transition: transform .12s ease-out, box-shadow .12s ease-out, background .15s;
 }
 .topbar-nav > a { padding: 5px 11px; background: var(--surface); color: var(--ink); }
-.topbar-nav > .btn-ghost, .topbar-nav .me > .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--ink); }
-.topbar-nav > .btn-primary { border-color: var(--ink); }
+.topbar-nav > .btn-ghost, .topbar-nav .me > .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--key-edge); }
+.topbar-nav > .btn-primary { border-color: transparent; }
 .topbar-nav > a:hover, .topbar-nav > .btn:hover:not(:disabled), .topbar-nav .me > .btn:hover:not(:disabled) {
-  transform: translateY(-1px); box-shadow: 0 calc(var(--key) + 1px) 0 var(--ink);
+  transform: translateY(-1px); box-shadow: 0 calc(var(--key) + 1px) 0 var(--key-ink);
 }
-.topbar-nav > a:hover, .topbar-nav > .btn-ghost:hover:not(:disabled), .topbar-nav .me > .btn-ghost:hover:not(:disabled) { background: var(--surface); border-color: var(--ink); color: var(--ink); }
+.topbar-nav > a:hover, .topbar-nav > .btn-ghost:hover:not(:disabled), .topbar-nav .me > .btn-ghost:hover:not(:disabled) { background: var(--surface); border-color: var(--key-edge); color: var(--ink); }
 .topbar-nav > a:active, .topbar-nav > .btn:active:not(:disabled), .topbar-nav .me > .btn:active:not(:disabled),
 .topbar-nav > a.on {
-  transform: translateY(var(--key)); box-shadow: 0 0 0 var(--ink); transition-duration: .05s;
+  transform: translateY(var(--key)); box-shadow: 0 0 0 var(--key-ink); transition-duration: .05s;
 }
 .topbar-nav > a.on { background: var(--paper-2); }
 .topbar-nav > a:focus-visible, .topbar-nav > .btn:focus-visible, .topbar-nav .me > .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
