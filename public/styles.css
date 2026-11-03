@@ -2489,3 +2489,36 @@ main.home, body:has(main.home) .topbar { --line: #c3bfb3; --line-2: #a29d90; }
   .hx .jh-title.hx-poem { font-size: min(17.6cqi, 112px); margin-bottom: 18px; }
   .hx .jh-lede.hx-verse { font-size: 18px; margin-bottom: 28px; }
 }
+
+/* =====================================================================
+   The top bar's controls press like keys (November 2026): each sits on
+   a short ink shadow, rises a little on hover and goes down onto it when
+   pressed; the page you're on stays pressed. Ink only, never coral.
+   ===================================================================== */
+.topbar-nav > a, .topbar-nav > .btn, .topbar-nav .me > .btn {
+  --key: 3px;
+  position: relative; border: 1px solid var(--ink); border-radius: 8px;
+  box-shadow: 0 var(--key) 0 var(--ink);
+  transition: transform .12s ease-out, box-shadow .12s ease-out, background .15s;
+}
+.topbar-nav > a { padding: 5px 11px; background: var(--surface); color: var(--ink); }
+.topbar-nav > .btn-ghost, .topbar-nav .me > .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--ink); }
+.topbar-nav > .btn-primary { border-color: var(--ink); }
+.topbar-nav > a:hover, .topbar-nav > .btn:hover:not(:disabled), .topbar-nav .me > .btn:hover:not(:disabled) {
+  transform: translateY(-1px); box-shadow: 0 calc(var(--key) + 1px) 0 var(--ink);
+}
+.topbar-nav > a:hover, .topbar-nav > .btn-ghost:hover:not(:disabled), .topbar-nav .me > .btn-ghost:hover:not(:disabled) { background: var(--surface); border-color: var(--ink); color: var(--ink); }
+.topbar-nav > a:active, .topbar-nav > .btn:active:not(:disabled), .topbar-nav .me > .btn:active:not(:disabled),
+.topbar-nav > a.on {
+  transform: translateY(var(--key)); box-shadow: 0 0 0 var(--ink); transition-duration: .05s;
+}
+.topbar-nav > a.on { background: var(--paper-2); }
+.topbar-nav > a:focus-visible, .topbar-nav > .btn:focus-visible, .topbar-nav .me > .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .topbar-nav > a, .topbar-nav > .btn, .topbar-nav .me > .btn { transition: none; }
+}
+@media (max-width: 520px) {
+  .topbar-nav { gap: 7px; }
+  .topbar-nav > a { padding: 5px 8px; }
+  .topbar-nav > .btn, .topbar-nav .me > .btn { padding: 5px 9px; }
+}
