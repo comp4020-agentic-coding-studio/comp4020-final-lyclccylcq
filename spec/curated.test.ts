@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AREAS, CURATED, CURATED_VERSION, DESTINATIONS } from "../src/curated.ts";
+import { AREAS, CURATED, CURATED_VERSION, DESTINATIONS, FOOD_STYLE_OF, FOOD_STYLES } from "../src/curated.ts";
 import { haversineKm } from "../src/geo.ts";
 
 // The curated library is written by hand; these checks keep it honest: real
@@ -44,6 +44,15 @@ describe("the curated itinerary library", () => {
         for (const s of stops) expect(haversineKm({ lat: it.ref[0], lng: it.ref[1] }, s), `${it.slug}: ${s.title}`).toBeLessThan(120);
         if (it.days > 1 && !OLDER.has(it.slug)) expect(stops.some((s) => s.kind === "food"), `${it.slug} day ${day} has a meal`).toBe(true);
       }
+    }
+  });
+
+  it("gives every food stop a hand-written food style (possibly none), and nothing else one", () => {
+    const foodQueries = new Set(CURATED.flatMap((it) => it.stops.filter((s) => s.kind === "food").map((s) => s.query)));
+    for (const q of foodQueries) expect(FOOD_STYLE_OF[q], q).toBeDefined();
+    for (const [q, styles] of Object.entries(FOOD_STYLE_OF)) {
+      expect(foodQueries.has(q), `${q} is not a food stop`).toBe(true);
+      for (const st of styles) expect(FOOD_STYLES).toContain(st);
     }
   });
 

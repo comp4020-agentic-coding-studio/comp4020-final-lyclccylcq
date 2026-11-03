@@ -53,7 +53,7 @@ also carry:
 | Publishing | `TRIP_PUBLISHED`, `TRIP_REPUBLISHED`, `TRIP_UNPUBLISHED`, `TRIP_FORKED`, `REVIEW_CREATED`, `REVIEW_UPDATED`, `REVIEW_DELETED` (rules in `docs/permissions.md`) |
 | Editing | `TRIP_DESTINATION_ADDED`, `TRIP_DESTINATION_ADD_REPLAYED` (retried add, nothing changed), `TRIP_DESTINATION_REMOVED`, `TRIP_DESTINATION_REORDERED`, `TRIP_DESTINATION_MODIFIED`, `TRIP_SCHEDULE_MODIFIED` (a time or length changed, or a copilot fix applied), `TRIP_START_CHANGED`, `TRIP_ROUTE_CALCULATED`, `TRIP_ROUTE_MODE_SELECTED` |
 | Real-time | `REALTIME_CONNECTED` / `REALTIME_DISCONNECTED` (one per tab stream), `COLLAB_COLLABORATOR_JOINED` / `_LEFT` (a person's first tab opened / last tab closed on a trip), `COLLAB_UPDATE_BROADCAST`, `REALTIME_CONNECTION_FAILED` |
-| Other | `COPILOT_ASKED`, `CALL_INVITED`, `CALL_ACCEPTED`, `CALL_ENDED` |
+| Other | `TRIP_DISCOVERY_SEARCHED` (homepage trip discovery; the wishes themselves aren't logged), `COPILOT_ASKED`, `CALL_INVITED`, `CALL_ACCEPTED`, `CALL_ENDED` |
 | Refusals and errors | `UNAUTHORIZED_MODIFICATION_ATTEMPT` (a write refused with 401/403, or by a non-member), `ACCESS_DENIED` (the same for a read), `INVALID_TRIP_OPERATION` (400/409 and other refusals), `FEATURE_UNAVAILABLE` (503: no Google or AI key), `API_OPERATION_FAILED`, `UNHANDLED_ERROR`, `GOOGLE_API_FAILED`, `COPILOT_PROVIDER_ERROR`, `CALL_TURN_UNAVAILABLE` |
 | Server | `SERVER_STARTED` (which integrations are configured, never their values), `SERVER_STOPPING`, `CONFIG_WARNING` |
 

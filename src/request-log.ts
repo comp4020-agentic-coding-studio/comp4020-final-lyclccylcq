@@ -17,6 +17,7 @@ const ROUTES: [string, RegExp, Route][] = [
   ["POST", /^\/api\/trips$/, { event: "TRIP_CREATED", action: "create_trip", message: "User created a trip" }],
   ["POST", /^\/api\/itineraries\/pub-[0-9a-f-]{36}\/copy$/, { event: "TRIP_FORKED", action: "use_template", message: "User forked a published trip into a new private trip" }],
   ["POST", /^\/api\/itineraries\/[a-z0-9-]+\/copy$/, { event: "TRIP_CREATED", action: "copy_itinerary", message: "User created a trip from a curated itinerary" }],
+  ["POST", /^\/api\/itineraries\/match$/, { event: "TRIP_DISCOVERY_SEARCHED", action: "match_itineraries", message: "Visitor matched curated itineraries to their wishes" }],
   ["PUT", /^\/api\/itineraries\/pub-[0-9a-f-]{36}\/reviews$/, { event: "REVIEW_UPDATED", action: "review", message: "User changed their review of a published trip" }],
   ["DELETE", /^\/api\/itineraries\/pub-[0-9a-f-]{36}\/reviews\/[0-9a-f-]{36}$/, { event: "REVIEW_DELETED", action: "delete_review", message: "User deleted their review" }],
   ["GET", /^\/api\/trips\/[0-9a-f-]{36}$/, { event: "TRIP_OPENED", action: "open_trip", message: "User opened the trip" }],

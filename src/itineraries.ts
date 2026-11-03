@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { AREAS, CURATED, CURATED_VERSION, type Category, DESTINATIONS } from "./curated.ts";
+import { AREAS, CURATED, CURATED_VERSION, type Category, DESTINATIONS, FOOD_STYLE_OF, type FoodStyle } from "./curated.ts";
 import { transaction } from "./db.ts";
 import { bad, notFound } from "./errors.ts";
 import { haversineKm, type LatLng } from "./geo.ts";
@@ -46,6 +46,58 @@ export type TemplateStop = {
 };
 
 export type TemplateDetail = TemplateSummary & { timezone: string; stops: TemplateStop[] };
+
+// --- trip discovery ---
+
+// how far from the chosen destination an itinerary may be (as for "near you")
+const MATCH_RADIUS_KM = 150;
+// a wished-for place counts as in a plan only when one of its stops is this
+// close (or is the same Google place); the answer names that stop and the
+// distance, so a neighbouring sight is never passed off as the one asked for
+const SAME_PLACE_KM = 0.25;
+
+export type WantedPlace = LatLng & { placeId: string | null };
+export type MatchInput = { origin: LatLng | null; places: WantedPlace[]; food: FoodStyle[]; days: number | null };
+export type Match = {
+  // per wished-for place, by its index in the request: the stop that is it
+  places: { want: number; stop: string; day: number; km: number }[];
+  // the rest: how far the plan's nearest stop is
+  missing: { want: number; nearestKm: number }[];
+  // each asked-for food style the plan has, with the stops that have it
+  food: { style: FoodStyle; stops: string[] }[];
+  duration: { want: number; days: number; fit: "exact" | "shorter" | "longer" } | null;
+  // how many of the stated wishes it meets at all, and whether it meets all of them
+  met: number;
+  complete: boolean;
+  score: number;
+};
+
+function matchOne(stops: TemplateStop[], days: number, want: MatchInput): Match {
+  const places: Match["places"] = [];
+  const missing: Match["missing"] = [];
+  want.places.forEach((w, i) => {
+    let best: { s: TemplateStop; km: number } | null = null;
+    for (const s of stops) {
+      const km = w.placeId && s.placeId === w.placeId ? 0 : haversineKm(w, s);
+      if (!best || km < best.km) best = { s, km };
+    }
+    if (best && best.km <= SAME_PLACE_KM) places.push({ want: i, stop: best.s.title, day: best.s.day, km: Math.round(best.km * 1000) / 1000 });
+    else missing.push({ want: i, nearestKm: best ? Math.round(best.km * 10) / 10 : Infinity });
+  });
+  const food = want.food
+    .map((style) => ({ style, stops: [...new Set(stops.filter((s) => s.kind === "food" && s.placeQuery && FOOD_STYLE_OF[s.placeQuery]?.includes(style)).map((s) => s.title))] }))
+    .filter((f) => f.stops.length > 0);
+  // 4 stands for "4–5 days": anything shorter is a start, not the whole trip
+  const duration = want.days === null ? null : { want: want.days, days, fit: days === want.days ? ("exact" as const) : days < want.days ? ("shorter" as const) : ("longer" as const) };
+  const met = (places.length > 0 ? 1 : 0) + (food.length > 0 ? 1 : 0) + (duration?.fit === "exact" ? 1 : 0);
+  const complete = places.length === want.places.length && (want.food.length === 0 || food.length > 0) && (duration === null || duration.fit === "exact");
+  // places weigh most, then length, then food; a wished-for place that's
+  // missing still counts a little when the plan passes close to it
+  const coherence = missing.reduce((n, m) => n + Math.max(0, 1 - m.nearestKm / 5) * 0.5, 0);
+  const lengthScore = !duration ? 0 : duration.fit === "exact" ? 2 : Math.abs(days - duration.want) === 1 ? 1 : 0;
+  const score = places.length * 3 + lengthScore + food.length + coherence;
+  return { places, missing, food, duration, met, complete, score: Math.round(score * 100) / 100 };
+}
 
 const toMin = (hhmm: string): number => {
   const [h, m] = hhmm.split(":").map(Number);
@@ -190,6 +242,46 @@ export function createItineraryStore(db: DatabaseSync, now = () => Date.now()) {
         const mine = all.filter((s) => s.destinationId === d.id);
         return { ...d, itineraries: mine.length, days: mine.length ? Math.max(...mine.map((s) => s.days)) : 0 };
       });
+    },
+
+    // The places curated itineraries visit around a destination (not their
+    // meals), one per search query, for the discovery panel to offer.
+    highlights(origin: LatLng): { title: string; lat: number; lng: number; plans: number }[] {
+      const seen = new Map<string, { title: string; lat: number; lng: number; plans: number }>();
+      for (const r of publicRows()) {
+        if (r.source !== "curated") continue;
+        const stops = stopsOf(String(r.id));
+        if (Math.min(haversineKm(origin, { lat: Number(r.ref_lat), lng: Number(r.ref_lng) }), ...stops.map((s) => haversineKm(origin, s))) > MATCH_RADIUS_KM) continue;
+        for (const s of stops) {
+          if (s.kind === "food" || !s.placeQuery) continue;
+          const had = seen.get(s.placeQuery);
+          if (had) had.plans += 1;
+          else seen.set(s.placeQuery, { title: s.title, lat: s.lat, lng: s.lng, plans: 1 });
+        }
+      }
+      return [...seen.values()].sort((a, b) => b.plans - a.plans || a.title.localeCompare(b.title)).slice(0, 24);
+    },
+
+    // Trip discovery: retrieves the curated itineraries for a destination
+    // (a hard limit, by distance), then ranks them by the places, food and
+    // length the visitor asked for (soft). Everything reported is read from
+    // the itinerary's own stops; nothing is generated, and a plan that meets
+    // none of the stated wishes is left out rather than padded in.
+    match(want: MatchInput): { inArea: number; results: (TemplateSummary & { match: Match })[] } {
+      const inArea: { s: TemplateSummary; stops: TemplateStop[] }[] = [];
+      for (const r of publicRows()) {
+        if (r.source !== "curated") continue;
+        const stops = stopsOf(String(r.id));
+        const s = summary(r, stops);
+        if (want.origin && Math.min(haversineKm(want.origin, s.ref), ...stops.map((x) => haversineKm(want.origin as LatLng, x))) > MATCH_RADIUS_KM) continue;
+        inArea.push({ s, stops });
+      }
+      const asked = want.places.length > 0 || want.food.length > 0 || want.days !== null;
+      const results = inArea
+        .map(({ s, stops }) => ({ ...s, match: matchOne(stops, s.days, want) }))
+        .filter((t) => !asked || t.match.met > 0)
+        .sort((a, b) => b.match.score - a.match.score || Number(b.featured) - Number(a.featured) || a.title.localeCompare(b.title));
+      return { inArea: inArea.length, results };
     },
 
     // regions in display order, each with its countries, for the homepage filter

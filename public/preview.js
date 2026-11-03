@@ -1,3 +1,4 @@
+import { discoveryBack } from "/discover.js";
 import { createMap } from "/map.js";
 import { placeDialog } from "/places.js";
 import { coverImg, photoFor } from "/photos.js";
@@ -38,7 +39,7 @@ export async function renderPreview(app, id, ctx) {
   const panel = h(
     "section",
     { class: "preview-panel" },
-    h("a", { class: "back-link", href: "/#near", "data-link": true }, icon("back"), "Back to recommendations"),
+    h("a", { class: "back-link", href: discoveryBack(t.id) ?? "/#near", "data-link": true }, icon("back"), "Back to recommendations"),
     shared && photoFor(t.cover) && h("div", { class: "pv-cover has-photo" }, coverImg(photoFor(t.cover), { decorative: true })),
     !shared && h("p", { class: "it-tags" }, t.categories.map((c) => h("span", { class: "tag" }, CATEGORY_LABEL[c] ?? c))),
     h("h1", {}, t.title),

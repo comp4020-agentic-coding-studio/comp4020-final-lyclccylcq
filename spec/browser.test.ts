@@ -292,6 +292,71 @@ describe.skipIf(!chromePath)("homepage discovery in a real browser", () => {
   });
 });
 
+describe.skipIf(!chromePath)("homepage trip discovery", () => {
+  it("is optional, matches wishes to curated plans with honest reasons, and opens one as the traveller's own trip", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(390, 844, true);
+    await signUpIn(page, baseUrl, uniqueName("dx"));
+    await page.goto(new URL("/", baseUrl).href);
+    // closed until asked: the ready-made cards are there without it
+    await page.waitFor(`document.querySelector('#discover') && document.querySelectorAll('#itineraries .it-card:not(.skeleton)').length > 4`);
+    expect(await page.eval(`document.querySelector('#dx-body').hidden`)).toBe(true);
+    await page.eval(`document.querySelector('.dx-toggle').click()`);
+    await page.waitFor(`document.querySelector('#discover [data-city="Kyoto"]')`);
+    await page.eval(`document.querySelector('#discover [data-city="Kyoto"]').click()`);
+    // the places offered come from Wayline's Kyoto plans
+    await page.waitFor(`[...document.querySelectorAll('.dx-idea')].some(b => b.textContent.includes('Fushimi Inari'))`);
+    await page.eval(`[...document.querySelectorAll('.dx-idea')].find(b => b.textContent.includes('Fushimi Inari')).click()`);
+    await page.eval(`[...document.querySelectorAll('#discover .cat-chip')].find(b => b.textContent === '3 days').click()`);
+    await page.eval(`document.querySelector('.dx-go').click()`);
+    await page.waitFor(`document.querySelector('.dx-results .it-card .dx-why')`);
+    // a partial match says so, names the real stop, and says what doesn't fit
+    const why = await page.eval<string>(`document.querySelector('.dx-results .it-card .dx-why').textContent`);
+    expect(why).toMatch(/Partial match/);
+    expect(why).toMatch(/Includes Fushimi Inari Taisha \(day 1\)/);
+    expect(why).toMatch(/2 days, shorter than the 3 days/);
+    expect(why).not.toMatch(/%|confidence|score/i);
+    expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+
+    // preview, back to the same results, then copy into a private trip
+    await page.eval(`document.querySelector('.dx-results .it-card .btn-outline').click()`);
+    await page.waitFor(`location.pathname === '/itineraries/tpl-kyoto-shrines-gion' && document.querySelector('.back-link')`);
+    expect(await page.eval(`document.querySelector('.back-link').getAttribute('href')`)).toBe("/#discover");
+    await page.eval(`document.querySelector('.back-link').click()`);
+    await page.waitFor(`location.pathname === '/' && document.querySelector('.dx-results .it-card .dx-why')`);
+    await page.eval(`document.querySelector('.dx-results .it-card .btn-outline').click()`);
+    await page.waitFor(`document.querySelector('[data-pv="use"]')`);
+    await page.eval(`document.querySelector('[data-pv="use"]').click()`);
+    await page.waitFor(`document.querySelector('dialog[open] button[type=submit]')`);
+    await page.eval(`document.querySelector('dialog[open] button[type=submit]').click()`);
+    await page.waitFor(`/^\\/trips\\/[0-9a-f-]{36}/.test(location.pathname)`, 8000);
+    // the curated plan itself is unchanged
+    const tpl = await page.eval<any>(`fetch('/api/itineraries/tpl-kyoto-shrines-gion').then(r => r.json())`);
+    expect(tpl.stops.length).toBe(12);
+  }, 30_000);
+
+  it("says plainly when nothing fits, and offers to loosen the choices", async () => {
+    const page = await browser!.newPage();
+    await page.viewport(1920, 1080);
+    await page.goto(new URL("/", baseUrl).href);
+    await page.eval(`sessionStorage.clear()`);
+    await page.goto(new URL("/", baseUrl).href);
+    await page.waitFor(`document.querySelector('.dx-toggle')`);
+    await page.eval(`document.querySelector('.dx-toggle').click()`);
+    await page.waitFor(`document.querySelector('#discover [data-city="Canberra"]')`);
+    await page.eval(`document.querySelector('#discover [data-city="Canberra"]').click()`);
+    await page.eval(`[...document.querySelectorAll('#discover .cat-chip')].find(b => b.textContent === 'Seafood').click()`);
+    await page.eval(`[...document.querySelectorAll('#discover .cat-chip')].find(b => b.textContent === '4–5 days').click()`);
+    await page.eval(`document.querySelector('.dx-go').click()`);
+    await page.waitFor(`document.querySelector('.dx-empty')`);
+    expect(await page.eval(`document.querySelectorAll('.dx-results .it-card').length`)).toBe(0);
+    await page.eval(`[...document.querySelectorAll('.dx-empty button')].find(b => b.textContent === 'Any food').click()`);
+    await page.waitFor(`document.querySelector('.dx-empty') || document.querySelectorAll('.dx-results .it-card').length > 0`);
+    await page.eval(`[...document.querySelectorAll('.dx-empty button')].find(b => b.textContent === 'Any length')?.click()`);
+    await page.waitFor(`document.querySelectorAll('.dx-results .it-card').length === 4`);
+  }, 20_000);
+});
+
 describe.skipIf(!chromePath)("explore places on the homepage map", () => {
   it("shows places around the chosen location on the map, and opens one with Add to Trip", async () => {
     const page = await browser!.newPage();

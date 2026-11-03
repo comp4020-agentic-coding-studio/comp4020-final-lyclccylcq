@@ -1,3 +1,4 @@
+import { tripDiscovery } from "/discover.js";
 import { createExploreMap } from "/explore-map.js";
 import { journeyHero } from "/journey-hero.js";
 import { photoStream, streamItems } from "/media.js";
@@ -539,6 +540,9 @@ export function renderHome(app, ctx) {
     h("div", { class: "rx-filters" }, regionTabs, countryTabs),
     destGrid,
   );
+  // optional: narrows the same curated plans to what the visitor asks for
+  const discovery = tripDiscovery(ctx, { cities: () => D.destinations });
+  regions.insertBefore(discovery.el, regions.querySelector(".rx-filters"));
 
   const visibleDests = () => D.destinations.filter((d) => (S.area === AREA_ALL || d.area === S.area) && (!S.country || d.country === S.country));
 
@@ -604,6 +608,7 @@ export function renderHome(app, ctx) {
       renderRegions();
       renderStream();
       explore.refresh();
+      discovery.refresh();
     })
     .catch((err) => destGrid.replaceChildren(h("p", { class: "form-error" }, err.message)));
 
@@ -727,6 +732,7 @@ export function renderHome(app, ctx) {
     renderPlaceChip();
   });
   if (location.hash === "#explore") requestAnimationFrame(() => regions.scrollIntoView());
+  if (location.hash === "#discover") requestAnimationFrame(() => discovery.el.scrollIntoView());
   if (location.hash === "#explore-map") requestAnimationFrame(() => explore.el.scrollIntoView());
   // back from a preview: the list it came from (nearby when a place is chosen)
   if (location.hash === "#near") requestAnimationFrame(() => (near.hidden ? regions : near).scrollIntoView());
@@ -736,5 +742,6 @@ export function renderHome(app, ctx) {
     S.aborter?.abort();
     explore.destroy();
     hero.destroy();
+    discovery.destroy();
   };
 }

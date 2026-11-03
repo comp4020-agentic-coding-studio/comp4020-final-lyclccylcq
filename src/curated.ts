@@ -67,6 +67,88 @@ export const DESTINATIONS: Destination[] = [
   { id: "los-angeles", name: "Los Angeles", region: "California, United States", country: "United States", area: "North America", lat: 34.0522, lng: -118.2437, blurb: "Griffith views, museums and the coast." },
 ];
 
+// What kind of eating each food stop is, written by hand from what the place
+// is known for (a market street, a café strip, a fish market), keyed by the
+// stop's search query. Trip discovery on the homepage matches food
+// preferences against these and names the stops it matched; a stop with no
+// style ([]) is simply a meal stop. Dietary needs (vegetarian, halal, …) are
+// not here: a neighbourhood can't promise them, so discovery never claims to.
+export const FOOD_STYLES = ["local", "market", "street", "cafe", "seafood"] as const;
+export type FoodStyle = (typeof FOOD_STYLES)[number];
+
+export const FOOD_STYLE_OF: Record<string, FoodStyle[]> = {
+  "Kingston Foreshore, Kingston ACT": [],
+  "Lonsdale Street, Braddon ACT": ["cafe"],
+  "The Rocks, Sydney NSW": [],
+  "Coogee Beach, NSW": [],
+  "Dixon Street, Haymarket NSW": ["street"],
+  "Leura Mall, Leura NSW": ["cafe"],
+  "Ameyoko Shopping Street, Ueno": ["street", "market"],
+  "Omoide Yokocho, Shinjuku": ["street", "local"],
+  "Tsukiji Outer Market, Tokyo": ["market", "seafood", "local"],
+  "Komachi-dori, Kamakura": ["street"],
+  "Degraves Street, Melbourne": ["cafe"],
+  "Southbank Promenade, Melbourne": [],
+  "Little Bourke Street Chinatown, Melbourne": [],
+  "Queen Victoria Market, Melbourne": ["market", "street"],
+  "Brunswick Street, Fitzroy, Melbourne": ["cafe"],
+  "Acland Street, St Kilda": ["cafe"],
+  "Gojozaka, Higashiyama, Kyoto": [],
+  "Pontocho Alley, Kyoto": ["local"],
+  "Saga-Arashiyama, Kyoto": ["local"],
+  "Nishiki Market, Kyoto": ["market", "local"],
+  "Insadong-gil, Seoul": ["local", "cafe"],
+  "Gwangjang Market, Seoul": ["market", "street", "local"],
+  "Myeongdong, Seoul": ["street"],
+  "Ikseon-dong Hanok Street, Seoul": ["cafe"],
+  "Haeundae Market, Busan": ["market", "seafood"],
+  "Gwangalli Beach, Busan": ["seafood"],
+  "Jagalchi Fish Market, Busan": ["market", "seafood", "local"],
+  "Yuyuan Bazaar, Shanghai": ["street", "local"],
+  "East Nanjing Road, Shanghai": [],
+  "Xintiandi, Shanghai": ["cafe"],
+  "Lujiazui, Shanghai": [],
+  "Jingshan Front Street, Beijing": [],
+  "Nanluoguxiang, Beijing": ["street"],
+  "Mutianyu Village, Huairou, Beijing": [],
+  "Qianmen Street, Beijing": ["local"],
+  "Palais-Royal, Paris": [],
+  "Rue Mouffetard, Paris": ["market", "local"],
+  "Place du Tertre, Paris": ["cafe"],
+  "Rue Cler, Paris": ["market", "local"],
+  "Whitehall, London": [],
+  "Covent Garden, London": [],
+  "Borough Market, London": ["market", "street"],
+  "Shad Thames, London": [],
+  "Rione Monti, Rome": ["local"],
+  "Trastevere, Rome": ["local"],
+  "Prati, Rome": [],
+  "Campo de' Fiori, Rome": ["market", "local"],
+  "Gràcia, Barcelona": [],
+  "Eixample, Barcelona": [],
+  "Mercat de la Boqueria, Barcelona": ["market", "street"],
+  "El Born, Barcelona": ["local"],
+  "Barceloneta, Barcelona": ["seafood", "local"],
+  "Museumplein, Amsterdam": ["cafe"],
+  "De Pijp, Amsterdam": [],
+  "Jordaan, Amsterdam": ["cafe"],
+  "Reguliersgracht, Amsterdam": [],
+  "Upper East Side, Manhattan": [],
+  "Times Square, New York": [],
+  "Chelsea Market, New York": ["market"],
+  "DUMBO, Brooklyn": [],
+  "Ferry Building Marketplace, San Francisco": ["market"],
+  "Fisherman's Wharf, San Francisco": ["seafood", "street"],
+  "North Beach, San Francisco": ["cafe"],
+  "Chestnut Street, San Francisco": [],
+  "Chinatown, San Francisco": [],
+  "Los Feliz Village, Los Angeles": ["cafe"],
+  "Downtown Los Angeles": [],
+  "Grand Central Market, Los Angeles": ["market", "street"],
+  "Getty Center Restaurant": [],
+  "Third Street Promenade, Santa Monica": [],
+};
+
 const S = (title: string, kind: StopKind, start: string, minutes: number, lat: number, lng: number, query: string, extra: Partial<CuratedStop> = {}): CuratedStop => ({
   title, kind, start, minutes, lat, lng, query, ...extra,
 });

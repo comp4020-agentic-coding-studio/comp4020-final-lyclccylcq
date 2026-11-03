@@ -18,7 +18,8 @@ import {
   searchPlaces,
   type Waypoint,
 } from "./google.ts";
-import { type ItineraryStore, parseCategory } from "./itineraries.ts";
+import { FOOD_STYLES, type FoodStyle } from "./curated.ts";
+import { type ItineraryStore, type MatchInput, parseCategory } from "./itineraries.ts";
 import { clientIp, createLimiter } from "./ratelimit.ts";
 import { type Mode, MODES } from "./schedule.ts";
 import type { Publications } from "./publications.ts";
@@ -44,6 +45,36 @@ function waypointInput(v: unknown, field: string): Waypoint {
     if (!/^[A-Za-z0-9_-]{10,300}$/.test(w.placeId)) throw bad(`${field}: that isn't a Google place id.`);
     return { placeId: w.placeId };
   }
+  return parseLatLng(w.lat, w.lng);
+}
+
+// What the discovery panel sends: a destination (optional), up to eight
+// places, food styles, and a length in days (4 stands for "4–5 days").
+function matchInput(v: Record<string, unknown>): MatchInput {
+  const origin = v.origin === undefined || v.origin === null ? null : waypointLatLng(v.origin, "origin");
+  if (v.places !== undefined && !Array.isArray(v.places)) throw bad("places must be a list.");
+  const rawPlaces = (v.places ?? []) as unknown[];
+  if (rawPlaces.length > 8) throw bad("Choose at most eight places.");
+  const places = rawPlaces.map((x, i) => {
+    const at = waypointLatLng(x, `places[${i}]`);
+    const id = (x as Record<string, unknown>).placeId;
+    if (id !== undefined && id !== null && (typeof id !== "string" || !/^[A-Za-z0-9_:-]{3,300}$/.test(id))) throw bad(`places[${i}]: that isn't a place id.`);
+    return { ...at, placeId: typeof id === "string" ? id : null };
+  });
+  if (v.food !== undefined && !Array.isArray(v.food)) throw bad("food must be a list.");
+  const food = [...new Set((v.food ?? []) as unknown[])].map((f) => {
+    if (!FOOD_STYLES.includes(f as FoodStyle)) throw bad(`food must be some of: ${FOOD_STYLES.join(", ")}.`);
+    return f as FoodStyle;
+  });
+  const days = v.days === undefined || v.days === null ? null : Number(v.days);
+  if (days !== null && (!Number.isInteger(days) || days < 1 || days > 4)) throw bad("days must be 1, 2, 3 or 4.");
+  if (!origin && !places.length) throw bad("Choose a destination or at least one place.");
+  return { origin, places, food, days };
+}
+
+function waypointLatLng(v: unknown, field: string) {
+  if (!v || typeof v !== "object") throw bad(`${field} is required.`);
+  const w = v as Record<string, unknown>;
   return parseLatLng(w.lat, w.lng);
 }
 
@@ -107,6 +138,15 @@ export function createDiscovery(deps: { itineraries: ItineraryStore; trips: Trip
         limit: parseBounded(p.get("limit"), "limit", 1, 20, 12),
       });
       return ok({ origin: coarse(origin), radiusKm, itineraries: list });
+    }
+    // trip discovery: places the curated plans visit around a destination,
+    // and the plans ranked by what the visitor asked for. Wayline's own
+    // data and arithmetic only; no Google or model call.
+    if (method === "GET" && path === "/api/itineraries/highlights") {
+      return ok({ places: itineraries.highlights(parseLatLng(p.get("lat"), p.get("lng"))) });
+    }
+    if (method === "POST" && path === "/api/itineraries/match") {
+      return ok(itineraries.match(matchInput(await readBody())));
     }
     // trips travellers published: a separate list, never mixed into the curated ones
     if (method === "GET" && path === "/api/publications") {

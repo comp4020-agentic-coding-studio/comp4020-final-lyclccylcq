@@ -119,6 +119,75 @@ describe("itinerary recommendations", () => {
   });
 });
 
+// Trip discovery: retrieval, filtering and ranking of the curated plans, and
+// every reason it gives read from the plan's own stops. No Google, no model.
+describe("trip discovery (matching curated plans to wishes)", () => {
+  const KYOTO = { lat: 35.0116, lng: 135.7681 };
+  const FUSHIMI = { lat: 34.9671, lng: 135.7727 };
+  const ARASHIYAMA = { lat: 35.017, lng: 135.6713 };
+  const GINKAKUJI = { lat: 35.0270, lng: 135.7982 }; // in no curated plan
+  const match = (body: unknown) => nobody.send("POST", "/api/itineraries/match", body);
+
+  it("with only a destination, returns every curated plan there and nothing else", async () => {
+    const r = await match({ origin: { lat: -35.2809, lng: 149.13 } });
+    expect(r.status).toBe(200);
+    expect(r.data.inArea).toBe(4);
+    expect(r.data.results.map((t: any) => t.destination)).toEqual(["Canberra", "Canberra", "Canberra", "Canberra"]);
+    expect(r.data.results.every((t: any) => t.source === "curated")).toBe(true);
+  });
+
+  it("names the stops that are the places asked for, and says which ones a plan doesn't visit", async () => {
+    const r = await match({ origin: KYOTO, places: [FUSHIMI, ARASHIYAMA, GINKAKUJI] });
+    const [kyoto] = r.data.results;
+    expect(kyoto.id).toBe("tpl-kyoto-shrines-gion");
+    expect(kyoto.match.places.map((p: any) => [p.want, p.stop, p.day])).toEqual([[0, "Fushimi Inari Taisha", 1], [1, "Arashiyama Bamboo Grove", 2]]);
+    expect(kyoto.match.missing.map((m: any) => m.want)).toEqual([2]);
+    expect(kyoto.match.missing[0].nearestKm).toBeGreaterThan(0.25);
+    expect(kyoto.match.complete).toBe(false);
+    // every stop it names really is in the plan
+    const plan = (await nobody.get("/api/itineraries/tpl-kyoto-shrines-gion")).data;
+    for (const p of kyoto.match.places) expect(plan.stops.some((s: any) => s.title === p.stop && s.day === p.day)).toBe(true);
+  });
+
+  it("ranks plans that visit the chosen places above ones that don't", async () => {
+    const harbour = { lat: -33.8568, lng: 151.2153 }; // the Opera House
+    const r = await match({ origin: { lat: -33.8688, lng: 151.2093 }, places: [harbour] });
+    expect(r.data.results[0].id).toBe("tpl-sydney-harbour-highlights");
+    expect(r.data.results[0].match.complete).toBe(true);
+    // plans that meet none of the wishes are left out, not padded in
+    expect(r.data.results.every((t: any) => t.match.met > 0)).toBe(true);
+  });
+
+  it("matches food styles only from tagged food stops, and duration as a soft preference", async () => {
+    const r = await match({ origin: { lat: 35.1796, lng: 129.0756 }, food: ["seafood"], days: 1 });
+    const [busan] = r.data.results;
+    expect(busan.match.food).toEqual([{ style: "seafood", stops: ["Lunch in Haeundae", "Dinner in Gwangalli", "Lunch at Jagalchi Market"] }]);
+    expect(busan.match.duration).toEqual({ want: 1, days: 2, fit: "longer" });
+    expect(busan.match.complete).toBe(false);
+  });
+
+  it("returns an honest empty list when nothing fits, and nothing invented", async () => {
+    const far = await match({ origin: { lat: -1.2921, lng: 36.8219 } });
+    expect(far.data).toEqual({ inArea: 0, results: [] });
+    const none = await match({ origin: KYOTO, places: [GINKAKUJI], food: ["seafood"], days: 1 });
+    expect(none.data).toEqual({ inArea: 1, results: [] });
+    expect(JSON.stringify(none.data)).not.toMatch(/rating|popular|percent|confidence/i);
+  });
+
+  it("lists the places a destination's plans visit, without meals", async () => {
+    const r = await nobody.get(`/api/itineraries/highlights?lat=${KYOTO.lat}&lng=${KYOTO.lng}`);
+    const titles = r.data.places.map((p: any) => p.title);
+    expect(titles).toContain("Fushimi Inari Taisha");
+    expect(titles).not.toContain("Nishiki Market");
+  });
+
+  it("rejects bad input with a 400", async () => {
+    for (const body of [{}, { origin: { lat: 99, lng: 0 } }, { origin: KYOTO, food: ["pizza"] }, { origin: KYOTO, days: 9 }, { origin: KYOTO, places: "Fushimi" }, { origin: KYOTO, places: Array(9).fill(FUSHIMI) }]) {
+      expect((await match(body)).status, JSON.stringify(body)).toBe(400);
+    }
+  });
+});
+
 describe("copying an itinerary into a trip", () => {
   it("needs an account", async () => {
     expect((await nobody.send("POST", "/api/itineraries/tpl-tokyo-kamakura/copy", { startDate: "2026-12-05" })).status).toBe(401);

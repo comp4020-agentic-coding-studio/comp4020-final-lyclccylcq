@@ -100,6 +100,18 @@ contradict the README, stop and ask. Don't quietly change the product.
   are a separate list ("Shared by travellers", labelled with the author),
   never ranked among the curated ones; only they carry ratings, computed on
   the server from real reviews.
+- Trip discovery (November 2026, `public/discover.js`, `POST
+  /api/itineraries/match`): an optional, closed-by-default questionnaire at
+  the top of "Explore ready-made trips" (city, places, food, length). It
+  retrieves and ranks curated itineraries; it never generates or changes
+  one. The destination is a hard limit (150 km); places, food and length
+  rank. A wished-for place counts only when a stop is within 250 m (or the
+  same Google place), and the card names that stop; partial matches say
+  what's missing; plans meeting no wish are left out; no percentages or
+  scores are shown. Food styles come only from `FOOD_STYLE_OF` in
+  `src/curated.ts` (hand-written per food stop; no dietary claims). No
+  model call: the inputs are all structured. Opening a result is the
+  normal preview and copy flow.
 - Never write a Google place id by hand. Curated stops carry a search query
   and approximate coordinates; `discovery.ts` stores an id only when Google
   returns a match within 1.5 km, and the UI labels unmatched stops
