@@ -298,16 +298,21 @@ describe.skipIf(!chromePath)("homepage trip discovery", () => {
     await page.viewport(390, 844, true);
     await signUpIn(page, baseUrl, uniqueName("dx"));
     await page.goto(new URL("/", baseUrl).href);
-    // closed until asked: the ready-made cards are there without it
-    await page.waitFor(`document.querySelector('#discover') && document.querySelectorAll('#itineraries .it-card:not(.skeleton)').length > 4`);
-    expect(await page.eval(`document.querySelector('#dx-body').hidden`)).toBe(true);
-    await page.eval(`document.querySelector('.dx-toggle').click()`);
-    await page.waitFor(`document.querySelector('#discover [data-city="Kyoto"]')`);
-    await page.eval(`document.querySelector('#discover [data-city="Kyoto"]').click()`);
+    // optional: the ready-made cards are there without it, and only the
+    // destination is asked up front; the rest folds away until wanted
+    await page.waitFor(`document.querySelector('#discover [data-city="Kyoto"]') && document.querySelectorAll('#itineraries .it-card:not(.skeleton)').length > 4`);
+    expect(await page.eval(`document.querySelector('#dx-refine').hidden`)).toBe(true);
+    // the full city list is a search away, not a wall of buttons
+    expect(await page.eval<number>(`document.querySelectorAll('#discover [data-city]').length`)).toBeLessThanOrEqual(6);
+    await page.eval(`(() => { const i = document.querySelector('#dx-city'); i.focus(); i.value = 'bar'; i.dispatchEvent(new Event('input')); })()`);
+    await page.waitFor(`document.querySelector('#dx-city-list li[role=option]')?.textContent.includes('Barcelona')`);
+    await page.eval(`(() => { const i = document.querySelector('#dx-city'); i.value = 'kyo'; i.dispatchEvent(new Event('input')); i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
+    await page.waitFor(`document.querySelector('#dx-city').value === 'Kyoto' && document.querySelector('#discover [data-city="Kyoto"]').getAttribute('aria-pressed') === 'true'`);
+    await page.eval(`document.querySelector('.dx-refine-toggle').click()`);
     // the places offered come from Wayline's Kyoto plans
     await page.waitFor(`[...document.querySelectorAll('.dx-idea')].some(b => b.textContent.includes('Fushimi Inari'))`);
     await page.eval(`[...document.querySelectorAll('.dx-idea')].find(b => b.textContent.includes('Fushimi Inari')).click()`);
-    await page.eval(`[...document.querySelectorAll('#discover .cat-chip')].find(b => b.textContent === '3 days').click()`);
+    await page.eval(`[...document.querySelectorAll('#discover .dx-chip')].find(b => b.textContent === '3 days').click()`);
     await page.eval(`document.querySelector('.dx-go').click()`);
     await page.waitFor(`document.querySelector('.dx-results .it-card .dx-why')`);
     // a partial match says so, names the real stop, and says what doesn't fit
@@ -341,12 +346,14 @@ describe.skipIf(!chromePath)("homepage trip discovery", () => {
     await page.goto(new URL("/", baseUrl).href);
     await page.eval(`sessionStorage.clear()`);
     await page.goto(new URL("/", baseUrl).href);
-    await page.waitFor(`document.querySelector('.dx-toggle')`);
-    await page.eval(`document.querySelector('.dx-toggle').click()`);
-    await page.waitFor(`document.querySelector('#discover [data-city="Canberra"]')`);
-    await page.eval(`document.querySelector('#discover [data-city="Canberra"]').click()`);
-    await page.eval(`[...document.querySelectorAll('#discover .cat-chip')].find(b => b.textContent === 'Seafood').click()`);
-    await page.eval(`[...document.querySelectorAll('#discover .cat-chip')].find(b => b.textContent === '4–5 days').click()`);
+    // Canberra isn't one of the popular picks: found by search
+    await page.waitFor(`document.querySelector('#discover [data-city]')`);
+    await page.eval(`(() => { const i = document.querySelector('#dx-city'); i.focus(); i.value = 'Canberra'; i.dispatchEvent(new Event('input')); })()`);
+    await page.waitFor(`document.querySelector('#dx-city-list li[role=option]')`);
+    await page.eval(`document.querySelector('#dx-city-list li[role=option]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`);
+    await page.eval(`document.querySelector('.dx-refine-toggle').click()`);
+    await page.eval(`[...document.querySelectorAll('#discover .dx-chip')].find(b => b.textContent === 'Seafood').click()`);
+    await page.eval(`[...document.querySelectorAll('#discover .dx-chip')].find(b => b.textContent === '4–5 days').click()`);
     await page.eval(`document.querySelector('.dx-go').click()`);
     await page.waitFor(`document.querySelector('.dx-empty')`);
     expect(await page.eval(`document.querySelectorAll('.dx-results .it-card').length`)).toBe(0);

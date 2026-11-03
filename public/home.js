@@ -536,13 +536,15 @@ export function renderHome(app, ctx) {
   const regions = h(
     "section",
     { class: "home-section rx", id: "explore" },
-    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "03"), "Curated by Wayline"), h("h2", {}, "Explore ready-made trips"), h("p", { class: "section-sub" }, "Written by the Wayline team. Preview one, then copy it into your own trip."))),
+    h("div", { class: "section-head rx-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "03"), "Curated by Wayline"), h("h2", {}, "Explore ready-made trips"), h("p", { class: "section-sub" }, "Itineraries written by the Wayline team, city by city. Browse them all, or let us find the ones that fit you."))),
+    // the whole collection, as before: after the optional discovery panel
+    h("h3", { class: "rx-browse" }, "Or browse every city"),
     h("div", { class: "rx-filters" }, regionTabs, countryTabs),
     destGrid,
   );
   // optional: narrows the same curated plans to what the visitor asks for
   const discovery = tripDiscovery(ctx, { cities: () => D.destinations });
-  regions.insertBefore(discovery.el, regions.querySelector(".rx-filters"));
+  regions.insertBefore(discovery.el, regions.querySelector(".rx-browse"));
 
   const visibleDests = () => D.destinations.filter((d) => (S.area === AREA_ALL || d.area === S.area) && (!S.country || d.country === S.country));
 

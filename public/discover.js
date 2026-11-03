@@ -44,10 +44,13 @@ const session = {
 // the preview page's way back, when it was opened from these results
 export const discoveryBack = (id) => (session.get()?.opened === id ? "/#discover" : null);
 
+// a few well-covered cities to start from; every other one is a search away
+const POPULAR = ["Kyoto", "Paris", "Tokyo", "London", "Sydney", "New York"];
+
 export function tripDiscovery(ctx, { cities }) {
   const saved = session.get();
   const S = {
-    open: Boolean(saved?.asked),
+    refine: Boolean(saved?.places?.length || saved?.food?.length || saved?.days), // the optional preferences shown
     city: saved?.city ?? null, // { name, lat, lng }
     places: saved?.places ?? [], // { label, lat, lng, placeId }
     food: saved?.food ?? [],
@@ -57,81 +60,154 @@ export function tripDiscovery(ctx, { cities }) {
     timer: null,
     aborter: null,
     suggestions: [],
+    cityMatches: [],
+    cityActive: -1,
   };
 
-  const body = h("div", { class: "dx-body", id: "dx-body" });
   const results = h("div", { class: "dx-results", "aria-live": "polite" });
-  const toggle = h("button", { type: "button", class: "dx-toggle", "aria-expanded": "false", "aria-controls": "dx-body", onclick: () => setOpen(!S.open) });
+
+  // --- destination: a search over Wayline's own cities, and a few to start from ---
+  const cityInput = h("input", { type: "search", id: "dx-city", class: "dx-input", placeholder: "Search a city, e.g. Kyoto", autocomplete: "off", role: "combobox", "aria-expanded": "false", "aria-controls": "dx-city-list", "aria-autocomplete": "list", maxlength: 60 });
+  const cityList = h("ul", { id: "dx-city-list", class: "suggest dx-suggest", role: "listbox", hidden: true });
+  const cityField = h("div", { class: "dx-field dx-field-city" }, icon("pin"), cityInput, cityList);
+  const popular = h("div", { class: "dx-popular" });
+
+  // --- the optional preferences ---
+  const placeInput = h("input", { type: "search", id: "dx-place", class: "dx-input", placeholder: "Search a place, e.g. a temple or a market", autocomplete: "off", role: "combobox", "aria-expanded": "false", "aria-controls": "dx-place-list", "aria-autocomplete": "list", maxlength: 80 });
+  const placeList = h("ul", { id: "dx-place-list", class: "suggest dx-suggest", role: "listbox", hidden: true });
+  const chosen = h("ul", { class: "dx-picked", "aria-label": "Places you chose" });
+  const ideas = h("div", { class: "dx-ideas" });
+  const foodRow = h("div", { class: "dx-chips", role: "group", "aria-labelledby": "dx-food-h" });
+  const lengthRow = h("div", { class: "dx-chips", role: "group", "aria-labelledby": "dx-days-h" });
+  const refineBtn = h("button", { type: "button", class: "dx-refine-toggle", "aria-expanded": "false", "aria-controls": "dx-refine", onclick: () => { S.refine = !S.refine; render(); } });
+  const refine = h(
+    "div",
+    { class: "dx-refine", id: "dx-refine" },
+    h("div", { class: "dx-group" }, h("label", { class: "dx-label", for: "dx-place" }, "Places you\u2019d love to see"), h("div", { class: "dx-field" }, icon("search"), placeInput, placeList), chosen, ideas),
+    h(
+      "div",
+      { class: "dx-pair" },
+      h("div", { class: "dx-group" }, h("p", { class: "dx-label", id: "dx-days-h" }, "How long"), lengthRow),
+      h("div", { class: "dx-group" }, h("p", { class: "dx-label", id: "dx-food-h" }, "How you like to eat"), foodRow),
+    ),
+  );
+  const error = h("p", { class: "form-error", role: "alert", hidden: true });
+  const submit = h("button", { type: "submit", class: "btn btn-primary dx-go" }, "Find journeys");
+  const resetBtn = h("button", { type: "button", class: "linklike dx-reset", onclick: reset }, "Start over");
+
+  const form = h(
+    "form",
+    { class: "dx-form", onsubmit: (e) => { e.preventDefault(); find(); } },
+    h("div", { class: "dx-group" }, h("label", { class: "dx-label dx-label-main", for: "dx-city" }, "Where would you like to go?"), cityField, popular),
+    h("div", { class: "dx-more" }, refineBtn, refine),
+    h("div", { class: "dx-actions" }, submit, resetBtn, error),
+  );
+
   const el = h(
     "section",
     { class: "dx", id: "discover", "aria-labelledby": "dx-h" },
     h(
       "div",
-      { class: "dx-head" },
-      h("div", {}, h("h3", { id: "dx-h", class: "dx-title" }, "Find a journey that fits"), h("p", { class: "dx-lede" }, "Tell us a few places you’d love to visit, and we’ll find the ready-made plans that already go there.")),
-      toggle,
+      { class: "dx-panel" },
+      h(
+        "div",
+        { class: "dx-intro" },
+        h("p", { class: "dx-kicker" }, "Personal picks"),
+        h("h3", { id: "dx-h", class: "dx-title" }, "Find a journey that fits"),
+        h("p", { class: "dx-lede" }, "Start with a city. Add a few places, a length or the food you like, and we\u2019ll match the ready-made plans that already go there."),
+        h("p", { class: "dx-aside" }, "Matched from Wayline\u2019s own itineraries, never generated."),
+      ),
+      form,
     ),
-    body,
     results,
   );
 
-  // --- the questionnaire ---
-  const cityRow = h("div", { class: "dx-chips", role: "group", "aria-label": "Destination" });
-  const placeInput = h("input", { type: "search", id: "dx-place", class: "dx-input", placeholder: "Search a place, e.g. a temple or a market", autocomplete: "off", role: "combobox", "aria-expanded": "false", "aria-controls": "dx-place-list", "aria-autocomplete": "list", maxlength: 80 });
-  const placeList = h("ul", { id: "dx-place-list", class: "suggest dx-suggest", role: "listbox", hidden: true });
-  const chosen = h("ul", { class: "dx-picked", "aria-label": "Places you chose" });
-  const ideas = h("div", { class: "dx-ideas" });
-  const foodRow = h("div", { class: "dx-chips", role: "group", "aria-label": "Food" });
-  const lengthRow = h("div", { class: "dx-chips", role: "group", "aria-label": "Trip length" });
-  const error = h("p", { class: "form-error", role: "alert", hidden: true });
-  const submit = h("button", { type: "submit", class: "btn btn-primary dx-go" }, "Find journeys");
-
-  const step = (n, title, hint, ...content) =>
-    h("fieldset", { class: "dx-step" }, h("legend", {}, h("span", { class: "dx-n", "aria-hidden": "true" }, n), title, hint && h("span", { class: "dx-hint" }, hint)), ...content);
-
-  const form = h(
-    "form",
-    { class: "dx-form", onsubmit: (e) => { e.preventDefault(); find(); } },
-    step("01", "Where to", null, cityRow),
-    step("02", "Places you’d love to see", "optional", h("div", { class: "dx-search" }, h("label", { for: "dx-place", class: "sr-only" }, "Search a place"), icon("search"), placeInput, placeList), chosen, ideas),
-    step("03", "How you like to eat", "optional", foodRow),
-    step("04", "How long", "optional", lengthRow),
-    h("div", { class: "dx-actions" }, submit, h("button", { type: "button", class: "linklike dx-reset", onclick: reset }, "Start over"), error),
-  );
-  body.append(form);
-
-  function setOpen(open) {
-    S.open = open;
-    body.hidden = !open;
-    toggle.setAttribute("aria-expanded", String(open));
-    toggle.replaceChildren(open ? "Close" : "Begin", h("span", { class: "dx-toggle-arrow", "aria-hidden": "true" }, open ? "↑" : "↓"));
-    if (!open) results.replaceChildren();
-    if (open) render();
-  }
-
-  const chip = (on, label, onclick, extra = {}) => h("button", { type: "button", class: `cat-chip${on ? " on" : ""}`, "aria-pressed": String(on), onclick, ...extra }, label);
+  const chip = (on, label, onclick, extra = {}) => h("button", { type: "button", class: `dx-chip${on ? " on" : ""}`, "aria-pressed": String(on), onclick, ...extra }, label);
 
   function render() {
-    cityRow.replaceChildren(...cities().map((c) => chip(S.city?.name === c.name, c.name, () => setCity(S.city?.name === c.name ? null : { name: c.name, lat: c.lat, lng: c.lng }), { "data-city": c.name })));
+    if (document.activeElement !== cityInput) cityInput.value = S.city?.name ?? "";
+    cityField.classList.toggle("is-set", Boolean(S.city));
+    const known = cities();
+    popular.replaceChildren(
+      ...(known.length
+        ? [h("span", { class: "dx-popular-label" }, "Popular"), ...POPULAR.map((n) => known.find((c) => c.name === n)).filter(Boolean).map((c) => chip(S.city?.name === c.name, c.name, () => setCity(S.city?.name === c.name ? null : { name: c.name, lat: c.lat, lng: c.lng }), { "data-city": c.name }))]
+        : []),
+    );
+    // the preferences: optional, folded away until asked for (open once any is set)
+    const set = S.places.length + S.food.length + (S.days !== null ? 1 : 0);
+    refine.hidden = !S.refine;
+    refineBtn.setAttribute("aria-expanded", String(S.refine));
+    fill(refineBtn, h("span", { class: "dx-refine-sign", "aria-hidden": "true" }, S.refine ? "\u2212" : "+"), h("span", { class: "dx-refine-text" }, "Refine with places, length and food"), set > 0 && h("span", { class: "dx-count" }, `${set} chosen`), !S.refine && h("span", { class: "dx-optional" }, "optional"));
+    resetBtn.hidden = !S.city && set === 0;
     chosen.replaceChildren(
       ...S.places.map((p, i) =>
-        h("li", { class: "dx-place" }, h("span", {}, p.label), h("button", { type: "button", class: "dx-remove", "aria-label": `Remove ${p.label}`, onclick: () => { S.places.splice(i, 1); render(); } }, "×")),
+        h("li", { class: "dx-place" }, h("span", {}, p.label), h("button", { type: "button", class: "dx-remove", "aria-label": `Remove ${p.label}`, onclick: () => { S.places.splice(i, 1); render(); } }, "\u00d7")),
       ),
     );
     const left = S.highlights.filter((x) => !S.places.some((p) => p.label === x.title));
     fill(
       ideas,
       S.city && left.length
-        ? h("div", {}, h("p", { class: "dx-ideas-title" }, `In Wayline’s ${S.city.name} plans`), h("div", { class: "dx-chips" }, left.slice(0, 12).map((x) => chip(false, `+ ${x.title}`, () => addPlace({ label: x.title, lat: x.lat, lng: x.lng, placeId: null }), { class: "cat-chip dx-idea" }))))
-        : "",
-      ctx.config.places !== "google" && h("p", { class: "dx-note" }, "Searching any place needs Google Maps on the server; the places above are always there."),
+        ? h("div", {}, h("p", { class: "dx-ideas-title" }, `From Wayline\u2019s ${S.city.name} plans`), h("div", { class: "dx-chips" }, left.slice(0, 8).map((x) => chip(false, x.title, () => addPlace({ label: x.title, lat: x.lat, lng: x.lng, placeId: null }), { class: "dx-chip dx-idea", "aria-pressed": null }))))
+        : !S.city && h("p", { class: "dx-note" }, "Choose a city to see the places its plans visit."),
+      ctx.config.places !== "google" && S.city && h("p", { class: "dx-note" }, "Searching any place needs Google Maps on the server; the places above are always there."),
     );
     placeInput.disabled = S.places.length >= MAX_PLACES;
-    foodRow.replaceChildren(
-      chip(S.food.length === 0, "No preference", () => { S.food = []; render(); }),
-      ...FOOD.map(([k, label]) => chip(S.food.includes(k), label, () => { S.food = S.food.includes(k) ? S.food.filter((f) => f !== k) : [...S.food, k]; render(); })),
+    // nothing chosen means any: no separate "any" button to keep in step
+    lengthRow.replaceChildren(...LENGTHS.map(([n, label]) => chip(S.days === n, label, () => { S.days = S.days === n ? null : n; render(); })));
+    foodRow.replaceChildren(...FOOD.map(([k, label]) => chip(S.food.includes(k), label, () => { S.food = S.food.includes(k) ? S.food.filter((f) => f !== k) : [...S.food, k]; render(); })));
+  }
+
+  // --- city search: Wayline's own destinations, no Google request ---
+  cityInput.addEventListener("input", () => {
+    const q = cityInput.value.trim().toLowerCase();
+    if (S.city && cityInput.value !== S.city.name) {
+      S.city = null;
+      S.highlights = [];
+      render();
+    }
+    // names that start with what's typed first, then any that contain it
+    const starts = (c) => (c.name.toLowerCase().startsWith(q) ? 0 : 1);
+    S.cityMatches = q ? cities().filter((c) => `${c.name} ${c.country}`.toLowerCase().includes(q)).sort((a, b) => starts(a) - starts(b)).slice(0, 6) : [];
+    S.cityActive = S.cityMatches.length ? 0 : -1;
+    renderCityList(q);
+  });
+  cityInput.addEventListener("keydown", (e) => {
+    if (cityList.hidden) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      S.cityActive = (S.cityActive + (e.key === "ArrowDown" ? 1 : -1) + S.cityMatches.length) % S.cityMatches.length;
+      renderCityList(cityInput.value.trim());
+    } else if (e.key === "Enter" && S.cityMatches.length) {
+      e.preventDefault();
+      pickCity(S.cityMatches[Math.max(0, S.cityActive)]);
+    } else if (e.key === "Escape") closeCityList();
+  });
+  cityInput.addEventListener("blur", () => setTimeout(() => { closeCityList(); render(); }, 150));
+
+  function renderCityList(q) {
+    if (!q) return closeCityList();
+    cityList.hidden = false;
+    cityInput.setAttribute("aria-expanded", "true");
+    cityList.replaceChildren(
+      ...(S.cityMatches.length
+        ? S.cityMatches.map((c, i) => h("li", { role: "option", id: `dx-city-${i}`, class: i === S.cityActive ? "on" : "", "aria-selected": String(i === S.cityActive), onmousedown: (e) => { e.preventDefault(); pickCity(c); } }, h("strong", {}, c.name), h("span", {}, c.country)))
+        : [h("li", { class: "suggest-empty" }, "Wayline has no ready-made plans there yet.")]),
     );
-    lengthRow.replaceChildren(chip(S.days === null, "Any length", () => { S.days = null; render(); }), ...LENGTHS.map(([n, label]) => chip(S.days === n, label, () => { S.days = n; render(); })));
+    if (S.cityActive >= 0) cityInput.setAttribute("aria-activedescendant", `dx-city-${S.cityActive}`);
+  }
+
+  function closeCityList() {
+    cityList.hidden = true;
+    cityInput.setAttribute("aria-expanded", "false");
+    cityInput.removeAttribute("aria-activedescendant");
+  }
+
+  function pickCity(c) {
+    closeCityList();
+    cityInput.value = c.name; // render() leaves a focused field alone
+    cityInput.blur();
+    setCity({ name: c.name, lat: c.lat, lng: c.lng });
   }
 
   async function setCity(c) {
@@ -253,7 +329,7 @@ export function tripDiscovery(ctx, { cities }) {
           ? `${full} of ${list.length} plans match everything you asked for; the others match part of it.`
           : `No plan for ${where} has everything you asked for. ${list.length === 1 ? "This one has" : `These ${list.length} have`} some of it.`;
     results.replaceChildren(
-      h("div", { class: "dx-results-head" }, h("p", { class: "dx-results-lead" }, lead), h("p", { class: "dx-results-note" }, "Matched from Wayline’s own itineraries. Nothing here is generated; open one to make it your trip.")),
+      h("div", { class: "dx-results-head" }, h("p", { class: "dx-results-lead" }, lead), h("p", { class: "dx-results-note" }, "Open one to preview it, then make it your own trip.")),
       h("div", { class: "it-grid dx-grid" }, list.map((t) => resultCard(t, asked, wishes))),
     );
   }
@@ -298,7 +374,7 @@ export function tripDiscovery(ctx, { cities }) {
       "div",
       { class: "dx-empty" },
       inArea === 0
-        ? [h("p", { class: "dx-empty-title" }, `Wayline doesn’t have ready-made plans for ${where} yet.`), h("p", { class: "muted" }, "Try one of the cities above, or start your own trip there and add the places yourself.")]
+        ? [h("p", { class: "dx-empty-title" }, `Wayline doesn’t have ready-made plans for ${where} yet.`), h("p", { class: "muted" }, "Try one of the popular cities above, or start your own trip there and add the places yourself.")]
         : [
             h("p", { class: "dx-empty-title" }, `None of the ${inArea} ${inArea === 1 ? "plan" : "plans"} for ${where} ${asked.places.length ? "go to those places" : "match that"}.`),
             h("p", { class: "muted" }, "Loosen one of your choices, or start your own trip and add them yourself."),
@@ -326,11 +402,11 @@ export function tripDiscovery(ctx, { cities }) {
 
   // the homepage's destination list arrives after this is built
   function refresh() {
-    if (S.open) render();
+    render();
     if (S.city && !S.highlights.length) setCity(S.city);
   }
 
-  setOpen(S.open);
+  render();
   if (saved?.asked && (S.city || S.places.length)) find({ scroll: false });
 
   return {

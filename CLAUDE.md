@@ -101,8 +101,10 @@ contradict the README, stop and ask. Don't quietly change the product.
   never ranked among the curated ones; only they carry ratings, computed on
   the server from real reviews.
 - Trip discovery (November 2026, `public/discover.js`, `POST
-  /api/itineraries/match`): an optional, closed-by-default questionnaire at
-  the top of "Explore ready-made trips" (city, places, food, length). It
+  /api/itineraries/match`): an optional panel at the top of "Explore
+  ready-made trips": a city search over Wayline's own destinations (a few
+  popular ones as quick picks, never the whole list as buttons), with
+  places, length and food folded under "Refine" (optional). It
   retrieves and ranks curated itineraries; it never generates or changes
   one. The destination is a hard limit (150 km); places, food and length
   rank. A wished-for place counts only when a stop is within 250 m (or the
