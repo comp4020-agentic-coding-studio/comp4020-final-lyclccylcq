@@ -6,7 +6,7 @@ import { coverImg, PHOTOS, photoFor } from "/photos.js";
 import { renderJourney } from "/journey-page.js";
 import { renderPreview } from "/preview.js";
 import { renderProfile } from "/profile.js";
-import { renderTripPrint } from "/trip-print.js";
+import { renderTripExport, renderTripPrint } from "/trip-print.js";
 import { api, ApiError, avatar, fill, fmtRange, h, icon, openDialog, relTime, toast } from "/ui.js";
 
 const app = document.getElementById("app");
@@ -37,6 +37,7 @@ async function route() {
   const tripPrint = path.match(/^\/trips\/([0-9a-f-]{36})\/print$/);
   const itinerary = path.match(/^\/itineraries\/([a-z0-9-]{3,80})$/);
   const journey = path.match(/^\/journeys\/(pub-[0-9a-f-]{36})$/);
+  const shared = path.match(/^\/export\/([A-Za-z0-9_-]{20,100})$/);
   window.scrollTo(0, 0);
 
   // open to everyone
@@ -44,6 +45,8 @@ async function route() {
   if (itinerary) return void (cleanup = await renderPreview(app, itinerary[1], ctx()));
   // a published journey: read-only, for anyone with its link
   if (journey) return void (cleanup = await renderJourney(app, journey[1], ctx()));
+  // a trip's read-only link: its members shared it; nothing here edits it
+  if (shared) return void (cleanup = await renderTripExport(app, shared[1]));
   if (path === "/privacy") return renderPrivacy();
   if (path === "/credits") return renderCredits();
   if (path === "/experiments/pixel-train") {
@@ -66,7 +69,7 @@ async function route() {
     return;
   }
   if (path === "/profile") return void (cleanup = await renderProfile(app, ctx()));
-  // a trip as a printable document, for its members; nothing is published
+  // a trip to export (PDF, image, read-only link), for its members; nothing is published
   if (tripPrint) {
     try {
       cleanup = await renderTripPrint(app, tripPrint[1], ctx());
@@ -173,6 +176,12 @@ function renderPrivacy() {
         "p",
         {},
         "When you ask to join a trip through an invite link, Wayline stores your request (your account, the trip, when, and whether the owner approved or rejected it); the owner sees your username and display name. If you publish a trip, anyone can see its title, description, destination, stops, times and places, and your display name as its author. Your notes, the people on the trip and invite links are never published, and unpublishing hides it again. Reviews you write show your display name, rating and comment to everyone who views that trip, until you delete them.",
+      ),
+      h("h2", {}, "Exporting a trip"),
+      h(
+        "p",
+        {},
+        "Anyone on a trip can export it as a PDF or an image, which stays on their own device, or make a read-only link. Whoever has that link can see the trip as it stands, including stops' notes and the members' display names (never usernames), and save it; they can't change anything or join the trip. It isn't listed anywhere. Anyone on the trip can switch it off, and making a new link switches off the old one. Exporting looks up the travel times between stops with Google Maps.",
       ),
       h("h2", {}, "Travel preferences and AI"),
       h(

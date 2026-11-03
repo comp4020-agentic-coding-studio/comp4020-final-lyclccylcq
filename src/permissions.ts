@@ -5,7 +5,8 @@ import { HttpError } from "./errors.ts";
 //
 //   owner         everything
 //   collaborator  view, add stops, and change, move or remove the stops they
-//                 added themselves; nothing that runs the trip
+//                 added themselves, and share the read-only export link;
+//                 nothing that runs the trip
 //   anyone else   nothing: the trip answers 404, as if it didn't exist
 export type Role = "owner" | "collaborator";
 
@@ -24,9 +25,10 @@ export type Action =
   | "manage_requests"
   | "remove_member"
   | "leave"
-  | "publish";
+  | "publish"
+  | "share_export";
 
-const COLLABORATOR: ReadonlySet<Action> = new Set(["view", "add_activity", "edit_own_activity", "calculate_route", "leave"]);
+const COLLABORATOR: ReadonlySet<Action> = new Set(["view", "add_activity", "edit_own_activity", "calculate_route", "leave", "share_export"]);
 
 export const can = (role: Role | null, action: Action): boolean =>
   role === "owner" || (role === "collaborator" && COLLABORATOR.has(action));

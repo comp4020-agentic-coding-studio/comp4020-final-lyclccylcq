@@ -196,6 +196,12 @@ contradict the README, stop and ask. Don't quietly change the product.
   Adding, removing, reordering or changing the start doesn't either: the
   affected legs show "Route not calculated", and "Calculate N missing routes"
   looks up only those.
+  Exporting is also an explicit request (November 2026, the student's call):
+  opening Export (`POST /routes/all`) looks up every leg that has two
+  routable places and no current route, through the same deduplicated path,
+  and opening a read-only link does the same as the member who made it, at
+  most once a minute per trip and only when a leg is missing. Legs already
+  known never call Google again.
 - Demo places (`demo:` ids) are labelled "Demo place" everywhere, have no
   opening hours, and can't be routed.
 
@@ -382,9 +388,13 @@ contradict the README, stop and ask. Don't quietly change the product.
   edit rights, and its link is separate from invite links: keep "Share"
   (invite to edit), "Publish" (a read-only journey) and printing distinct.
   Export (`/trips/:id/print`, `public/trip-print.js`) needs no publication:
-  a members-only printable copy of the working trip, notes included, read
-  through `GET /api/trips/:id` (non-members get its 404), with only routes
-  Google already returned; saving as PDF is the browser's print dialog.
+  for members, the working trip with notes and every route, as a PDF (the
+  browser's print dialog), a PNG (drawn on a canvas in the browser, no
+  library) or a read-only link (`/export/<token>`, `trip_export_links`, one
+  live per trip, token stored hashed, any member makes or revokes it). The
+  link shows the trip as it stands now, notes and display names included,
+  through `GET /api/exports/:token` only: never member ids, invites, an edit
+  or a way to join. Keep it separate from invite links and publications.
 - Every change to a trip is stored on the server as it's made (`mutate()`);
   there is no separate Save. The editor's indicator (`saves` in `ui.js`)
   shows Saving, Saved, Not saved (a write that didn't reach the server) and

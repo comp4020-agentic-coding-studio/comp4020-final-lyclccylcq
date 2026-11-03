@@ -43,6 +43,10 @@ const ROUTES: [string, RegExp, Route][] = [
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/activities\/[0-9a-f-]{36}\/move$/, { event: "TRIP_DESTINATION_REORDERED", action: "reorder_destination", message: "User moved a destination in the plan" }],
   ["PUT", /^\/api\/trips\/[0-9a-f-]{36}\/activities\/[0-9a-f-]{36}\/place$/, { event: "TRIP_DESTINATION_MODIFIED", action: "change_place", message: "User pointed a stop at a different place" }],
   ["PUT", /^\/api\/trips\/[0-9a-f-]{36}\/start$/, { event: "TRIP_START_CHANGED", action: "set_start", message: "User set the trip's starting point" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/routes\/all$/, { event: "TRIP_ROUTES_CALCULATED", action: "calculate_all_routes", message: "Member exported the trip; every missing route was looked up" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/export-link$/, { event: "TRIP_EXPORT_LINK_CREATED", action: "create_export_link", message: "Member made a read-only link to the trip (any earlier one was revoked)" }],
+  ["DELETE", /^\/api\/trips\/[0-9a-f-]{36}\/export-link$/, { event: "TRIP_EXPORT_LINK_REVOKED", action: "revoke_export_link", message: "Member revoked the trip's read-only link" }],
+  ["GET", /^\/api\/exports\/[A-Za-z0-9_-]+$/, { event: "TRIP_EXPORT_VIEWED", action: "view_export", message: "Someone opened a trip's read-only link" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/routes$/, { event: "TRIP_ROUTE_CALCULATED", action: "calculate_route", message: "User calculated the route between two stops" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/segments\/[0-9a-f-]{36}\/mode$/, { event: "TRIP_ROUTE_MODE_SELECTED", action: "select_mode", message: "User chose a transport mode for a leg" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/proposals\/apply$/, { event: "TRIP_SCHEDULE_MODIFIED", action: "apply_proposal", message: "User applied a schedule fix" }],
@@ -91,7 +95,7 @@ function requestLine(method: string, path: string, status: number, started: numb
   const extra = notes();
   const durationMs = Math.round(performance.now() - started);
   const { event: _e, action: _a, message: _m, ...details } = extra;
-  const base = { tripId, activityId, publicationId, ...details, method, path: path.replace(/\/api\/invites\/[^/]+/, "/api/invites/[token]"), httpStatus: status, durationMs };
+  const base = { tripId, activityId, publicationId, ...details, method, path: path.replace(/\/api\/invites\/[^/]+/, "/api/invites/[token]").replace(/\/api\/exports\/[^/]+/, "/api/exports/[token]"), httpStatus: status, durationMs };
   if (status < 400) {
     // the same PUT creates a review (201) or edits the caller's own (200)
     if (route?.event === "REVIEW_UPDATED" && status === 201) {

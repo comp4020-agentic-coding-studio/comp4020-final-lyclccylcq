@@ -99,6 +99,16 @@ export type TripSnapshot = {
   days: Day[];
 };
 
+// The read-only export link's view of a trip (see viewExport).
+export type ExportView = Pick<TripSnapshot, "title" | "destination" | "startDate" | "endDate" | "timezone" | "updatedAt" | "cover"> & {
+  members: { displayName: string }[];
+  days: {
+    date: string;
+    activities: (Pick<Activity, "id" | "title" | "kind" | "startMin" | "durationMin" | "notes" | "role" | "meal"> & { place: { source: string } | null })[];
+    segments: (Pick<Segment, "fromId" | "toId" | "selectedMode" | "stale" | "options">)[];
+  }[];
+};
+
 type Row = Record<string, unknown>;
 
 export const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -658,6 +668,65 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       require(tripId, userId, "manage_invites");
       q("update trip_invite_links set revoked_at = ? where trip_id = ? and revoked_at is null").run(now(), tripId);
       onChange(tripId);
+    },
+
+    // The read-only export link (/export/<token>): the trip as it stands,
+    // for anyone with the address, never an edit. Any member may make or
+    // revoke it; making a new one revokes the old. The token is shown once,
+    // to whoever made it, and stored only as a hash.
+    exportLink(userId: string, tripId: string): { createdAt: number } | null {
+      require(tripId, userId, "view");
+      const r = q("select created_at from trip_export_links where trip_id = ? and revoked_at is null order by created_at desc limit 1").get(tripId);
+      return r ? { createdAt: Number(r.created_at) } : null;
+    },
+
+    createExportLink(userId: string, tripId: string): { token: string; createdAt: number } {
+      require(tripId, userId, "share_export");
+      const token = newToken();
+      const t = now();
+      transaction(db, () => {
+        q("update trip_export_links set revoked_at = ? where trip_id = ? and revoked_at is null").run(t, tripId);
+        q("insert into trip_export_links (id, trip_id, token_hash, created_by, created_at) values (?, ?, ?, ?, ?)").run(randomUUID(), tripId, sha256(token), userId, t);
+      });
+      return { token, createdAt: t };
+    },
+
+    revokeExportLink(userId: string, tripId: string): void {
+      require(tripId, userId, "share_export");
+      q("update trip_export_links set revoked_at = ? where trip_id = ? and revoked_at is null").run(now(), tripId);
+    },
+
+    // What the link shows: the trip as its members have it now, notes
+    // included (the members chose to share it), without anything that runs
+    // the trip (member ids, invites, requests, its publication). Unknown and
+    // revoked tokens look the same.
+    exportLinkFor(token: unknown): { tripId: string; createdBy: string | null } {
+      if (typeof token !== "string" || token.length < 20 || token.length > 100) throw notFound("This link isn't valid any more.");
+      const r = q("select trip_id, created_by from trip_export_links where token_hash = ? and revoked_at is null").get(sha256(token));
+      if (!r) throw notFound("This link isn't valid any more.");
+      // routes are looked up as the person who shared it, while they're still on the trip
+      const member = r.created_by !== null && roleOf(String(r.trip_id), String(r.created_by)) !== null;
+      return { tripId: String(r.trip_id), createdBy: member ? String(r.created_by) : null };
+    },
+
+    viewExport(token: unknown): ExportView {
+      const t = snapshot(store.exportLinkFor(token).tripId);
+      return {
+        title: t.title,
+        destination: t.destination,
+        startDate: t.startDate,
+        endDate: t.endDate,
+        timezone: t.timezone,
+        updatedAt: t.updatedAt,
+        cover: t.cover,
+        members: t.members.map((m) => ({ displayName: m.displayName })),
+        // what the page prints, and no more: no user ids, versions or analysis
+        days: t.days.map((d) => ({
+          date: d.date,
+          activities: d.activities.map((a) => ({ id: a.id, title: a.title, kind: a.kind, startMin: a.startMin, durationMin: a.durationMin, notes: a.notes, role: a.role, meal: a.meal, place: a.place && { source: a.place.source } })),
+          segments: d.segments.map((g) => ({ fromId: g.fromId, toId: g.toId, selectedMode: g.selectedMode, stale: g.stale, options: g.options.map(({ polyline: _p, ...o }) => o) })),
+        })),
+      };
     },
 
     // The owner's view of the current link: when it was made and expires. The

@@ -325,6 +325,18 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
       updated_by text references users(id) on delete set null,
       updated_at integer not null
     );
+    -- A read-only link to a trip as it stands (the export page), for people
+    -- outside it. One live link per trip; the token is stored only as a hash
+    -- and any member can make or revoke it. It never grants an edit.
+    create table if not exists trip_export_links (
+      id         text primary key,
+      trip_id    text not null references trips(id) on delete cascade,
+      token_hash text not null unique,
+      created_by text references users(id) on delete set null,
+      created_at integer not null,
+      revoked_at integer
+    );
+    create index if not exists trip_export_links_by_trip on trip_export_links(trip_id);
   `);
   // Legacy invite links (trips.invite_hash) never expired and joined people
   // without the owner's approval. They're switched off rather than carried

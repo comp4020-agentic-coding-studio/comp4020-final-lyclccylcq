@@ -87,6 +87,9 @@ const iceLimit = createLimiter(20, 60_000);
 const searchLimit = createLimiter(60, 60_000); // nickname searches per owner per minute
 const inviteLimit = createLimiter(30, 60_000);
 const availabilityLimit = createLimiter(60, 60_000); // per IP, before an account exists
+const exportViewLimit = createLimiter(60, 60_000); // read-only export links opened, per IP
+const exportRoutesLimit = createLimiter(6, 60_000); // "calculate every route" per person per minute
+const exportLinkRoutesLimit = createLimiter(1, 60_000); // route top-ups from a read-only link, per trip per minute
 const port = Number(process.env.PORT ?? 8080);
 
 const TYPES: Record<string, string> = {
@@ -237,6 +240,26 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     if (leaving) hub.closeUser(leaving.id);
     auth.logout(readCookie(req.headers.cookie, COOKIE));
     return json(res, 200, { ok: true }, { "set-cookie": clearCookie(isSecure(req)) });
+  }
+
+  // a read-only export link: the trip as it stands, for anyone with the
+  // address, signed in or not. Read only; nothing here writes.
+  const ex = path.match(/^\/api\/exports\/([A-Za-z0-9_-]+)$/);
+  if (ex && method === "GET") {
+    exportViewLimit(clientIp(req));
+    // routes the plan is missing are looked up first, as the person who
+    // shared the link (it's their export), at most once a minute per trip;
+    // already-known legs cost nothing, so reopening never calls Google again
+    const { tripId, createdBy } = trips.exportLinkFor(ex[1]);
+    if (createdBy && googleConfigured() && missingLegs(trips.snapshot(tripId)).length) {
+      try {
+        exportLinkRoutesLimit(tripId);
+        await calculateAllRoutes({ id: createdBy }, tripId);
+      } catch {
+        // rate-limited or Google unavailable: show what's known, marked
+      }
+    }
+    return json(res, 200, { ...trips.viewExport(ex[1]), routing: googleConfigured() });
   }
 
   const maybeUser: User | null = auth.userForToken(readCookie(req.headers.cookie, COOKIE));
@@ -444,6 +467,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   }
 
   if (method === "POST" && rest === "/routes") return json(res, 200, await calculateRoute(user, tripId, await body(req)));
+  // Export: every leg that has two routable places and no current route is
+  // looked up, one after another, through the same deduplicated path as the
+  // buttons. Pressing Export is the request; nothing here runs on its own.
+  if (method === "POST" && rest === "/routes/all") {
+    exportRoutesLimit(user.id);
+    return json(res, 200, await calculateAllRoutes(user, tripId));
+  }
+  if (rest === "/export-link") {
+    if (method === "GET") return json(res, 200, { link: trips.exportLink(user.id, tripId) });
+    if (method === "POST") return json(res, 201, trips.createExportLink(user.id, tripId));
+    if (method === "DELETE") {
+      trips.revokeExportLink(user.id, tripId);
+      return json(res, 200, { ok: true });
+    }
+  }
 
   r = rest.match(/^\/segments\/([0-9a-f-]{36})\/mode$/);
   if (method === "POST" && r) return json(res, 200, trips.selectMode(user.id, tripId, r[1], (await body(req)).mode));
@@ -531,7 +569,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
   json(res, 404, { error: "No such endpoint." });
 }
 
-async function calculateRoute(user: User, tripId: string, input: Record<string, unknown>): Promise<TripSnapshot> {
+async function calculateRoute(user: Pick<User, "id">, tripId: string, input: Record<string, unknown>): Promise<TripSnapshot> {
   const reqInfo = trips.routeRequest(user.id, tripId, input.fromId, input.toId); // membership first
   if (!googleConfigured()) {
     throw new HttpError(503, "Route calculation needs Google Maps configured on the server (GOOGLE_MAPS_SERVER_KEY). No route was estimated.");
@@ -557,6 +595,37 @@ async function calculateRoute(user: User, tripId: string, input: Record<string, 
   })().finally(() => inflight.delete(key));
   inflight.set(key, job);
   return job;
+}
+
+type Place = TripSnapshot["days"][number]["activities"][number]["place"];
+const routable = (p: Place) => p?.source === "google" || (p?.source === "custom" && p.lat !== null && p.lng !== null);
+const legsOf = (snap: TripSnapshot) =>
+  snap.days.flatMap((d) => d.activities.slice(0, -1).map((a, i) => ({ a, b: d.activities[i + 1], seg: d.segments.find((s) => s.fromId === a.id && s.toId === d.activities[i + 1].id) })));
+// legs that could be routed and have no current route (none yet, or stale)
+const missingLegs = (snap: TripSnapshot) => legsOf(snap).filter(({ a, b, seg }) => routable(a.place) && routable(b.place) && (!seg || seg.stale));
+
+// Every missing or out-of-date route on the trip, for an export. Legs that
+// can't be routed (demo places, no place) are left as they are; one that
+// Google can't answer keeps its own message, and the rest still go on. The
+// answer says how many were looked up, and how many couldn't be.
+async function calculateAllRoutes(user: Pick<User, "id">, tripId: string): Promise<{ trip: TripSnapshot; calculated: number; failed: number; unroutable: number }> {
+  const snap = trips.view(user.id, tripId); // membership first
+  if (!googleConfigured()) {
+    throw new HttpError(503, "Route calculation needs Google Maps configured on the server (GOOGLE_MAPS_SERVER_KEY). No route was estimated.");
+  }
+  let calculated = 0;
+  let failed = 0;
+  const unroutable = legsOf(snap).filter(({ a, b }) => !routable(a.place) || !routable(b.place)).length;
+  for (const { a, b } of missingLegs(snap)) {
+    try {
+      await calculateRoute(user, tripId, { fromId: a.id, toId: b.id }); // a stale one has a new departure, so it's looked up again
+      calculated++;
+    } catch (err) {
+      failed++;
+      log.warn("TRIP_ROUTE_EXPORT_FAILED", { tripId, action: "calculate_route", status: "failure", errorCode: err instanceof HttpError ? ERROR_CODES[err.status] ?? "ERROR" : "UPSTREAM_ERROR", message: sanitize(err) });
+    }
+  }
+  return { trip: trips.snapshot(tripId), calculated, failed, unroutable };
 }
 
 // Centres the map on the destination: the first Google result for it, or,
@@ -590,7 +659,7 @@ async function refreshStalePlaces(tripId: string): Promise<void> {
   }
 }
 
-const APP_PAGES =/^\/(login|privacy|credits|profile|journeys\/pub-[0-9a-f-]{36}|trips|trips\/[0-9a-f-]{36}(?:\/print)?|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80}|experiments\/pixel-train)?$/;
+const APP_PAGES =/^\/(login|privacy|credits|profile|journeys\/pub-[0-9a-f-]{36}|trips|trips\/[0-9a-f-]{36}(?:\/print)?|export\/[A-Za-z0-9_-]{20,100}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80}|experiments\/pixel-train)?$/;
 
 const server = createServer((req, res) => withRequest(shortId("req"), () => handle(req, res)));
 

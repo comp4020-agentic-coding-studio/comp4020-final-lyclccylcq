@@ -294,6 +294,52 @@ describe("Google service layer (mocked Google)", () => {
     }
   });
 
+  it("exporting looks up every missing route once, and a read-only link shows them to anyone", async () => {
+    const c = await signUp(base);
+    const trip = await newTrip(c, { destination: "Paris", timezone: "Europe/Paris" });
+    const day = trip.days[0].id;
+    const place = (title: string, startMin: number, placeId: string, lat: number) =>
+      c.send("POST", `/api/trips/${trip.id}/activities`, { clientId: crypto.randomUUID(), dayId: day, title, kind: "attraction", startMin, durationMin: 60, place: { placeId, source: "google", lat, lng: 2.3 }, notes: title === "Louvre" ? "Use the Carrousel entrance." : "" });
+    await place("Louvre", 540, "ChIJ_louvre_id", 48.861);
+    await place("Orsay", 660, "ChIJ_orsay_id", 48.86);
+    await place("Eiffel Tower", 780, "ChIJ_eiffel_tower_id", 48.858);
+    const routeCalls = () => seen.filter((s) => s.path === "/directions/v2:computeRoutes").length;
+
+    // nobody pressed a route button: exporting fills both legs (three modes each)
+    let before = routeCalls();
+    const all = await c.send("POST", `/api/trips/${trip.id}/routes/all`, {});
+    expect(all.status).toBe(200);
+    expect(all.data).toMatchObject({ calculated: 2, failed: 0, unroutable: 0 });
+    expect(all.data.trip.days[0].segments).toHaveLength(2);
+    expect(routeCalls() - before).toBe(6);
+    // again: nothing is missing, so Google isn't asked
+    before = routeCalls();
+    expect((await c.send("POST", `/api/trips/${trip.id}/routes/all`, {})).data.calculated).toBe(0);
+    expect(routeCalls()).toBe(before);
+
+    // the read-only link: anyone, signed out, sees the plan, its notes and routes
+    const made = await c.send("POST", `/api/trips/${trip.id}/export-link`, {});
+    expect(made.status).toBe(201);
+    const view = await anon(base).get(`/api/exports/${made.data.token}`);
+    expect(view.status).toBe(200);
+    expect(view.data.days[0].activities.map((a: any) => a.title)).toEqual(["Louvre", "Orsay", "Eiffel Tower"]);
+    expect(view.data.days[0].activities[0].notes).toBe("Use the Carrousel entrance.");
+    expect(view.data.days[0].segments).toHaveLength(2);
+    expect(JSON.stringify(view.data)).not.toMatch(/createdBy|"version"|"id":"[0-9a-f-]{36}","displayName"|polyline/);
+
+    // a stop added after the link was made: opening the link fills its leg
+    await place("Trocadéro", 900, "ChIJ_trocadero_id", 48.862);
+    before = routeCalls();
+    const later = await anon(base).get(`/api/exports/${made.data.token}`);
+    expect(later.data.days[0].segments).toHaveLength(3);
+    expect(routeCalls() - before).toBe(3);
+
+    // through the link nothing changes, and once switched off it shows nothing
+    expect((await anon(base).send("POST", `/api/exports/${made.data.token}`, {})).status).toBeGreaterThanOrEqual(400);
+    await c.send("DELETE", `/api/trips/${trip.id}/export-link`, {});
+    expect((await anon(base).get(`/api/exports/${made.data.token}`)).status).toBe(404);
+  });
+
   it("never puts the server key in a response", async () => {
     const c = anon(base);
     const bodies = await Promise.all(

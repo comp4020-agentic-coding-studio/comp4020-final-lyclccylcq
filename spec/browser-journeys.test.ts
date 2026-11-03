@@ -129,13 +129,45 @@ describe.skipIf(!chromePath)("journeys: save, publish, share and the profile", (
     expect(await owner.eval(`document.querySelectorAll('[data-print="go"]').length`)).toBe(1);
     expect((await inPage(owner, "GET", `/api/trips/${trip.id}/publication`)).publication ?? null).toBeNull();
 
+    // an image: a PNG of the document, made in the browser
+    await owner.eval(`(() => { window.__png = null; const o = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { if (this.download) { fetch(this.href).then(r => r.blob()).then(b => window.__png = { type: b.type, size: b.size, name: this.download }); return; } return o.call(this); }; })()`);
+    await owner.eval(`document.querySelector('[data-export="image"]').click()`);
+    await owner.waitFor(`window.__png`, 10_000);
+    const png = await owner.eval<{ type: string; size: number; name: string }>(`window.__png`);
+    expect(png).toMatchObject({ type: "image/png", name: "print-me.png" });
+    expect(png.size).toBeGreaterThan(5000);
+
     // anyone else gets the same answer as a missing trip
     const other = await browser.newPage();
     await signUpIn(other, baseUrl, uniqueName("ey"));
     await other.goto(new URL(`/trips/${trip.id}/print`, baseUrl).href);
     await other.waitFor(`/doesn't exist, or you don't have access/.test(document.querySelector('main')?.textContent ?? '')`, 8000);
     expect(await other.eval<string>(`document.body.textContent`)).not.toContain("Opal card");
-  }, 30_000);
+    expect((await inPage(other, "POST", `/api/trips/${trip.id}/export-link`, {})).error).toBe("Trip not found.");
+
+    // a read-only link: made by a member, opened signed out, the same plan, nothing to change
+    await owner.eval(`document.querySelector('[data-export-link="make"]').click()`);
+    await owner.waitFor(`/\\/export\\//.test(document.querySelector('.tp-link input')?.value ?? '')`, 8000);
+    const link = await owner.eval<string>(`document.querySelector('.tp-link input').value`);
+    const reader = await browser.newPage();
+    await reader.viewport(390, 844, true);
+    await reader.goto(link);
+    await reader.waitFor(`document.querySelector('.tp-title')?.textContent === 'Print me'`, 8000);
+    expect(await reader.eval<string>(`document.querySelector('.tp-doc').textContent`)).toContain("Wharf 3, buy an Opal card first.");
+    expect(await reader.eval(`document.querySelectorAll('main input, main textarea, [contenteditable], [data-export-link], a[href^="/trips/"]').length`)).toBe(0);
+    expect(await reader.eval(`document.querySelectorAll('[data-print="go"], [data-export="image"]').length`)).toBe(2);
+    expect(await reader.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+    // the plan changes: the link shows it as it stands now
+    await inPage(owner, ...addStop(trip.id, trip.days[0].id, "Manly Corso", 720));
+    await reader.goto(link);
+    await reader.waitFor(`document.querySelector('.tp-doc')?.textContent.includes('Manly Corso')`, 8000);
+    // the trip itself stays closed to them, and switching the link off ends it
+    expect((await inPage(reader, "GET", `/api/trips/${trip.id}`)).error).toBeTruthy();
+    await owner.eval(`document.querySelector('[data-export-link="revoke"]').click()`);
+    await owner.waitFor(`!document.querySelector('[data-export-link="revoke"]')`, 8000);
+    await reader.goto(link);
+    await reader.waitFor(`/isn't available/.test(document.querySelector('main')?.textContent ?? '')`, 8000);
+  }, 40_000);
 
   it("shows the account as stored, edits it, and lists created, shared and published journeys", async () => {
     const page = await browser.newPage();

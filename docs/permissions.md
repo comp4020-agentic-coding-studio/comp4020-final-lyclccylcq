@@ -105,18 +105,35 @@ none can stay permanent; owners make a new, expiring link when they need one.
 - Google coordinates in a publication follow the same 30-day rule as trips;
   a custom pinned spot is the author's own choice and doesn't expire.
 
-## Exporting (print / PDF)
+## Exporting (PDF, image, read-only link)
 
-- `/trips/:id/print` is a printable copy of the working trip, for its
-  members, whether or not it's published. It's linked as "Export" in the
-  editor's bar and beside each trip on `/profile`.
-- It reads `GET /api/trips/:id`, so the usual roles apply: members (owner or
-  collaborator) see it, everyone else gets the same 404 as a missing trip.
-  Nothing new is stored, shared or logged; it isn't a link to give out.
-- Unlike a publication it includes notes and the members' names, because
-  only members can open it. Travel between stops appears only where a route
-  was already looked up (Google's duration and distance, marked when stale);
-  printing never calls Google.
+- `/trips/:id/print` is for a trip's members, whether or not it's
+  published. It's linked as "Export" in the editor's bar and beside each
+  trip on `/profile`. It reads `GET /api/trips/:id`, so non-members get the
+  same 404 as a missing trip.
+- Opening it looks up every route the plan is missing (`POST
+  /api/trips/:id/routes/all`, `calculate_route`, which collaborators have),
+  so the export has the travel between every pair of stops Google can
+  route. Legs with a demo place, or that Google can't answer, say so.
+- PDF is the browser's print dialog; the image is a PNG drawn in the
+  browser. Neither leaves the person's device through Wayline.
+- A read-only link (`share_export`: owner and collaborators) is a 256-bit
+  random token stored only as a hash in `trip_export_links`, one live link
+  per trip; making a new one revokes the old, and any member can revoke it.
+  It doesn't expire on its own.
+- Anyone with the link, signed in or not, reads `GET /api/exports/:token`:
+  the trip as it stands now, with notes, stop times, routes and the
+  members' display names. It never returns member or user ids, usernames,
+  versions, invite or publication state, and nothing under `/api/exports`
+  writes anything. It grants no access to `/api/trips/:id`, doesn't let
+  anyone join, and isn't listed anywhere. Unknown and revoked tokens are
+  the same 404. It's rate-limited per IP.
+- Opening a link looks up routes that are missing as the member who made
+  it (if they're still on the trip), at most once a minute per trip and
+  only when a leg is missing, so a visitor can't make Wayline call Google
+  over and over.
+- The token never appears in logs: request lines record
+  `/api/exports/[token]`.
 
 ## Profiles
 
