@@ -2038,7 +2038,9 @@ main.home, body:has(main.home) .topbar { --line: #c3bfb3; --line-2: #a29d90; }
 .it-index .it-body h3 { font-family: var(--sans); font-size: clamp(22px, 2vw, 28px); font-weight: 650; letter-spacing: -.02em; line-height: 1.2; }
 /* smaller names (cards, stops) stay in the grotesk, a touch heavier */
 .rx-body h3, .trip-card h3, .workspace .stop-card h3, .pv-stop h3, .ps-cap b { font-family: var(--sans); font-weight: 650; letter-spacing: -.01em; }
-.brand { font-family: var(--display); font-weight: 800; font-size: 24px; letter-spacing: .01em; text-transform: uppercase; }
+/* the wordmark keeps the original brand type (Inter Tight, as before the
+   redesign), apart from the signage and editorial faces of the pages */
+.brand { font-family: "Inter Tight", system-ui, -apple-system, "Segoe UI", sans-serif; font-weight: 700; font-size: 19px; letter-spacing: -.03em; gap: 8px; }
 
 /* sections: one hairline under each heading, nothing else; no rules
    between sections or down the sides (they never lined up with the
