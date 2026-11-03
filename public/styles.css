@@ -261,6 +261,10 @@ textarea { resize: vertical; }
   .invite-row .row-actions .btn { flex: 1; }
 }
 .toasts { position: fixed; z-index: 50; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; width: min(440px, calc(100vw - 32px)); pointer-events: none; }
+/* the call window sits along the bottom too: toasts (someone else's edit)
+   rise above it rather than covering its controls */
+body:has(.call-card:not([hidden])) .toasts { bottom: 96px; }
+body:has(.call-card:not([hidden]):not(.is-mini)) .toasts { bottom: auto; top: calc(var(--bar-h) + 16px); }
 .toast { pointer-events: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--ink); color: #fff; padding: 12px 16px; border-radius: 12px; box-shadow: var(--shadow-lg); font-weight: 600; animation: toast-in .2s ease-out; transition: opacity .4s, transform .4s; }
 .toast-error { background: var(--danger); }
 .toast-out { opacity: 0; transform: translateY(8px); }
