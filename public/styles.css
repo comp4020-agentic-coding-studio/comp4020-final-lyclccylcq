@@ -2690,3 +2690,10 @@ a.me-item:hover, button.me-item:hover, a.me-item:focus-visible, button.me-item:f
 :lang(zh-CN) .hx-poem-by { font-style: normal; font-size: .3em; }
 :lang(zh-CN) .hx-poem-us { margin-left: .2em; font: 400 .5em/1.1 var(--serif-art); letter-spacing: .08em; transform: none; }
 :lang(zh-CN) .hx .hx-verse, :lang(zh-CN) .hx .hx-verse em, :lang(zh-CN) .hx .hx-kicker, :lang(zh-CN) .hx .jh-explore { font-style: normal; }
+
+/* the share dialog: people you've travelled with, one click to invite */
+.companions-box { margin: 4px 0 12px; }
+.companions-box h4 { margin-bottom: 6px; }
+.companions { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.companion { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; }
+.companion .grow { min-width: 0; overflow-wrap: anywhere; }

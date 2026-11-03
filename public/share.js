@@ -203,6 +203,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
                     e.target.disabled = true;
                     await api(`${base}/invitations/${i.id}`, { method: "DELETE" }).catch((err) => toast(err.message, { kind: "error" }));
                     loadSent();
+                    loadCompanions();
                     if (nameInput.value.trim()) search();
                   },
                 },
@@ -227,17 +228,62 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
       results.replaceChildren();
       choose(null);
       searchNote.textContent = t("Invitation sent to {name}.", { name: who.displayName });
-      await loadSent();
+      await Promise.all([loadSent(), loadCompanions()]);
     } catch (err) {
       searchNote.textContent = err.message;
       if (err.status === 409) search();
       else inviteBtn.disabled = false;
     }
   });
+  // people you've travelled with on your other trips: one click invites
+  const companions = h("ul", { class: "companions", "aria-label": t("People you've travelled with") });
+  const companionsBox = h("div", { class: "companions-box", hidden: true }, h("h4", { class: "small" }, t("People you've travelled with")), companions);
+  const loadCompanions = async () => {
+    try {
+      const { people } = await api(`${base}/companions`);
+      if (!dialog.open) return;
+      companionsBox.hidden = people.length === 0;
+      companions.replaceChildren(
+        ...people.map((p) =>
+          h(
+            "li",
+            { class: "companion", "data-companion": p.id },
+            avatar(p, "sm"),
+            h("span", { class: "grow" }, h("strong", {}, p.displayName), h("br"), h("small", { class: "muted" }, `@${p.username}`)),
+            p.status === "available"
+              ? h(
+                  "button",
+                  {
+                    class: "btn btn-ghost btn-sm",
+                    type: "button",
+                    "data-share": "invite-companion",
+                    "aria-label": t("Invite {name}", { name: p.displayName }),
+                    onclick: async (e) => {
+                      e.currentTarget.disabled = true;
+                      try {
+                        await api(`${base}/invitations`, { method: "POST", body: { userId: p.id } });
+                        searchNote.textContent = t("Invitation sent to {name}.", { name: p.displayName });
+                      } catch (err) {
+                        searchNote.textContent = err.message;
+                      }
+                      await Promise.all([loadSent(), loadCompanions()]);
+                    },
+                  },
+                  t("Invite"),
+                )
+              : h("span", { class: `chip ${p.status === "invited" ? "chip-soft" : ""}` }, t(STATUS[p.status])),
+          ),
+        ),
+      );
+    } catch {
+      // a convenience: searching by nickname still works
+    }
+  };
   const byName = isOwner && h(
     "section",
     { class: "share-method", "aria-labelledby": "share-by-name" },
     h("h3", { id: "share-by-name" }, t("Invite by nickname")),
+    companionsBox,
     h("div", { class: "invitee-search" }, nameInput, inviteBtn),
     searchNote,
     results,
@@ -251,7 +297,10 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
     h("h4", { class: "small" }, t("Requests to join")),
     requests,
   );
-  if (isOwner) loadSent();
+  if (isOwner) {
+    loadSent();
+    queueMicrotask(loadCompanions); // once the dialog is open
+  }
   // someone accepted while this was open: their status and the member list
   // follow, a tick later so the editor has applied the snapshot first
   const following = new Set();
@@ -261,6 +310,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
     if (isOwner) {
       loadSent();
       loadRequests();
+      loadCompanions();
     }
   };
   const onSnap = () => {

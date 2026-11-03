@@ -431,6 +431,8 @@ async function signedInApi(req: IncomingMessage, res: ServerResponse, url: URL, 
     searchLimit(user.id);
     return json(res, 200, trips.searchInvitees(user.id, tripId, url.searchParams.get("q")));
   }
+  // people the owner has travelled with, to invite in one click
+  if (method === "GET" && rest === "/companions") return json(res, 200, trips.pastCompanions(user.id, tripId));
   if (rest === "/invitations") {
     if (method === "GET") return json(res, 200, { invitations: trips.invitationsFor(user.id, tripId) });
     if (method === "POST") {

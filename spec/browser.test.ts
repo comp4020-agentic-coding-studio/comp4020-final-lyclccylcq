@@ -807,6 +807,34 @@ describe.skipIf(!chromePath)("unique names and inviting by nickname", () => {
 });
 
 describe.skipIf(!chromePath)("nickname search responses", () => {
+  it("invites someone from an earlier trip in one click, without searching", { timeout: 30_000 }, async () => {
+    const owner = await browser!.newPage();
+    await owner.viewport(390, 844, true);
+    await signUpIn(owner, baseUrl, uniqueName("co"));
+    const friend = await browser!.newPage();
+    const friendName = uniqueName("cf");
+    await signUpIn(friend, baseUrl, friendName);
+    const friendId = (await inPage(friend, "GET", "/api/auth/me")).user.id;
+    // an earlier trip together (invited by name, accepted)
+    const newTrip = (title: string) => inPage(owner, "POST", "/api/trips", { title, destination: "Sydney", startDate: "2026-12-01", endDate: "2026-12-01", timezone: "Australia/Sydney" });
+    const earlier = await newTrip("Last summer");
+    const inv = await inPage(owner, "POST", `/api/trips/${earlier.id}/invitations`, { userId: friendId });
+    await inPage(friend, "POST", `/api/invitations/${inv.invitation.id}/accept`, {});
+
+    const trip = await newTrip("This winter");
+    await owner.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await owner.waitFor(`document.querySelector('.conn-live')`, 8000);
+    await owner.eval(`[...document.querySelectorAll('.trip-bar button')].find(b => b.textContent.includes('Share')).click()`);
+    await owner.waitFor(`document.querySelector('dialog[open] [data-companion="${friendId}"] [data-share="invite-companion"]')`, 8000);
+    expect(await owner.eval<string>(`document.querySelector('dialog[open] .invitee-input').value`)).toBe("");
+    await owner.eval(`document.querySelector('dialog[open] [data-companion="${friendId}"] [data-share="invite-companion"]').click()`);
+    // the row now says Invited, and the invitation reaches them
+    await owner.waitFor(`document.querySelector('dialog[open] [data-companion="${friendId}"]')?.textContent.includes('Invited')`, 8000);
+    const theirs = (await inPage(friend, "GET", "/api/invitations")).invitations;
+    expect(theirs.map((i: any) => i.trip.title)).toContain("This winter");
+    expect(await owner.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+  });
+
   it("discards an old response during the next debounce and after the share dialog closes", { timeout: 30_000 }, async () => {
     const page = await browser!.newPage();
     await page.viewport(390, 844, true);

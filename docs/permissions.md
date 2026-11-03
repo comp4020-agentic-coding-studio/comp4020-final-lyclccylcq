@@ -68,6 +68,16 @@ and the stop's author now.
 expired and let people in without approval. On startup they're cleared, so
 none can stay permanent; owners make a new, expiring link when they need one.
 
+## People you've travelled with
+
+- In the share dialog, the owner sees up to 8 people who are members of
+  their *other* trips (`GET /api/trips/:id/companions`, `manage_invites`:
+  owner only; collaborators get 403, outsiders the trip's 404).
+- It reveals only display names and usernames the owner can already see on
+  those trips, and nothing is stored: it's computed from `trip_members`.
+- Listing invites nobody. "Invite" sends the same `trip_invitations` row as
+  inviting by nickname, which the person accepts from My Trips.
+
 ## Publishing
 
 - `PUT /api/trips/:id/publication` (owner, with a description) copies the trip

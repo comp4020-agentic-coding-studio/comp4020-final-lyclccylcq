@@ -361,4 +361,35 @@ describe("inviting an existing account by nickname", () => {
     expect((await back.get("/api/invitations")).data.invitations).toEqual([]);
     expect((await back.send("POST", `/api/invitations/${list[0].id}/accept`, {})).status).toBe(404);
   });
+
+  it("offers the people you've travelled with, and nobody else, for one-click invites", async () => {
+    const owner = await signUp(baseUrl);
+    const friend = await signUp(baseUrl);
+    const theirFriend = await signUp(baseUrl);
+    const stranger = await signUp(baseUrl);
+    // an earlier trip with friend; friend's own trip with theirFriend
+    const earlier = await newTrip(owner);
+    await share(owner, friend, earlier.id);
+    const friends = await newTrip(friend);
+    await share(friend, theirFriend, friends.id);
+
+    const trip = await newTrip(owner);
+    const first = await owner.get(`/api/trips/${trip.id}/companions`);
+    expect(first.status).toBe(200);
+    expect(first.data.people.map((p: any) => p.id)).toEqual([friend.userId]); // not their friend, not a stranger
+    expect(first.data.people[0]).toMatchObject({ status: "available" });
+    expect(Object.keys(first.data.people[0]).sort()).toEqual(["displayName", "id", "status", "username"]);
+
+    // invited: the list says so, and nothing was invited by listing
+    expect((await friend.get("/api/invitations")).data.invitations).toHaveLength(0);
+    await owner.send("POST", `/api/trips/${trip.id}/invitations`, { userId: friend.userId });
+    expect((await owner.get(`/api/trips/${trip.id}/companions`)).data.people[0].status).toBe("invited");
+
+    // only the owner can ask; outsiders get the trip's 404
+    expect((await friend.get(`/api/trips/${trip.id}/companions`)).status).toBe(404);
+    expect((await stranger.get(`/api/trips/${trip.id}/companions`)).status).toBe(404);
+    const collab = await newTrip(friend);
+    await share(friend, owner, collab.id);
+    expect((await owner.get(`/api/trips/${collab.id}/companions`)).status).toBe(403);
+  });
 });

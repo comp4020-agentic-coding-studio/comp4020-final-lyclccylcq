@@ -432,6 +432,13 @@ contradict the README, stop and ask. Don't quietly change the product.
   adds the member and consumes the invitation in one `mutate()`. Accepted,
   declined and cancelled invitations never let anyone in again. Link and
   named invitations are independent: neither revokes the other.
+- The share dialog also lists "People you've travelled with" (November 2026,
+  `GET /companions`, owner-only): current members of the owner's other
+  trips, most recent first, at most 8, with the same status as a search
+  result. One click on Invite sends the same invitation as the search.
+  There are no friend requests, friend lists or social graph (README: no
+  social features); the list is derived from trip membership and stored
+  nowhere.
 - A signed-in person's own stream (`/api/me/events`) carries only a count of
   pending invitations, never trip content; trip streams stay members-only.
 - Sessions are HttpOnly SameSite=Lax cookies (Secure behind Fly's TLS), stored

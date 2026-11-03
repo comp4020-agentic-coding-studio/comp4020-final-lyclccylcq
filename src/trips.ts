@@ -881,6 +881,34 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       };
     },
 
+    // People the owner has travelled with: members of their other trips
+    // (trips they're on now), most recent shared trip first. Only names
+    // they can already see on those trips; nothing new is revealed and
+    // nothing is stored. Each carries the same status as a search result.
+    pastCompanions(userId: string, tripId: string) {
+      require(tripId, userId, "manage_invites");
+      const rows = q(
+        `select u.id, u.username, u.display_name, max(max(mine.joined_at, theirs.joined_at)) as together,
+                (select role from trip_members m where m.trip_id = ? and m.user_id = u.id) as role,
+                (select 1 from trip_invitations i where i.trip_id = ? and i.invitee_id = u.id and i.status = 'pending') as pending
+           from trip_members mine
+           join trip_members theirs on theirs.trip_id = mine.trip_id and theirs.user_id <> mine.user_id
+           join users u on u.id = theirs.user_id
+          where mine.user_id = ? and mine.trip_id <> ?
+          group by u.id
+          order by together desc, lower(u.display_name), u.id
+          limit 8`,
+      ).all(tripId, tripId, userId, tripId);
+      return {
+        people: rows.map((r) => ({
+          id: String(r.id),
+          username: String(r.username),
+          displayName: String(r.display_name),
+          status: r.role ? "member" : r.pending ? "invited" : "available",
+        })),
+      };
+    },
+
     // An invitation addressed to one account. It adds nobody: the invitee
     // accepts it from My Trips. One pending per person per trip (the partial
     // unique index decides under concurrent requests).
