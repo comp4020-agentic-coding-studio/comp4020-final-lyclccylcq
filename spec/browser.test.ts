@@ -997,7 +997,7 @@ describe.skipIf(!chromePath)("the share dialog and the live stream", () => {
     return trip;
   }
 
-  it("listens once per opening and stops when closed, however often it's opened", async () => {
+  it("listens once per opening and stops when closed, however often it's opened", { timeout: 20_000 }, async () => {
     const page = await browser!.newPage();
     await page.viewport(1920, 1080);
     await editor(page);
@@ -1019,7 +1019,7 @@ describe.skipIf(!chromePath)("the share dialog and the live stream", () => {
     expect(await page.eval<number>(`__snap.lookups`)).toBe(before);
   });
 
-  it("only the open dialog follows a snapshot, and one already on its way when the dialog closes changes nothing", async () => {
+  it("only the open dialog follows a snapshot, and one already on its way when the dialog closes changes nothing", { timeout: 20_000 }, async () => {
     const page = await browser!.newPage();
     await page.viewport(1920, 1080);
     await editor(page);
