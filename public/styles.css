@@ -2338,86 +2338,63 @@ main.home, body:has(main.home) .topbar { --line: #c3bfb3; --line-2: #a29d90; }
 .share-method [role=status]:empty { display: none; }
 
 /* =====================================================================
-   Ready-made trips and trip discovery (public/discover.js), in the hero's
-   journal voice: one serif heading for the section, then one discovery
-   panel on a slightly deeper paper. The destination comes first and is
-   always there; places, length and food fold away as optional. Space
-   and type do the grouping; borders only where something is a control.
+   Ready-made trips, and trip discovery on the map (public/explore-map.js,
+   public/discover.js), in the hero's journal voice. The map's panel holds
+   one tray: the places saved from the map, the optional length and food
+   folded away, and one action, Find journeys; the matching plans then
+   fill the "Journeys for …" section under the map, with why each is there.
    ===================================================================== */
 .rx-head { --serif-art: "Cormorant Garamond", "Iowan Old Style", Georgia, serif; }
 .home .rx .rx-head { border-bottom: 0; padding-bottom: 0; margin-bottom: 30px; }
 .home .rx .rx-head h2 { font: 500 clamp(38px, 3.6vw, 56px)/1.04 var(--serif-art); letter-spacing: -.01em; text-transform: none; color: var(--ink); }
 .home .rx .rx-head .section-sub { max-width: 46ch; text-wrap: pretty; margin-top: 12px; font: italic 400 clamp(17px, 1.2vw, 20px)/1.45 var(--serif-art); color: var(--ink-2); }
 
-.dx { --serif-art: "Cormorant Garamond", "Iowan Old Style", Georgia, serif; margin: 0 0 56px; }
-.dx-panel { display: grid; grid-template-columns: minmax(220px, 4fr) minmax(0, 7fr); gap: 32px clamp(32px, 5vw, 88px); padding: clamp(28px, 3.4vw, 48px); border-radius: 14px; background: color-mix(in srgb, var(--paper-2) 70%, var(--paper)); }
-.dx-intro { align-self: start; position: sticky; top: calc(var(--bar-h) + 28px); }
-.dx-kicker { margin-bottom: 14px; font: 500 11px/1 var(--mono, ui-monospace, monospace); letter-spacing: .12em; text-transform: uppercase; color: var(--coral-ink); }
-.dx-title { font: italic 500 clamp(28px, 2.3vw, 36px)/1.1 var(--serif-art); letter-spacing: 0; color: var(--ink); }
-.dx-lede { margin-top: 12px; max-width: 34ch; text-wrap: pretty; font: italic 400 clamp(16px, 1.1vw, 18px)/1.5 var(--serif-art); color: var(--ink-2); }
-.dx-aside { margin-top: 18px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+/* the tray, at the top of the map's panel */
+.xm-tray { --serif-art: "Cormorant Garamond", "Iowan Old Style", Georgia, serif; position: sticky; top: -20px; z-index: 2; display: flex; flex-direction: column; gap: 12px; margin: -20px -20px 14px; padding: 20px 20px 18px; background: color-mix(in srgb, var(--paper-2) 55%, var(--surface)); border-bottom: 1px solid var(--line); }
+.xm-tray-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.xm-tray-title { font: italic 500 24px/1.1 var(--serif-art); letter-spacing: 0; color: var(--ink); }
+.xm-tray-count { font: 500 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--coral-ink); }
+.xm-tray-hint { font-size: 13.5px; line-height: 1.5; color: var(--ink-2); text-wrap: pretty; }
+.xm-picked { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.xm-picked li { display: inline-flex; align-items: center; max-width: 100%; min-height: 32px; padding: 0 2px 0 4px; border-radius: 999px; background: var(--ink); color: var(--paper); }
+.xm-picked-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px 0 8px; border: 0; background: none; color: inherit; font: 500 13px/1 var(--sans); cursor: pointer; }
+.xm-picked-name::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--coral); vertical-align: 1px; }
+.xm-picked-x { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: none; color: inherit; cursor: pointer; }
+.xm-picked-x svg { width: 13px; height: 13px; }
+.xm-picked-x:hover { background: rgba(255, 255, 255, .16); }
+.xm-prefs-toggle { display: inline-flex; align-items: baseline; gap: 2px; width: fit-content; padding: 0; border: 0; background: none; color: var(--ink); font: 600 13.5px/1.3 var(--sans); cursor: pointer; }
+.xm-prefs-toggle > span:first-child { width: 14px; color: var(--coral-ink); font-weight: 500; }
+.xm-prefs-toggle:hover { text-decoration: underline; text-underline-offset: 3px; }
+.xm-prefs-opt { font: italic 400 15px/1 var(--serif-art); color: var(--muted); }
+.xm-prefs-count { font: 500 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--coral-ink); }
+.xm-prefs { display: flex; flex-direction: column; gap: 8px; }
+.xm-prefs[hidden] { display: none; }
+.xm-prefs .dx-label:not(:first-child) { margin-top: 4px; }
+.xm-tray-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding-top: 2px; }
+.xm-find { min-height: 42px; padding: 0 22px; }
+.xm-start { color: var(--muted); }
+.xm-start:hover { color: var(--ink); }
+.xm-pick { width: fit-content; background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.xm-pick:hover:not(:disabled) { background: #000; }
+.xm-pick.on { background: var(--surface); color: var(--ink); border-color: var(--ink); }
+.xm-pick.on svg { color: var(--coral-ink); }
+.place-pin.is-picked { color: var(--coral-ink); }
+.pad-x { padding: 0 10px; }
+/* a place in the picks: vermilion on the map */
+.pin-result.pin-picked { background: var(--coral); border-color: var(--surface); box-shadow: 0 0 0 2px var(--coral), 0 1px 4px rgba(0, 0, 0, .35); }
+.schematic-result.picked circle { fill: var(--coral); stroke: var(--surface); stroke-width: 3; }
 
-.dx-form { display: flex; flex-direction: column; gap: 22px; min-width: 0; max-width: 640px; }
-.dx-group { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.dx-label { font: 600 14px/1.3 var(--sans); color: var(--ink); }
-.dx-label-main { font: 500 clamp(19px, 1.4vw, 22px)/1.2 var(--serif-art); }
-
-.dx-field { position: relative; display: flex; align-items: center; gap: 10px; padding: 0 16px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); transition: border-color .15s, box-shadow .15s; }
-.dx-field:focus-within { border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent); }
-.dx-field > svg { width: 17px; height: 17px; flex: none; color: var(--muted); }
-.dx-field-city { min-height: 54px; }
-.dx-field-city .dx-input { font-size: 17px; }
-.dx-field-city.is-set > svg { color: var(--coral-ink); }
-.dx-field-city.is-set .dx-input { font-weight: 600; }
-.dx .dx-input { flex: 1; min-width: 0; border: 0; border-radius: 0; padding: 12px 0; background: none; box-shadow: none; font: inherit; color: var(--ink); }
-.dx .dx-input:focus { outline: none; box-shadow: none; }
-.dx-suggest { top: calc(100% + 6px); left: 0; right: 0; }
-
-.dx-popular { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; }
-.dx-popular-label { margin-right: 6px; font: italic 400 15px/1 var(--serif-art); color: var(--muted); }
-
-/* light chips: text on paper, a hairline only on hover, ink when chosen */
+.dx-label { font: 600 13px/1.3 var(--sans); color: var(--ink); }
 .dx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.dx-chip { display: inline-flex; align-items: center; min-height: 34px; padding: 0 13px; border: 1px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--surface) 62%, transparent); color: var(--ink-2); font: 500 13.5px/1 var(--sans); cursor: pointer; transition: background .12s, border-color .12s, color .12s; }
-.dx-chip:hover { border-color: var(--line-2); color: var(--ink); }
+.dx-chip { display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface); color: var(--ink-2); font: 500 13px/1 var(--sans); cursor: pointer; transition: background .12s, border-color .12s, color .12s; }
+.dx-chip:hover { border-color: var(--ink-2); color: var(--ink); }
 .dx-chip.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
-.dx-chip:focus-visible, .dx-refine-toggle:focus-visible, .dx-remove:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-.dx-popular .dx-chip { background: none; padding: 0 10px; }
-.dx-popular .dx-chip:hover { background: color-mix(in srgb, var(--surface) 62%, transparent); }
-.dx-popular .dx-chip.on { background: var(--ink); }
-.dx-idea::before { content: "+"; margin-right: 6px; color: var(--coral-ink); }
+.dx-chip:focus-visible, .xm-prefs-toggle:focus-visible, .xm-picked button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
-.dx-more { display: flex; flex-direction: column; gap: 20px; padding-top: 18px; border-top: 1px solid color-mix(in srgb, var(--line-2) 55%, transparent); }
-.dx-refine-toggle { display: inline-flex; align-items: baseline; gap: 10px; width: fit-content; padding: 0; border: 0; background: none; color: var(--ink); font: 600 14px/1.3 var(--sans); text-align: left; cursor: pointer; }
-.dx-refine-toggle:hover { text-decoration: underline; text-underline-offset: 3px; }
-.dx-refine-sign { width: 12px; color: var(--coral-ink); font-weight: 500; }
-.dx-optional { font: italic 400 15px/1 var(--serif-art); color: var(--muted); }
-.dx-count { font: 500 11px/1 var(--mono, ui-monospace, monospace); letter-spacing: .06em; text-transform: uppercase; color: var(--coral-ink); }
-.dx-refine { display: flex; flex-direction: column; gap: 22px; }
-.dx-refine[hidden] { display: none; }
-.dx-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px 32px; }
-.dx-pair .dx-chip { padding: 0 12px; }
-
-.dx-picked { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.dx-picked:empty { display: none; }
-.dx-place { display: inline-flex; align-items: center; gap: 2px; min-height: 34px; padding: 0 4px 0 13px; border-radius: 999px; background: var(--ink); color: var(--paper); font: 500 13.5px/1 var(--sans); }
-.dx-remove { width: 26px; height: 26px; border: 0; border-radius: 50%; background: none; color: inherit; font-size: 16px; line-height: 1; cursor: pointer; }
-.dx-remove:hover { background: rgba(255, 255, 255, .16); }
-.dx-ideas:empty { display: none; }
-.dx-ideas-title { margin-bottom: 8px; font: italic 400 15px/1.2 var(--serif-art); color: var(--muted); }
-.dx-note { margin-top: 6px; font-size: 13px; color: var(--muted); }
-
-.dx-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; padding-top: 4px; }
-.dx-go { min-height: 48px; padding: 0 30px; border-radius: 999px; font-size: 15px; font-weight: 600; }
-.dx-reset { font-size: 13px; color: var(--muted); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
-.dx-reset:hover { color: var(--ink); }
-.dx-actions .form-error { flex-basis: 100%; margin: 0; }
-
-.dx-results:empty { display: none; }
-.dx-results { padding: 36px 0 8px; }
-.dx-results-head { margin-bottom: 20px; }
-.dx-results-lead { font: italic 500 clamp(22px, 1.7vw, 27px)/1.3 var(--serif-art); color: var(--ink); }
-.dx-results-note { margin-top: 4px; font-size: 13px; color: var(--muted); }
+/* the matching plans, in the section under the map */
+.dx-results { --serif-art: "Cormorant Garamond", "Iowan Old Style", Georgia, serif; }
+.dx-results[hidden] { display: none; }
+.dx-results-lead { margin-bottom: 20px; font: italic 500 clamp(22px, 1.7vw, 27px)/1.3 var(--serif-art); color: var(--ink); }
 .dx-why { padding: 10px 0 2px; border-top: 1px dashed var(--line-2); font-size: 13px; line-height: 1.45; }
 .dx-fit { margin-bottom: 6px; font: 500 11px/1 var(--mono, ui-monospace, monospace); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .dx-fit-full { color: var(--coral-ink); }
@@ -2427,31 +2404,20 @@ main.home, body:has(main.home) .topbar { --line: #c3bfb3; --line-2: #a29d90; }
 .dx-yes::before { content: "\2713"; color: var(--ink); }
 .dx-no { color: var(--muted) !important; }
 .dx-no::before { content: "\2013"; color: var(--muted); }
-.dx-empty { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 24px 0 0; }
+.dx-empty { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .dx-empty-title { font: italic 500 23px/1.3 var(--serif-art); color: var(--ink); }
 .dx-empty-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.near .cat-chips[hidden], .near .it-grid[hidden] { display: none; }
 
-@media (prefers-reduced-motion: reduce) { .dx-chip, .dx-field { transition: none; } }
-/* tablet: the intro sits above the form, the form keeps its measure */
-@media (max-width: 1080px) {
-  .dx-panel { grid-template-columns: 1fr; gap: 26px; }
-  .dx-intro { position: static; }
-  .dx-lede { max-width: 52ch; }
-  .dx-aside { display: none; }
+@media (prefers-reduced-motion: reduce) { .dx-chip { transition: none; } }
+@media (max-width: 960px) {
+  .xm-tray { position: static; }
 }
-/* phones: one column, full-width action, preferences stacked */
 @media (max-width: 640px) {
-  .dx-panel { margin: 0 -4px; padding: 26px 20px 24px; border-radius: 12px; }
-  .dx-pair { grid-template-columns: 1fr; }
-  .dx-popular .dx-chip:nth-of-type(n+5) { display: none; }
-  .dx-refine-text { font-size: 0; }
-  .dx-refine-text::after { content: "Refine your picks"; font-size: 14px; }
-  .dx-refine-toggle { flex-wrap: wrap; }
-  .dx-go { flex: 1 1 100%; }
-  .dx-actions { justify-content: center; }
+  .xm-find { flex: 1 1 100%; }
+  .xm-tray-actions { justify-content: center; }
   .home .rx .rx-head h2 { font-size: 38px; }
 }
-.rx-browse { --serif-art: "Cormorant Garamond", "Iowan Old Style", Georgia, serif; margin: 0 0 14px; font: italic 500 clamp(22px, 1.7vw, 27px)/1.2 var(--serif-art); letter-spacing: 0; color: var(--ink); }
 
 /* =====================================================================
    The hero as a cover (November 2026): the words take a wider column and

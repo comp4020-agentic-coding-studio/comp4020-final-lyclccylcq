@@ -260,13 +260,14 @@ async function googleMap(el, config, handlers) {
         const dot = h("span", { class: `pin pin-temp${data.temp.start ? " pin-temp-start" : ""}`, "aria-hidden": "true" }, h("span", {}, data.temp.start ? "S" : "+"));
         markers.push(new AdvancedMarkerElement({ map, position: { lat: data.temp.lat, lng: data.temp.lng }, content: dot, title: data.temp.label ?? "Selected spot", zIndex: 200 }));
       }
+      const picked = new Set(data.picked ?? []);
       results.forEach((r) => {
-        const dot = h("button", { class: `pin pin-result${r.placeId === selectedPlaceId ? " pin-on" : ""}`, type: "button", "aria-label": r.name }, "");
+        const dot = h("button", { class: `pin pin-result${r.placeId === selectedPlaceId ? " pin-on" : ""}${picked.has(r.placeId) ? " pin-picked" : ""}`, type: "button", "aria-label": picked.has(r.placeId) ? `${r.name} (in your picks)` : r.name }, "");
         dot.addEventListener("click", (e) => {
           e.stopPropagation();
           handlers.onSelectResult(r.placeId);
         });
-        markers.push(new AdvancedMarkerElement({ map, position: { lat: r.lat, lng: r.lng }, content: dot, title: r.name, zIndex: 100 }));
+        markers.push(new AdvancedMarkerElement({ map, position: { lat: r.lat, lng: r.lng }, content: dot, title: r.name, zIndex: picked.has(r.placeId) ? 110 : 100 }));
       });
       if (stops.length > 1) {
         // the order of the stops, drawn straight: not a route
@@ -405,9 +406,10 @@ async function schematic(el, handlers, problem) {
       for (const r of data.routes ?? []) {
         node("polyline", { points: r.path.map((q) => at(q).join(",")).join(" "), class: "schematic-route", style: `stroke:${MODE_COLOUR[r.mode] ?? "#15171A"}` });
       }
+      const picked = new Set(data.picked ?? []);
       results.forEach((r) => {
         const [x, y] = at(r);
-        const g = node("g", { class: `schematic-result${r.placeId === selectedPlaceId ? " on" : ""}`, tabindex: 0, role: "button", "aria-label": r.name });
+        const g = node("g", { class: `schematic-result${r.placeId === selectedPlaceId ? " on" : ""}${picked.has(r.placeId) ? " picked" : ""}`, tabindex: 0, role: "button", "aria-label": picked.has(r.placeId) ? `${r.name} (in your picks)` : r.name });
         node("circle", { cx: x, cy: y, r: 8 }, g);
         const left = x > W * 0.62;
         const t = node("text", { x: left ? x - 13 : x + 13, y: y + 4.5, "text-anchor": left ? "end" : "start" }, g);

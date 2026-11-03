@@ -1,4 +1,4 @@
-import { tripDiscovery } from "/discover.js";
+import { createPicks, findJourneys } from "/discover.js";
 import { createExploreMap } from "/explore-map.js";
 import { journeyHero } from "/journey-hero.js";
 import { photoStream, streamItems } from "/media.js";
@@ -395,12 +395,17 @@ export function renderHome(app, ctx) {
   }
 
   // --- near you ---
+  // ranked by the chosen place; with none, the region browser below stands
+  // in. After "Find journeys" on the map, the same section shows the plans
+  // that match the visitor's picks, with why each is there.
   const nearTitle = h("h2", {});
   const nearSub = h("p", { class: "section-sub" });
   const chips = h("div", { class: "cat-chips", role: "group", "aria-label": "Filter by category" });
   const nearGrid = h("div", { class: "it-grid", "aria-live": "polite" });
-  // ranked by the chosen place; with none, the region browser below stands in
-  const near = h("section", { class: "home-section near", id: "near" }, h("div", { class: "section-head" }, h("div", {}, nearTitle, nearSub)), chips, nearGrid);
+  const matchBox = h("div", { class: "dx-results", "aria-live": "polite" });
+  const backToAll = h("button", { class: "linklike small", type: "button", onclick: () => { picks.setAsked(false); renderNearMode(); loadNear(); } }, "Show every plan here instead");
+  const near = h("section", { class: "home-section near", id: "near" }, h("div", { class: "section-head" }, h("div", {}, nearTitle, nearSub)), chips, nearGrid, matchBox);
+  const picks = createPicks();
 
   function renderChips() {
     chips.replaceChildren(
@@ -412,8 +417,46 @@ export function renderHome(app, ctx) {
 
   const skeletons = () => Array.from({ length: 3 }, () => h("div", { class: "it-card skeleton", "aria-hidden": "true" }, h("div", { class: "it-cover" }), h("div", { class: "it-body" }, h("span"), h("span"), h("span"))));
 
+  // matching: the near section's grid gives way to the ranked plans
+  const matching = () => picks.state.asked && Boolean(S.place);
+  function renderNearMode() {
+    const on = matching();
+    chips.hidden = on;
+    nearGrid.hidden = on;
+    matchBox.hidden = !on;
+    if (!on) matchBox.replaceChildren();
+  }
+
+  let findSeq = 0;
+  async function runFind({ scroll = true } = {}) {
+    if (!S.place) return;
+    const seq = ++findSeq;
+    picks.setAsked(true);
+    renderNearMode();
+    near.hidden = false;
+    const P = picks.state;
+    nearTitle.textContent = S.place.source === "location" ? "Journeys near you" : `Journeys for ${S.place.label}`;
+    nearSub.replaceChildren(
+      P.places.length || P.food.length || P.days !== null
+        ? `Wayline\u2019s ready-made plans, ranked by the places, length and food you picked on the map. `
+        : `Every ready-made plan ${S.place.source === "location" ? "near you" : `for ${S.place.label}`}. Save places on the map to rank them. `,
+      backToAll,
+    );
+    matchBox.replaceChildren(h("p", { class: "muted" }, "Looking through Wayline\u2019s plans\u2026"));
+    if (scroll) near.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    try {
+      const into = h("div", {});
+      await findJourneys(ctx, picks, S.place, into, { onRelax: () => runFind({ scroll: false }) });
+      if (seq === findSeq) matchBox.replaceChildren(...into.childNodes);
+    } catch (err) {
+      if (seq === findSeq) matchBox.replaceChildren(h("p", { class: "form-error" }, err.message));
+    }
+  }
+
   let loadSeq = 0;
   async function loadNear() {
+    if (matching()) return runFind({ scroll: false });
+    renderNearMode();
     const seq = ++loadSeq;
     const cat = S.category === "all" ? "" : `&category=${S.category}`;
     nearTitle.textContent = S.place ? (S.place.source === "location" ? "Near you" : `Ideas for ${S.place.label}`) : "Ideas to get you started";
@@ -496,7 +539,14 @@ export function renderHome(app, ctx) {
   let D = { destinations: [], areas: [], itineraries: [] };
 
   // --- the map, with the destination search above it ---
-  const explore = createExploreMap(ctx, { finder, actions: placeActions, ideas: quickPicks });
+  // one selection shared by the map and the recommendations
+  const explore = createExploreMap(ctx, {
+    finder,
+    ideas: quickPicks,
+    picks,
+    onFind: () => runFind(),
+    onStart: (origin) => ctx.createTrip(origin.source === "location" ? "" : origin.label),
+  });
 
   // before anything is chosen: a few of Wayline's cities, one click each
   // (the same as picking it in search; no Google request until the map moves)
@@ -510,22 +560,6 @@ export function renderHome(app, ctx) {
     );
   }
 
-  // what to do with a chosen place: plan a trip there, or see what's ready-made
-  function placeActions(origin) {
-    const name = origin.source === "location" ? null : origin.label;
-    return h(
-      "div",
-      { class: "xm-next" },
-      h("p", { class: "xm-next-title" }, name ? `Plan a trip to ${name}` : "Plan a trip near you"),
-      h(
-        "div",
-        { class: "xm-next-actions" },
-        h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => ctx.createTrip(name ?? "") }, icon("plus"), "Start a trip"),
-        h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => near.scrollIntoView({ behavior: "smooth" }) }, "Ready-made itineraries"),
-      ),
-    );
-  }
-
   // --- explore by region ---
   // Global browsing by region and country, separate from "near you" (which
   // only ever uses a place the visitor chose or a location they shared).
@@ -536,15 +570,10 @@ export function renderHome(app, ctx) {
   const regions = h(
     "section",
     { class: "home-section rx", id: "explore" },
-    h("div", { class: "section-head rx-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "03"), "Curated by Wayline"), h("h2", {}, "Explore ready-made trips"), h("p", { class: "section-sub" }, "Itineraries written by the Wayline team, city by city. Browse them all, or let us find the ones that fit you."))),
-    // the whole collection, as before: after the optional discovery panel
-    h("h3", { class: "rx-browse" }, "Or browse every city"),
+    h("div", { class: "section-head rx-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "03"), "Curated by Wayline"), h("h2", {}, "Explore ready-made trips"), h("p", { class: "section-sub" }, "Itineraries written by the Wayline team, city by city. To find the ones that fit you, save a few places on the map above."))),
     h("div", { class: "rx-filters" }, regionTabs, countryTabs),
     destGrid,
   );
-  // optional: narrows the same curated plans to what the visitor asks for
-  const discovery = tripDiscovery(ctx, { cities: () => D.destinations });
-  regions.insertBefore(discovery.el, regions.querySelector(".rx-browse"));
 
   const visibleDests = () => D.destinations.filter((d) => (S.area === AREA_ALL || d.area === S.area) && (!S.country || d.country === S.country));
 
@@ -610,7 +639,6 @@ export function renderHome(app, ctx) {
       renderRegions();
       renderStream();
       explore.refresh();
-      discovery.refresh();
     })
     .catch((err) => destGrid.replaceChildren(h("p", { class: "form-error" }, err.message)));
 
@@ -734,7 +762,7 @@ export function renderHome(app, ctx) {
     renderPlaceChip();
   });
   if (location.hash === "#explore") requestAnimationFrame(() => regions.scrollIntoView());
-  if (location.hash === "#discover") requestAnimationFrame(() => discovery.el.scrollIntoView());
+  if (location.hash === "#discover") requestAnimationFrame(() => explore.el.scrollIntoView());
   if (location.hash === "#explore-map") requestAnimationFrame(() => explore.el.scrollIntoView());
   // back from a preview: the list it came from (nearby when a place is chosen)
   if (location.hash === "#near") requestAnimationFrame(() => (near.hidden ? regions : near).scrollIntoView());
@@ -744,6 +772,5 @@ export function renderHome(app, ctx) {
     S.aborter?.abort();
     explore.destroy();
     hero.destroy();
-    discovery.destroy();
   };
 }

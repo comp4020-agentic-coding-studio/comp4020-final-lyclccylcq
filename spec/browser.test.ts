@@ -267,9 +267,10 @@ describe.skipIf(!chromePath)("homepage discovery in a real browser", () => {
     await page.waitFor(`/Tokyo/.test(document.querySelector('.chip-place')?.textContent ?? '') && ${cards}.length > 0`);
     const dest = await page.eval<string[]>(`[...document.querySelectorAll('#near .it-cover-dest')].map(e => e.textContent)`);
     expect(dest.every((d) => /Tokyo/.test(d))).toBe(true);
-    // the map below the search is now about the place, and offers a trip there
-    await page.waitFor(`/Plan a trip to Tokyo/.test(document.querySelector('#explore-map .xm-next')?.textContent ?? '') && /Tokyo/.test(document.querySelector('#explore-map .xm-note').textContent)`, 6000);
-    await page.eval(`[...document.querySelectorAll('#explore-map .xm-next button')].find(b => b.textContent.includes('Start a trip')).click()`);
+    // the map below the search is now about the place: its picks tray finds
+    // ready-made journeys there, or starts a trip there from scratch
+    await page.waitFor(`/for Tokyo/.test(document.querySelector('#explore-map .xm-tray')?.textContent ?? '') && /Tokyo/.test(document.querySelector('#explore-map .xm-note').textContent)`, 6000);
+    await page.eval(`document.querySelector('#explore-map .xm-tray .xm-start').click()`);
     await page.waitFor(`location.pathname === '/login'`); // signed out: sign in first, nothing created
   }, 20_000);
 
@@ -293,43 +294,63 @@ describe.skipIf(!chromePath)("homepage discovery in a real browser", () => {
 });
 
 describe.skipIf(!chromePath)("homepage trip discovery", () => {
-  it("is optional, matches wishes to curated plans with honest reasons, and opens one as the traveller's own trip", async () => {
+  // the picks tray and the map share one selection; a place picked on the
+  // map is what the match is asked about
+  const pickFromList = (name: string) => `(async () => {
+    [...document.querySelectorAll('#explore-map .place-row')].find(b => b.textContent.includes(${JSON.stringify(name)})).click();
+    await new Promise(r => setTimeout(r, 50));
+    document.querySelector('#explore-map .xm-pick').click();
+    document.querySelector('#explore-map .xm-panel .linklike').click();
+  })()`;
+
+  it("starts on the map: picks places there, matches them to curated plans with honest reasons, and opens one as the traveller's own trip", async () => {
     const page = await browser!.newPage();
     await page.viewport(390, 844, true);
     await signUpIn(page, baseUrl, uniqueName("dx"));
     await page.goto(new URL("/", baseUrl).href);
-    // optional: the ready-made cards are there without it, and only the
-    // destination is asked up front; the rest folds away until wanted
-    await page.waitFor(`document.querySelector('#discover [data-city="Kyoto"]') && document.querySelectorAll('#itineraries .it-card:not(.skeleton)').length > 4`);
-    expect(await page.eval(`document.querySelector('#dx-refine').hidden`)).toBe(true);
-    // the full city list is a search away, not a wall of buttons
-    expect(await page.eval<number>(`document.querySelectorAll('#discover [data-city]').length`)).toBeLessThanOrEqual(6);
-    await page.eval(`(() => { const i = document.querySelector('#dx-city'); i.focus(); i.value = 'bar'; i.dispatchEvent(new Event('input')); })()`);
-    await page.waitFor(`document.querySelector('#dx-city-list li[role=option]')?.textContent.includes('Barcelona')`);
-    await page.eval(`(() => { const i = document.querySelector('#dx-city'); i.value = 'kyo'; i.dispatchEvent(new Event('input')); i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); })()`);
-    await page.waitFor(`document.querySelector('#dx-city').value === 'Kyoto' && document.querySelector('#discover [data-city="Kyoto"]').getAttribute('aria-pressed') === 'true'`);
-    await page.eval(`document.querySelector('.dx-refine-toggle').click()`);
-    // the places offered come from Wayline's Kyoto plans
-    await page.waitFor(`[...document.querySelectorAll('.dx-idea')].some(b => b.textContent.includes('Fushimi Inari'))`);
-    await page.eval(`[...document.querySelectorAll('.dx-idea')].find(b => b.textContent.includes('Fushimi Inari')).click()`);
-    await page.eval(`[...document.querySelectorAll('#discover .dx-chip')].find(b => b.textContent === '3 days').click()`);
-    await page.eval(`document.querySelector('.dx-go').click()`);
-    await page.waitFor(`document.querySelector('.dx-results .it-card .dx-why')`);
+    await page.eval(`sessionStorage.clear(); localStorage.removeItem('wayline.destination')`);
+    await page.goto(new URL("/", baseUrl).href);
+    // optional: the ready-made cards are there without it, and there is no
+    // second destination field or questionnaire anywhere on the page
+    await page.waitFor(`document.querySelectorAll('#itineraries .it-card:not(.skeleton)').length > 4 && [...document.querySelectorAll('#explore-map .xm-ideas .cat-chip')].some(b => b.textContent === 'Kyoto')`);
+    expect(await page.eval(`document.querySelectorAll('#dx-city, #dx-place, .dx-panel, .dx-form').length`)).toBe(0);
+    expect(await page.eval(`document.querySelectorAll('input[type=search]').length`)).toBe(1);
+    // one destination, chosen once: the map moves there and the tray appears
+    await page.eval(`[...document.querySelectorAll('#explore-map .xm-ideas .cat-chip')].find(b => b.textContent === 'Kyoto').click()`);
+    await page.waitFor(`document.querySelector('#explore-map .xm-tray') && /Kyoto/.test(document.querySelector('.chip-place')?.textContent ?? '')`);
+    expect(await page.eval(`document.querySelector('#xm-prefs').hidden`)).toBe(true);
+    // the places Wayline's Kyoto plans visit, picked on the map (no Google needed)
+    await page.eval(`[...document.querySelectorAll('.xm-cats .cat-chip')].find(b => b.textContent === 'In Wayline plans').click()`);
+    await page.waitFor(`[...document.querySelectorAll('#explore-map .place-row')].some(b => b.textContent.includes('Fushimi Inari'))`);
+    await page.eval(pickFromList("Fushimi Inari"));
+    await page.eval(pickFromList("Kinkaku-ji"));
+    await page.waitFor(`document.querySelectorAll('.xm-picked li').length === 2`);
+    // picked places are marked on the map, and can be taken out again
+    expect(await page.eval<number>(`document.querySelectorAll('#explore-map .schematic-result.picked, #explore-map .pin-picked').length`)).toBe(2);
+    await page.eval(`[...document.querySelectorAll('.xm-picked-x')].find(b => b.getAttribute('aria-label').includes('Kinkaku')).click()`);
+    await page.waitFor(`document.querySelectorAll('.xm-picked li').length === 1 && document.querySelectorAll('#explore-map .schematic-result.picked, #explore-map .pin-picked').length === 1`);
+    // length is optional and folded away
+    await page.eval(`document.querySelector('.xm-prefs-toggle').click()`);
+    await page.eval(`[...document.querySelectorAll('#xm-prefs .dx-chip')].find(b => b.textContent === '3 days').click()`);
+    await page.eval(`document.querySelector('.xm-find').click()`);
+    // the matching plans fill the section under the map
+    await page.waitFor(`document.querySelector('#near .dx-results .it-card .dx-why') && !document.querySelector('#near').hidden`);
+    expect(await page.eval<string>(`document.querySelector('#near h2').textContent`)).toBe("Journeys for Kyoto");
     // a partial match says so, names the real stop, and says what doesn't fit
-    const why = await page.eval<string>(`document.querySelector('.dx-results .it-card .dx-why').textContent`);
+    const why = await page.eval<string>(`document.querySelector('#near .dx-results .it-card .dx-why').textContent`);
     expect(why).toMatch(/Partial match/);
     expect(why).toMatch(/Includes Fushimi Inari Taisha \(day 1\)/);
     expect(why).toMatch(/2 days, shorter than the 3 days/);
     expect(why).not.toMatch(/%|confidence|score/i);
     expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
 
-    // preview, back to the same results, then copy into a private trip
-    await page.eval(`document.querySelector('.dx-results .it-card .btn-outline').click()`);
+    // preview, back to the same results with the picks kept, then copy into a private trip
+    await page.eval(`document.querySelector('#near .dx-results .it-card .btn-outline').click()`);
     await page.waitFor(`location.pathname === '/itineraries/tpl-kyoto-shrines-gion' && document.querySelector('.back-link')`);
-    expect(await page.eval(`document.querySelector('.back-link').getAttribute('href')`)).toBe("/#discover");
+    expect(await page.eval(`document.querySelector('.back-link').getAttribute('href')`)).toBe("/#near");
     await page.eval(`document.querySelector('.back-link').click()`);
-    await page.waitFor(`location.pathname === '/' && document.querySelector('.dx-results .it-card .dx-why')`);
-    await page.eval(`document.querySelector('.dx-results .it-card .btn-outline').click()`);
+    await page.waitFor(`location.pathname === '/' && document.querySelector('#near .dx-results .it-card .dx-why') && document.querySelectorAll('.xm-picked li').length === 1`);
+    await page.eval(`document.querySelector('#near .dx-results .it-card .btn-outline').click()`);
     await page.waitFor(`document.querySelector('[data-pv="use"]')`);
     await page.eval(`document.querySelector('[data-pv="use"]').click()`);
     await page.waitFor(`document.querySelector('dialog[open] button[type=submit]')`);
@@ -340,28 +361,39 @@ describe.skipIf(!chromePath)("homepage trip discovery", () => {
     expect(tpl.stops.length).toBe(12);
   }, 30_000);
 
-  it("says plainly when nothing fits, and offers to loosen the choices", async () => {
+  it("says plainly when nothing fits, offers to loosen the choices, and drops picks when the destination moves far away", async () => {
     const page = await browser!.newPage();
     await page.viewport(1920, 1080);
     await page.goto(new URL("/", baseUrl).href);
-    await page.eval(`sessionStorage.clear()`);
+    await page.eval(`sessionStorage.clear(); localStorage.removeItem('wayline.destination')`);
     await page.goto(new URL("/", baseUrl).href);
-    // Canberra isn't one of the popular picks: found by search
-    await page.waitFor(`document.querySelector('#discover [data-city]')`);
-    await page.eval(`(() => { const i = document.querySelector('#dx-city'); i.focus(); i.value = 'Canberra'; i.dispatchEvent(new Event('input')); })()`);
-    await page.waitFor(`document.querySelector('#dx-city-list li[role=option]')`);
-    await page.eval(`document.querySelector('#dx-city-list li[role=option]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`);
-    await page.eval(`document.querySelector('.dx-refine-toggle').click()`);
-    await page.eval(`[...document.querySelectorAll('#discover .dx-chip')].find(b => b.textContent === 'Seafood').click()`);
-    await page.eval(`[...document.querySelectorAll('#discover .dx-chip')].find(b => b.textContent === '4–5 days').click()`);
-    await page.eval(`document.querySelector('.dx-go').click()`);
-    await page.waitFor(`document.querySelector('.dx-empty')`);
-    expect(await page.eval(`document.querySelectorAll('.dx-results .it-card').length`)).toBe(0);
+    await page.waitFor(`[...document.querySelectorAll('#explore-map .xm-ideas .cat-chip')].some(b => b.textContent === 'Canberra')`);
+    await page.eval(`[...document.querySelectorAll('#explore-map .xm-ideas .cat-chip')].find(b => b.textContent === 'Canberra').click()`);
+    await page.waitFor(`document.querySelector('#explore-map .xm-tray')`);
+    await page.eval(`document.querySelector('.xm-prefs-toggle').click()`);
+    await page.eval(`[...document.querySelectorAll('#xm-prefs .dx-chip')].find(b => b.textContent === 'Seafood').click()`);
+    await page.eval(`[...document.querySelectorAll('#xm-prefs .dx-chip')].find(b => b.textContent === '4–5 days').click()`);
+    await page.eval(`document.querySelector('.xm-find').click()`);
+    await page.waitFor(`document.querySelector('#near .dx-empty')`);
+    expect(await page.eval(`document.querySelectorAll('#near .dx-results .it-card').length`)).toBe(0);
     await page.eval(`[...document.querySelectorAll('.dx-empty button')].find(b => b.textContent === 'Any food').click()`);
-    await page.waitFor(`document.querySelector('.dx-empty') || document.querySelectorAll('.dx-results .it-card').length > 0`);
+    await page.waitFor(`document.querySelector('#near .dx-empty') || document.querySelectorAll('#near .dx-results .it-card').length > 0`);
     await page.eval(`[...document.querySelectorAll('.dx-empty button')].find(b => b.textContent === 'Any length')?.click()`);
-    await page.waitFor(`document.querySelectorAll('.dx-results .it-card').length === 4`);
-  }, 20_000);
+    await page.waitFor(`document.querySelectorAll('#near .dx-results .it-card').length === 4`);
+    // the tray follows: the loosened choices are cleared there too
+    expect(await page.eval(`document.querySelectorAll('#xm-prefs .dx-chip.on').length`)).toBe(0);
+    // back to every plan here, without the matching
+    await page.eval(`[...document.querySelectorAll('#near .linklike')].find(b => b.textContent.includes('every plan')).click()`);
+    await page.waitFor(`document.querySelector('#near .dx-results').hidden && document.querySelectorAll('#near .it-grid:not([hidden]) .it-card:not(.skeleton)').length > 0`);
+
+    // a pick made in Canberra doesn't follow the traveller to Kyoto
+    await page.eval(`[...document.querySelectorAll('.xm-cats .cat-chip')].find(b => b.textContent === 'In Wayline plans').click()`);
+    await page.waitFor(`document.querySelectorAll('#explore-map .place-row').length > 0`);
+    await page.eval(pickFromList(""));
+    await page.waitFor(`document.querySelectorAll('.xm-picked li').length === 1`);
+    await page.eval(`[...document.querySelectorAll('.rx-card')].find(c => c.textContent.includes('Kyoto')).querySelector('.rx-go').click()`);
+    await page.waitFor(`/Kyoto/.test(document.querySelector('.chip-place')?.textContent ?? '') && document.querySelector('.xm-tray') && document.querySelectorAll('.xm-picked li').length === 0`);
+  }, 30_000);
 });
 
 describe.skipIf(!chromePath)("explore places on the homepage map", () => {

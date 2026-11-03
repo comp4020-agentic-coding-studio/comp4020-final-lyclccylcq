@@ -1,3 +1,4 @@
+import { FOOD, LENGTHS, MAX_PICKS } from "/discover.js";
 import { createMap } from "/map.js";
 import { addToTripDialog, placeDialog } from "/places.js";
 import { api, decodePolyline, dur, h, icon, km } from "/ui.js";
@@ -5,10 +6,18 @@ import { api, decodePolyline, dur, h, icon, km } from "/ui.js";
 // "Explore places": an interactive map of real places around the discovery
 // location. Individual places, never itineraries. Every Google call happens
 // on a click (a category, a search, a place, a route), never on render.
-// The homepage puts its destination search above the map (`finder`) and
-// supplies what to do with a chosen destination (`actions`).
+// The homepage puts its destination search above the map (`finder`).
+//
+// It's also where trip discovery starts: places the visitor likes are saved
+// to one shared selection (`picks`, from discover.js), shown in red on the
+// map and in the panel's tray with the optional length and food, and "Find
+// journeys" (`onFind`) matches Wayline's ready-made plans to them. Picks
+// are interests, not a plan: no times, order or routes.
 
+// "wayline": the places Wayline's own plans visit around here (no Google
+// request; there even without a Maps key)
 const CATEGORIES = [
+  ["wayline", "In Wayline plans"],
   ["tourist_attraction", "Attractions"],
   ["museum", "Museums"],
   ["park", "Parks"],
@@ -23,7 +32,7 @@ const MODES = [
   ["DRIVE", "Drive", "drive"],
 ];
 
-export function createExploreMap(ctx, { finder = null, actions = null, ideas = null } = {}) {
+export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFind, onStart }) {
   const S = {
     origin: null, // { label, lat, lng, source }
     type: null,
@@ -36,6 +45,8 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
     loading: false,
     error: null,
     cache: new Map(), // this page only: the same category twice isn't re-fetched
+    prefs: false, // the tray's length and food, folded away until asked for
+    finding: false,
   };
   let map = null;
 
@@ -54,18 +65,22 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
   createMap(mapHost, {
     config: ctx.config,
     onSelectStop: () => {},
-    onSelectResult: (placeId) => select(S.results.find((r) => r.placeId === placeId)),
+    onSelectResult: (placeId) => select(shown().find((r) => r.placeId === placeId)),
   }).then((m) => {
     map = m;
     paintMap();
   });
+
+  // what's on the map: this list's places, plus any picks it doesn't show
+  const shown = () => [...S.results, ...picks.state.places.filter((p) => !S.results.some((r) => r.placeId === p.placeId)).map((p) => ({ ...p, name: p.label }))];
 
   function paintMap() {
     if (!map) return;
     const routes = S.route?.data?.status === "ok" && S.route.data.polyline ? [{ mode: S.route.mode, path: decodePolyline(S.route.data.polyline) }] : [];
     map.update({
       stops: S.origin?.source === "location" ? [{ id: "origin", title: "You are here", kind: "custom", lat: S.origin.lat, lng: S.origin.lng, selected: false }] : [],
-      results: S.results,
+      results: shown(),
+      picked: picks.state.places.map((p) => p.placeId),
       routes,
       center: S.origin ? { lat: S.origin.lat, lng: S.origin.lng } : null,
       fitKey: `${S.origin?.lat},${S.origin?.lng}|${S.type ?? S.query}`,
@@ -80,7 +95,7 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
     S.route = null;
     render();
     try {
-      const data = S.cache.get(key) ?? (await api(url));
+      const data = S.cache.get(key) ?? (url ? await api(url) : await waylinePlaces());
       S.cache.set(key, data);
       if (S.cache.size > 30) S.cache.delete(S.cache.keys().next().value);
       S.results = data.places;
@@ -98,7 +113,18 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
     S.type = type;
     S.query = "";
     const { lat, lng } = S.origin;
+    if (type === "wayline") return run(`${type}|${lat}|${lng}`, null);
     run(`${type}|${lat}|${lng}`, `/api/places/nearby?lat=${lat}&lng=${lng}&radius=8000&type=${type}`);
+  }
+
+  // the stops of Wayline's plans around here, as places to pick
+  async function waylinePlaces() {
+    const { lat, lng } = S.origin;
+    const { places } = await api(`/api/itineraries/highlights?lat=${lat}&lng=${lng}`);
+    return {
+      source: "wayline",
+      places: places.map((x) => ({ placeId: `wl:${x.lat.toFixed(5)},${x.lng.toFixed(5)}`, name: x.title, lat: x.lat, lng: x.lng, category: `In ${x.plans} Wayline ${x.plans === 1 ? "plan" : "plans"}`, source: "wayline" })),
+    };
   }
 
   function search(q) {
@@ -116,6 +142,7 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
     S.route = null;
     render();
     map?.focus(p);
+    if (p.source === "wayline") return; // a stop of Wayline's plans: no Google place to look up
     try {
       const d = await api(`/api/places/${encodeURIComponent(p.placeId)}`);
       if (S.selected?.placeId === p.placeId) S.details = d;
@@ -159,10 +186,10 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
       );
       return;
     }
-    if (S.selected) return side.replaceChildren(placePanel());
+    if (S.selected) return side.replaceChildren(tray(), placePanel());
     const input = h("input", { type: "search", name: "q", placeholder: S.origin.source === "location" ? "Search places near you" : `Search places in ${S.origin.label}`, maxlength: 120, value: S.query, "aria-label": "Search places in this area" });
     side.replaceChildren(
-      actions?.(S.origin) ?? "",
+      tray(),
       h("div", { class: "cat-chips xm-cats", role: "group", "aria-label": "Place type" }, CATEGORIES.map(([t, label]) => h("button", { type: "button", class: `cat-chip${S.type === t ? " on" : ""}`, "aria-pressed": String(S.type === t), onclick: () => showType(t) }, label))),
       h("form", { class: "xm-search", role: "search", onsubmit: (e) => { e.preventDefault(); search(input.value.trim()); } }, input, h("button", { class: "btn btn-dark btn-sm", type: "submit" }, "Search")),
       resultsList(),
@@ -173,11 +200,12 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
     if (S.loading) return h("p", { class: "muted pad", role: "status" }, "Finding places…");
     if (S.error) return h("div", { class: "pad" }, h("p", { class: "form-error" }, S.error));
     if (!S.type && !S.query) return h("p", { class: "muted pad" }, "Pick a category or search to see places on the map.");
-    if (!S.results.length) return h("p", { class: "muted pad" }, "No places found here. Try another category or a broader search.");
+    if (!S.results.length) return h("p", { class: "muted pad" }, S.type === "wayline" ? "Wayline has no ready-made plans around here yet." : "No places found here. Try another category, In Wayline plans, or a broader search.");
     return h(
       "div",
       {},
       S.source === "demo" && h("p", { class: "demo-note" }, h("strong", {}, "Demo places."), " Google Places isn't configured on this server; these are a few labelled Sydney landmarks."),
+      S.source === "wayline" && h("p", { class: "muted small pad-x" }, "Stops of Wayline\u2019s ready-made plans around here."),
       h(
         "ul",
         { class: "place-list xm-list" },
@@ -188,8 +216,8 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
             h(
               "button",
               { type: "button", class: "place-row", onclick: () => select(p) },
-              h("span", { class: "place-pin" }, icon("pin")),
-              h("span", { class: "grow" }, h("strong", {}, p.name), h("small", { class: "muted" }, [p.category, p.address].filter(Boolean).join(" · "))),
+              h("span", { class: `place-pin${picks.has(p.placeId) ? " is-picked" : ""}` }, icon(picks.has(p.placeId) ? "check" : "pin")),
+              h("span", { class: "grow" }, h("strong", {}, p.name), h("small", { class: "muted" }, [picks.has(p.placeId) && "In your picks", p.category, p.address].filter(Boolean).join(" · "))),
               typeof p.distanceKm === "number" && h("span", { class: "muted small" }, km(p.distanceKm)),
             ),
           ),
@@ -209,19 +237,20 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
       h("button", { class: "linklike small", type: "button", onclick: () => { S.selected = null; S.route = null; render(); } }, "← All places"),
       h("h3", {}, p.name),
       h("p", { class: "stop-meta" }, p.category && h("span", { class: "tag" }, p.category), p.source === "demo" && h("span", { class: "tag tag-demo" }, "Demo place")),
+      pickButton(p),
       p.address && h("p", { class: "muted small" }, p.address),
-      d === null && h("p", { class: "muted small", role: "status" }, "Loading details…"),
+      d === null && p.source !== "wayline" && h("p", { class: "muted small", role: "status" }, "Loading details…"),
       d?.error && h("p", { class: "form-error small" }, d.error),
       d && !d.error && typeof d.rating === "number" && h("p", { class: "rating" }, h("strong", {}, d.rating.toFixed(1)), " ★", d.ratingCount ? h("span", { class: "muted" }, ` (${d.ratingCount.toLocaleString("en-AU")} Google reviews)`) : null),
       d?.openingHours &&
         h("details", { class: "hours" }, h("summary", {}, d.openNow === true ? "Open now · hours" : d.openNow === false ? "Closed now · hours" : "Opening hours"), h("ul", {}, d.openingHours.map((line) => h("li", {}, line)))),
-      h(
+      p.source !== "wayline" && h(
         "div",
         { class: "row-actions" },
-        h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => addToTripDialog(p, ctx) }, icon("plus"), "Add to Trip"),
-        h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => placeDialog({ placeId: p.placeId, name: p.name, source: p.source }, ctx) }, "More details"),
+        h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => addToTripDialog(p, ctx) }, icon("plus"), "Add to Trip"),
+        h("button", { class: "btn btn-quiet btn-sm", type: "button", onclick: () => placeDialog({ placeId: p.placeId, name: p.name, source: p.source }, ctx) }, "More details"),
       ),
-      h(
+      p.source !== "wayline" && h(
         "div",
         { class: "xm-route" },
         h("p", { class: "small" }, h("strong", {}, "Getting there"), ` from ${S.origin.source === "location" ? "your location" : `central ${S.origin.label}`}`),
@@ -237,6 +266,79 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
       ),
       p.source === "google" && h("p", { class: "attrib", translate: "no" }, "Google Maps"),
     );
+  }
+
+  // Save / remove a place from the shared picks
+  function pickButton(p) {
+    const on = picks.has(p.placeId);
+    const full = !on && picks.state.places.length >= MAX_PICKS;
+    return h(
+      "button",
+      { class: `btn btn-sm xm-pick${on ? " on" : ""}`, type: "button", "aria-pressed": String(on), disabled: full, onclick: () => (on ? picks.remove(p.placeId) : picks.add(p)) },
+      icon(on ? "check" : "plus"),
+      on ? "In your picks" : full ? `Up to ${MAX_PICKS} picks` : "Save to my picks",
+    );
+  }
+
+  // The tray: the places picked so far, the optional length and food, and
+  // the one action, Find journeys. The selection is the visitor's
+  // interests, not an itinerary.
+  function tray() {
+    const P = picks.state;
+    const where = S.origin.source === "location" ? "near you" : S.origin.label;
+    const prefCount = P.food.length + (P.days !== null ? 1 : 0);
+    const chip = (on, label, onclick) => h("button", { type: "button", class: `dx-chip${on ? " on" : ""}`, "aria-pressed": String(on), onclick }, label);
+    return h(
+      "section",
+      { class: "xm-tray", id: "discover", "aria-labelledby": "xm-tray-h" },
+      h("div", { class: "xm-tray-head" }, h("h3", { id: "xm-tray-h", class: "xm-tray-title" }, "Your picks"), h("span", { class: "xm-tray-count" }, P.places.length ? `${P.places.length} of ${MAX_PICKS}` : "")),
+      P.places.length
+        ? h(
+            "ul",
+            { class: "xm-picked", "aria-label": "Places you picked" },
+            P.places.map((x) =>
+              h(
+                "li",
+                {},
+                h("button", { type: "button", class: "xm-picked-name", onclick: () => select(shown().find((r) => r.placeId === x.placeId)) }, x.label),
+                h("button", { type: "button", class: "xm-picked-x", "aria-label": `Remove ${x.label}`, onclick: () => picks.remove(x.placeId) }, icon("close")),
+              ),
+            ),
+          )
+        : h("p", { class: "xm-tray-hint" }, `Save places you like from the map, and Wayline finds ready-made plans ${S.origin.source === "location" ? "near you" : `for ${where}`} that go there. Optional.`),
+      h(
+        "button",
+        { type: "button", class: "xm-prefs-toggle", "aria-expanded": String(S.prefs), "aria-controls": "xm-prefs", onclick: () => { S.prefs = !S.prefs; render(); } },
+        h("span", { "aria-hidden": "true" }, S.prefs ? "\u2212" : "+"),
+        " Length and food",
+        prefCount > 0 ? h("span", { class: "xm-prefs-count" }, ` · ${prefCount} chosen`) : h("span", { class: "xm-prefs-opt" }, " · optional"),
+      ),
+      h(
+        "div",
+        { class: "xm-prefs", id: "xm-prefs", hidden: !S.prefs },
+        h("p", { class: "dx-label", id: "xm-days-h" }, "How long"),
+        h("div", { class: "dx-chips", role: "group", "aria-labelledby": "xm-days-h" }, LENGTHS.map(([n, label]) => chip(P.days === n, label, () => picks.setDays(n)))),
+        h("p", { class: "dx-label", id: "xm-food-h" }, "How you like to eat"),
+        h("div", { class: "dx-chips", role: "group", "aria-labelledby": "xm-food-h" }, FOOD.map(([k, label]) => chip(P.food.includes(k), label, () => picks.toggleFood(k)))),
+      ),
+      h(
+        "div",
+        { class: "xm-tray-actions" },
+        h("button", { type: "button", class: "btn btn-primary xm-find", disabled: S.finding, onclick: find }, S.finding ? "Finding\u2026" : "Find journeys"),
+        h("button", { type: "button", class: "linklike small xm-start", onclick: () => onStart(S.origin) }, "or start a trip from scratch"),
+      ),
+    );
+  }
+
+  async function find() {
+    S.finding = true;
+    render();
+    try {
+      await onFind(S.origin);
+    } finally {
+      S.finding = false;
+      render();
+    }
   }
 
   function routeSummary(mode, o) {
@@ -264,14 +366,17 @@ export function createExploreMap(ctx, { finder = null, actions = null, ideas = n
     );
   }
 
+  picks.onChange(render);
   render();
   return {
     el,
+    origin: () => S.origin,
     // the homepage's destinations arrived: redraw the panel's quick picks
     refresh: () => !S.origin && render(),
     setOrigin(origin) {
       const changed = !S.origin || !origin || S.origin.lat !== origin.lat || S.origin.lng !== origin.lng;
       S.origin = origin;
+      picks.moveTo(origin);
       if (!changed) return;
       S.results = [];
       S.selected = null;
