@@ -6,6 +6,7 @@ import { coverImg, PHOTOS, photoFor } from "/photos.js";
 import { renderJourney } from "/journey-page.js";
 import { renderPreview } from "/preview.js";
 import { renderProfile } from "/profile.js";
+import { renderTripPrint } from "/trip-print.js";
 import { api, ApiError, avatar, fill, fmtRange, h, icon, openDialog, relTime, toast } from "/ui.js";
 
 const app = document.getElementById("app");
@@ -33,6 +34,7 @@ async function route() {
   const next = new URLSearchParams(location.search).get("next");
   const join = path.match(/^\/join\/([A-Za-z0-9_-]+)$/);
   const trip = path.match(/^\/trips\/([0-9a-f-]{36})$/);
+  const tripPrint = path.match(/^\/trips\/([0-9a-f-]{36})\/print$/);
   const itinerary = path.match(/^\/itineraries\/([a-z0-9-]{3,80})$/);
   const journey = path.match(/^\/journeys\/(pub-[0-9a-f-]{36})$/);
   window.scrollTo(0, 0);
@@ -64,6 +66,15 @@ async function route() {
     return;
   }
   if (path === "/profile") return void (cleanup = await renderProfile(app, ctx()));
+  // a trip as a printable document, for its members; nothing is published
+  if (tripPrint) {
+    try {
+      cleanup = await renderTripPrint(app, tripPrint[1], ctx());
+    } catch (err) {
+      renderMissing(err instanceof ApiError && err.status === 404 ? "This trip doesn't exist, or you don't have access to it." : err.message);
+    }
+    return;
+  }
   if (path === "/trips") {
     cleanup = (await renderDashboard()) ?? null;
     if (new URLSearchParams(location.search).get("new") === "1") newTripDialog();

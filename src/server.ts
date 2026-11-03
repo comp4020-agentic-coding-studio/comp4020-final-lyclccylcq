@@ -590,7 +590,7 @@ async function refreshStalePlaces(tripId: string): Promise<void> {
   }
 }
 
-const APP_PAGES =/^\/(login|privacy|credits|profile|journeys\/pub-[0-9a-f-]{36}|trips|trips\/[0-9a-f-]{36}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80}|experiments\/pixel-train)?$/;
+const APP_PAGES =/^\/(login|privacy|credits|profile|journeys\/pub-[0-9a-f-]{36}|trips|trips\/[0-9a-f-]{36}(?:\/print)?|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80}|experiments\/pixel-train)?$/;
 
 const server = createServer((req, res) => withRequest(shortId("req"), () => handle(req, res)));
 

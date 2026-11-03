@@ -105,6 +105,19 @@ none can stay permanent; owners make a new, expiring link when they need one.
 - Google coordinates in a publication follow the same 30-day rule as trips;
   a custom pinned spot is the author's own choice and doesn't expire.
 
+## Exporting (print / PDF)
+
+- `/trips/:id/print` is a printable copy of the working trip, for its
+  members, whether or not it's published. It's linked as "Export" in the
+  editor's bar and beside each trip on `/profile`.
+- It reads `GET /api/trips/:id`, so the usual roles apply: members (owner or
+  collaborator) see it, everyone else gets the same 404 as a missing trip.
+  Nothing new is stored, shared or logged; it isn't a link to give out.
+- Unlike a publication it includes notes and the members' names, because
+  only members can open it. Travel between stops appears only where a route
+  was already looked up (Google's duration and distance, marked when stale);
+  printing never calls Google.
+
 ## Profiles
 
 `/profile` (`public/profile.js`) is the signed-in person's own page, read

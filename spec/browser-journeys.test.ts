@@ -109,6 +109,34 @@ describe.skipIf(!chromePath)("journeys: save, publish, share and the profile", (
     expect((await inPage(owner, "GET", `/api/trips/${trip.id}`)).members.length).toBe(1);
   }, 30_000);
 
+  it("exports an unpublished trip for its members only, notes included", async () => {
+    const owner = await browser.newPage();
+    await owner.viewport(1280, 900);
+    await signUpIn(owner, baseUrl, uniqueName("ex"));
+    const trip = await inPage(owner, "POST", "/api/trips", newTrip("Print me"));
+    const { activityId, trip: added } = await inPage(owner, ...addStop(trip.id, trip.days[0].id, "Ferry to Manly", 600));
+    const a = added.days[0].activities.find((x: any) => x.id === activityId);
+    await inPage(owner, "PATCH", `/api/trips/${trip.id}/activities/${activityId}`, { notes: "Wharf 3, buy an Opal card first.", baseVersion: a.version });
+
+    // from the editor, with nothing published
+    await owner.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+    await owner.waitFor(`document.querySelector('[data-export="print"]')`, 8000);
+    await owner.eval(`document.querySelector('[data-export="print"]').click()`);
+    await owner.waitFor(`location.pathname.endsWith('/print') && document.querySelector('.tp-title')?.textContent === 'Print me'`, 8000);
+    const doc = await owner.eval<string>(`document.querySelector('.tp-doc').textContent`);
+    expect(doc).toContain("Ferry to Manly");
+    expect(doc).toContain("Wharf 3, buy an Opal card first."); // the members' own copy keeps notes
+    expect(await owner.eval(`document.querySelectorAll('[data-print="go"]').length`)).toBe(1);
+    expect((await inPage(owner, "GET", `/api/trips/${trip.id}/publication`)).publication ?? null).toBeNull();
+
+    // anyone else gets the same answer as a missing trip
+    const other = await browser.newPage();
+    await signUpIn(other, baseUrl, uniqueName("ey"));
+    await other.goto(new URL(`/trips/${trip.id}/print`, baseUrl).href);
+    await other.waitFor(`/doesn't exist, or you don't have access/.test(document.querySelector('main')?.textContent ?? '')`, 8000);
+    expect(await other.eval<string>(`document.body.textContent`)).not.toContain("Opal card");
+  }, 30_000);
+
   it("shows the account as stored, edits it, and lists created, shared and published journeys", async () => {
     const page = await browser.newPage();
     await page.viewport(1280, 900);

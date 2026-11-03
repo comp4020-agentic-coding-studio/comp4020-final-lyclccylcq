@@ -120,7 +120,8 @@ export async function renderProfile(app, ctx) {
           const p = pubFor(t.id);
           const body = card.querySelector(".trip-card-body");
           body.prepend(h("p", { class: `pf-state ${p ? "is-published" : ""}` }, p ? (p.visibility === "link" ? "Published · link only" : "Published · listed") : S.tab === "created" ? (t.people > 1 ? "Private · shared with your crew" : "Private") : `${t.ownerName}'s trip`));
-          return card;
+          // the card is a link to the editor; the printable copy sits beside it
+          return h("div", { class: "pf-trip" }, card, h("a", { class: "linklike small pf-export", href: `/trips/${t.id}/print`, "data-link": true, "data-export": "print" }, "Export / print"));
         }),
       ),
     );
@@ -164,6 +165,7 @@ export async function renderProfile(app, ctx) {
           "div",
           { class: "pf-pub-actions" },
           live && h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-pub-action": "copy", onclick: () => copyLink(p) }, "Copy link"),
+          h("a", { class: "btn btn-quiet btn-sm", href: `/trips/${p.tripId}/print`, "data-link": true }, "Export"),
           live && p.outdated && h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-pub-action": "update", onclick: () => run(() => publish(p.visibility), "Published version updated to your current plan.") }, "Update to current plan"),
           live && h("button", { class: "btn btn-quiet btn-sm", type: "button", "data-pub-action": "visibility", onclick: () => run(() => publish(p.visibility === "link" ? "listed" : "link"), p.visibility === "link" ? "Listed under Shared by travellers." : "Now link only: no longer listed.") }, p.visibility === "link" ? "List on Wayline" : "Make link only"),
           live

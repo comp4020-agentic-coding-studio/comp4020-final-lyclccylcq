@@ -92,6 +92,8 @@ export type TripSnapshot = {
   pendingRequests: number;
   forkedFrom: { publicationId: string; title: string; author: string | null; at: number } | null;
   publication: { id: string; status: "published" | "unpublished"; publishedAt: number; outdated: boolean } | null;
+  // the same cover photo key as on My Trips (a curated photo, or none)
+  cover: string | null;
   members: { id: string; displayName: string; role: Role }[];
   mealTimes: MealTimes;
   days: Day[];
@@ -456,6 +458,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         ? { publicationId: String(t.forked_from_publication_id), title: String(t.forked_from_title), author: t.forked_from_author === null ? null : String(t.forked_from_author), at: Number(t.forked_at) }
         : null,
       publication: publicationOf(tripId, Number(t.rev)),
+      cover: coverFor(t),
       members,
       mealTimes,
       days,

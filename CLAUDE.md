@@ -381,6 +381,10 @@ contradict the README, stop and ask. Don't quietly change the product.
   also shows it under Shared by travellers. Reading a journey never grants
   edit rights, and its link is separate from invite links: keep "Share"
   (invite to edit), "Publish" (a read-only journey) and printing distinct.
+  Export (`/trips/:id/print`, `public/trip-print.js`) needs no publication:
+  a members-only printable copy of the working trip, notes included, read
+  through `GET /api/trips/:id` (non-members get its 404), with only routes
+  Google already returned; saving as PDF is the browser's print dialog.
 - Every change to a trip is stored on the server as it's made (`mutate()`);
   there is no separate Save. The editor's indicator (`saves` in `ui.js`)
   shows Saving, Saved, Not saved (a write that didn't reach the server) and
@@ -490,7 +494,7 @@ contradict the README, stop and ask. Don't quietly change the product.
   | Editor (`editor.js`, `map.js`) | `spec/browser.test.ts -t "in a real browser\|starting a trip\|collaborating"`, `spec/browser-suggest.test.ts` |
   | Share dialog, nicknames, publishing | `spec/browser.test.ts -t "share\|nickname\|publishing\|reloading"` |
   | My Trips | `spec/browser.test.ts -t "My Trips"` |
-  | Published journeys, profile, save state | `spec/browser-journeys.test.ts`, `spec/permissions.test.ts` |
+  | Published journeys, profile, save state, export | `spec/browser-journeys.test.ts`, `spec/permissions.test.ts` |
   | `ui.js` `h()` / `fill()` | `spec/dom-children.test.ts` |
   | Scheduling, order, start (`src/schedule.ts`, `src/trips.ts`) | `spec/schedule.test.ts`, `spec/order.test.ts`, `spec/start.test.ts`, `spec/itinerary.test.ts` |
   | Planner, review, copilot, AI budget | `spec/planner.test.ts`, `spec/review.test.ts`, `spec/plan-cancel.test.ts`, `spec/copilot.test.ts`, `spec/aiusage.test.ts` |
