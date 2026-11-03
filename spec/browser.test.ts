@@ -744,8 +744,11 @@ describe.skipIf(!chromePath)("unique names and inviting by nickname", () => {
       for (const p of [owner, guest]) await p.viewport(vp.width, vp.height, vp.mobile);
       const ownerName = uniqueName("own");
       const guestUser = uniqueName("guest_");
-      const fill = (p: Page, display: string, user: string) =>
-        p.eval(`(() => { const f = document.querySelector('.auth-form'); f.displayName.value = ${JSON.stringify(display)}; f.username.value = ${JSON.stringify(user)}; f.password.value = 'correct horse battery'; f.requestSubmit(); })()`);
+      // the form renders after the app boots (its config and session lookups), not at load
+      const fill = async (p: Page, display: string, user: string) => {
+        await p.waitFor(`document.querySelector('.auth-form [name=displayName]')`, 5000);
+        return p.eval(`(() => { const f = document.querySelector('.auth-form'); f.displayName.value = ${JSON.stringify(display)}; f.username.value = ${JSON.stringify(user)}; f.password.value = 'correct horse battery'; f.requestSubmit(); })()`);
+      };
       await owner.goto(new URL("/login", baseUrl).href);
       await fill(owner, `Owner ${ownerName}`, ownerName);
       await owner.waitFor(`location.pathname === '/'`, 5000);
@@ -1034,7 +1037,7 @@ describe.skipIf(!chromePath)("the share dialog and the live stream", () => {
     await page.eval(`(async () => { const ev = await ${snapshotEvent}; __snap.stream.dispatchEvent(ev); document.querySelector('dialog.dialog-share[open]').close(); })()`);
     await sleep(150);
     expect(await page.eval<number>(`__snap.lookups`)).toBe(before);
-    expect(await page.eval<number>(`__snap.live.size`)).toBe(1);
+    await page.waitFor(`__snap.live.size === 1`, 1000); // the close event is queued by the browser
   });
 });
 
