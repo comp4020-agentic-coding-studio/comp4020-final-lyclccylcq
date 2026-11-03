@@ -1,8 +1,20 @@
 import type { DatabaseSync } from "node:sqlite";
 import { AREAS, CURATED, CURATED_VERSION, type Category, DESTINATIONS, FOOD_STYLE_OF, type FoodStyle } from "./curated.ts";
+import { DESTINATIONS_ZH, ITINERARIES_ZH, type ItineraryZh } from "./curated-zh.ts";
 import { transaction } from "./db.ts";
 import { bad, notFound } from "./errors.ts";
 import { haversineKm, type LatLng } from "./geo.ts";
+import { requestLang } from "./lang.ts";
+
+// Curated content in the request's language (November 2026): the database
+// keeps the English; the Chinese from curated-zh.ts is laid over what's read,
+// at read time only. Matching keeps using the English keys (ids, queries,
+// areas, countries); only the text shown changes. A copy into a trip goes
+// through get(), so it takes the language served at copy time.
+function zhOf(templateId: string): ItineraryZh | null {
+  if (requestLang() !== "zh" || !templateId.startsWith("tpl-")) return null;
+  return ITINERARIES_ZH[templateId.slice(4)] ?? null;
+}
 
 // The recommendation layer. Google Places finds places; it doesn't know
 // itineraries. These are Wayline's own templates, ranked by geographic
@@ -146,15 +158,16 @@ export function createItineraryStore(db: DatabaseSync, now = () => Date.now()) {
   }
 
   function stopsOf(templateId: string): TemplateStop[] {
+    const zh = zhOf(templateId);
     return q("select * from itinerary_template_stops where template_id = ? order by day, position").all(templateId).map((r) => ({
       id: String(r.id),
       day: Number(r.day),
       position: Number(r.position),
-      title: String(r.title),
+      title: zh?.stops[String(r.title)] ?? String(r.title),
       kind: String(r.kind),
       startMin: r.start_min === null ? null : Number(r.start_min),
       durationMin: Number(r.duration_min),
-      note: String(r.note),
+      note: (r.note ? zh?.notes?.[String(r.note)] : undefined) ?? String(r.note),
       lat: Number(r.lat),
       lng: Number(r.lng),
       placeId: r.place_id === null ? null : String(r.place_id),
@@ -183,11 +196,12 @@ export function createItineraryStore(db: DatabaseSync, now = () => Date.now()) {
 
   function summary(r: Record<string, unknown>, stops = stopsOf(String(r.id))): TemplateSummary {
     const city = cityOf({ lat: Number(r.ref_lat), lng: Number(r.ref_lng) });
+    const zh = r.source === "curated" ? zhOf(String(r.id)) : null;
     return {
       id: String(r.id),
-      title: String(r.title),
-      destination: String(r.destination),
-      description: String(r.description),
+      title: zh?.title ?? String(r.title),
+      destination: zh?.destination ?? String(r.destination),
+      description: zh?.description ?? String(r.description),
       categories: JSON.parse(String(r.categories)) as Category[],
       days: Number(r.days),
       durationMin: duration(stops),
@@ -240,7 +254,8 @@ export function createItineraryStore(db: DatabaseSync, now = () => Date.now()) {
       const all = publicRows().map((r) => summary(r));
       return DESTINATIONS.map((d) => {
         const mine = all.filter((s) => s.destinationId === d.id);
-        return { ...d, itineraries: mine.length, days: mine.length ? Math.max(...mine.map((s) => s.days)) : 0 };
+        const zh = requestLang() === "zh" ? DESTINATIONS_ZH[d.id] : undefined;
+        return { ...d, ...(zh ?? {}), itineraries: mine.length, days: mine.length ? Math.max(...mine.map((s) => s.days)) : 0 };
       });
     },
 

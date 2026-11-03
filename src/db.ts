@@ -288,6 +288,8 @@ export function openDb(dir = process.env.DATA_DIR ?? "data"): DatabaseSync {
   if (!pubCols.includes("visibility")) db.exec("alter table trip_publications add column visibility text not null default 'listed' check (visibility in ('listed', 'link'))");
   const userCols = db.prepare("pragma table_info(users)").all().map((c) => String(c.name));
   if (!userCols.includes("bio")) db.exec("alter table users add column bio text not null default ''");
+  // The language a person chose for the site (November 2026): English or Chinese
+  if (!userCols.includes("lang")) db.exec("alter table users add column lang text not null default 'en' check (lang in ('en', 'zh'))");
   // AI: one row per model call, written before the call (status 'running')
   // and finished after it. The app-wide limits count these rows, so they
   // survive restarts; a row left 'running' by a crash stops counting as

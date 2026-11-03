@@ -2,6 +2,7 @@ import { FOOD, LENGTHS, MAX_PICKS } from "/discover.js";
 import { createMap } from "/map.js";
 import { addToTripDialog, placeDialog } from "/places.js";
 import { api, decodePolyline, dur, h, icon, km } from "/ui.js";
+import { locale, t, tn, tServer } from "/i18n.js";
 
 // "Explore places": an interactive map of real places around the discovery
 // location. Individual places, never itineraries. Every Google call happens
@@ -56,7 +57,7 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
   const el = h(
     "section",
     { class: "home-section", id: "explore-map" },
-    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "01"), "Plan a trip"), h("h2", {}, "Where would you like to go?"))),
+    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "01"), t("Plan a trip")), h("h2", {}, t("Where would you like to go?")))),
     finder,
     h("div", { class: "xm-grid" }, h("div", { class: "xm-map" }, mapHost), side),
     sub,
@@ -78,7 +79,7 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
     if (!map) return;
     const routes = S.route?.data?.status === "ok" && S.route.data.polyline ? [{ mode: S.route.mode, path: decodePolyline(S.route.data.polyline) }] : [];
     map.update({
-      stops: S.origin?.source === "location" ? [{ id: "origin", title: "You are here", kind: "custom", lat: S.origin.lat, lng: S.origin.lng, selected: false }] : [],
+      stops: S.origin?.source === "location" ? [{ id: "origin", title: t("You are here"), kind: "custom", lat: S.origin.lat, lng: S.origin.lng, selected: false }] : [],
       results: shown(),
       picked: picks.state.places.map((p) => p.placeId),
       routes,
@@ -123,7 +124,7 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
     const { places } = await api(`/api/itineraries/highlights?lat=${lat}&lng=${lng}`);
     return {
       source: "wayline",
-      places: places.map((x) => ({ placeId: `wl:${x.lat.toFixed(5)},${x.lng.toFixed(5)}`, name: x.title, lat: x.lat, lng: x.lng, category: `In ${x.plans} Wayline ${x.plans === 1 ? "plan" : "plans"}`, source: "wayline" })),
+      places: places.map((x) => ({ placeId: `wl:${x.lat.toFixed(5)},${x.lng.toFixed(5)}`, name: x.title, lat: x.lat, lng: x.lng, category: tn(x.plans, "In {n} Wayline plan", "In {n} Wayline plans"), source: "wayline" })),
     };
   }
 
@@ -171,41 +172,47 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
 
   function render() {
     sub.textContent = S.origin
-      ? `Places around ${S.origin.source === "location" ? "your location" : S.origin.label}${S.source === "demo" ? " (demo data: Google isn't configured)" : ", from Google Maps"}. These are individual places, not itineraries.`
-      : "Search a city, or use your location, to browse what's around it.";
+      ? S.source === "demo"
+        ? S.origin.source === "location"
+          ? t("Places around your location (demo data: Google isn't configured). These are individual places, not itineraries.")
+          : t("Places around {place} (demo data: Google isn't configured). These are individual places, not itineraries.", { place: S.origin.label })
+        : S.origin.source === "location"
+          ? t("Places around your location, from Google Maps. These are individual places, not itineraries.")
+          : t("Places around {place}, from Google Maps. These are individual places, not itineraries.", { place: S.origin.label })
+      : t("Search a city, or use your location, to browse what's around it.");
     paintMap();
     if (!S.origin) {
       side.replaceChildren(
         h(
           "div",
           { class: "xm-start" },
-          h("p", { class: "xm-start-title" }, "Start with a place"),
-          h("p", { class: "muted small" }, "Search a city above. The map moves there and shows attractions, restaurants and more to add to a trip. No location needed."),
+          h("p", { class: "xm-start-title" }, t("Start with a place")),
+          h("p", { class: "muted small" }, t("Search a city above. The map moves there and shows attractions, restaurants and more to add to a trip. No location needed.")),
           ideas?.() ?? "",
         ),
       );
       return;
     }
     if (S.selected) return side.replaceChildren(tray(), placePanel());
-    const input = h("input", { type: "search", name: "q", placeholder: S.origin.source === "location" ? "Search places near you" : `Search places in ${S.origin.label}`, maxlength: 120, value: S.query, "aria-label": "Search places in this area" });
+    const input = h("input", { type: "search", name: "q", placeholder: S.origin.source === "location" ? t("Search places near you") : t("Search places in {place}", { place: S.origin.label }), maxlength: 120, value: S.query, "aria-label": t("Search places in this area") });
     side.replaceChildren(
       tray(),
-      h("div", { class: "cat-chips xm-cats", role: "group", "aria-label": "Place type" }, CATEGORIES.map(([t, label]) => h("button", { type: "button", class: `cat-chip${S.type === t ? " on" : ""}`, "aria-pressed": String(S.type === t), onclick: () => showType(t) }, label))),
-      h("form", { class: "xm-search", role: "search", onsubmit: (e) => { e.preventDefault(); search(input.value.trim()); } }, input, h("button", { class: "btn btn-dark btn-sm", type: "submit" }, "Search")),
+      h("div", { class: "cat-chips xm-cats", role: "group", "aria-label": t("Place type") }, CATEGORIES.map(([it, label]) => h("button", { type: "button", class: `cat-chip${S.type === it ? " on" : ""}`, "aria-pressed": String(S.type === it), onclick: () => showType(it) }, t(label)))),
+      h("form", { class: "xm-search", role: "search", onsubmit: (e) => { e.preventDefault(); search(input.value.trim()); } }, input, h("button", { class: "btn btn-dark btn-sm", type: "submit" }, t("Search"))),
       resultsList(),
     );
   }
 
   function resultsList() {
-    if (S.loading) return h("p", { class: "muted pad", role: "status" }, "Finding places…");
+    if (S.loading) return h("p", { class: "muted pad", role: "status" }, t("Finding places…"));
     if (S.error) return h("div", { class: "pad" }, h("p", { class: "form-error" }, S.error));
-    if (!S.type && !S.query) return h("p", { class: "muted pad" }, "Pick a category or search to see places on the map.");
-    if (!S.results.length) return h("p", { class: "muted pad" }, S.type === "wayline" ? "Wayline has no ready-made plans around here yet." : "No places found here. Try another category, In Wayline plans, or a broader search.");
+    if (!S.type && !S.query) return h("p", { class: "muted pad" }, t("Pick a category or search to see places on the map."));
+    if (!S.results.length) return h("p", { class: "muted pad" }, S.type === "wayline" ? t("Wayline has no ready-made plans around here yet.") : t("No places found here. Try another category, In Wayline plans, or a broader search."));
     return h(
       "div",
       {},
-      S.source === "demo" && h("p", { class: "demo-note" }, h("strong", {}, "Demo places."), " Google Places isn't configured on this server; these are a few labelled Sydney landmarks."),
-      S.source === "wayline" && h("p", { class: "muted small pad-x" }, "Stops of Wayline\u2019s ready-made plans around here."),
+      S.source === "demo" && h("p", { class: "demo-note" }, h("strong", {}, t("Demo places.")), t(" Google Places isn't configured on this server; these are a few labelled Sydney landmarks.")),
+      S.source === "wayline" && h("p", { class: "muted small pad-x" }, t("Stops of Wayline\u2019s ready-made plans around here.")),
       h(
         "ul",
         { class: "place-list xm-list" },
@@ -217,7 +224,7 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
               "button",
               { type: "button", class: "place-row", onclick: () => select(p) },
               h("span", { class: `place-pin${picks.has(p.placeId) ? " is-picked" : ""}` }, icon(picks.has(p.placeId) ? "check" : "pin")),
-              h("span", { class: "grow" }, h("strong", {}, p.name), h("small", { class: "muted" }, [picks.has(p.placeId) && "In your picks", p.category, p.address].filter(Boolean).join(" · "))),
+              h("span", { class: "grow" }, h("strong", {}, p.name), h("small", { class: "muted" }, [picks.has(p.placeId) && t("In your picks"), p.category, p.address].filter(Boolean).join(" · "))),
               typeof p.distanceKm === "number" && h("span", { class: "muted small" }, km(p.distanceKm)),
             ),
           ),
@@ -234,33 +241,33 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
     return h(
       "div",
       { class: "xm-panel" },
-      h("button", { class: "linklike small", type: "button", onclick: () => { S.selected = null; S.route = null; render(); } }, "← All places"),
+      h("button", { class: "linklike small", type: "button", onclick: () => { S.selected = null; S.route = null; render(); } }, t("← All places")),
       h("h3", {}, p.name),
-      h("p", { class: "stop-meta" }, p.category && h("span", { class: "tag" }, p.category), p.source === "demo" && h("span", { class: "tag tag-demo" }, "Demo place")),
+      h("p", { class: "stop-meta" }, p.category && h("span", { class: "tag" }, p.category), p.source === "demo" && h("span", { class: "tag tag-demo" }, t("Demo place"))),
       pickButton(p),
       p.address && h("p", { class: "muted small" }, p.address),
-      d === null && p.source !== "wayline" && h("p", { class: "muted small", role: "status" }, "Loading details…"),
+      d === null && p.source !== "wayline" && h("p", { class: "muted small", role: "status" }, t("Loading details…")),
       d?.error && h("p", { class: "form-error small" }, d.error),
-      d && !d.error && typeof d.rating === "number" && h("p", { class: "rating" }, h("strong", {}, d.rating.toFixed(1)), " ★", d.ratingCount ? h("span", { class: "muted" }, ` (${d.ratingCount.toLocaleString("en-AU")} Google reviews)`) : null),
+      d && !d.error && typeof d.rating === "number" && h("p", { class: "rating" }, h("strong", {}, d.rating.toFixed(1)), " ★", d.ratingCount ? h("span", { class: "muted" }, t(" ({n} Google reviews)", { n: d.ratingCount.toLocaleString(locale()) })) : null),
       d?.openingHours &&
-        h("details", { class: "hours" }, h("summary", {}, d.openNow === true ? "Open now · hours" : d.openNow === false ? "Closed now · hours" : "Opening hours"), h("ul", {}, d.openingHours.map((line) => h("li", {}, line)))),
+        h("details", { class: "hours" }, h("summary", {}, d.openNow === true ? t("Open now · hours") : d.openNow === false ? t("Closed now · hours") : t("Opening hours")), h("ul", {}, d.openingHours.map((line) => h("li", {}, line)))),
       p.source !== "wayline" && h(
         "div",
         { class: "row-actions" },
-        h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => addToTripDialog(p, ctx) }, icon("plus"), "Add to Trip"),
-        h("button", { class: "btn btn-quiet btn-sm", type: "button", onclick: () => placeDialog({ placeId: p.placeId, name: p.name, source: p.source }, ctx) }, "More details"),
+        h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => addToTripDialog(p, ctx) }, icon("plus"), t("Add to Trip")),
+        h("button", { class: "btn btn-quiet btn-sm", type: "button", onclick: () => placeDialog({ placeId: p.placeId, name: p.name, source: p.source }, ctx) }, t("More details")),
       ),
       p.source !== "wayline" && h(
         "div",
         { class: "xm-route" },
-        h("p", { class: "small" }, h("strong", {}, "Getting there"), ` from ${S.origin.source === "location" ? "your location" : `central ${S.origin.label}`}`),
+        h("p", { class: "small" }, h("strong", {}, t("Getting there")), S.origin.source === "location" ? t(" from your location") : t(" from central {place}", { place: S.origin.label })),
         h(
           "div",
           { class: "modes" },
-          MODES.map(([m, label, ic]) => h("button", { type: "button", class: `mode${r?.mode === m ? " on" : ""}`, "aria-pressed": String(r?.mode === m), disabled: !ctx.config.routes || r?.loading, onclick: () => directions(m) }, icon(ic), h("span", {}, label))),
+          MODES.map(([m, label, ic]) => h("button", { type: "button", class: `mode${r?.mode === m ? " on" : ""}`, "aria-pressed": String(r?.mode === m), disabled: !ctx.config.routes || r?.loading, onclick: () => directions(m) }, icon(ic), h("span", {}, t(label)))),
         ),
-        !ctx.config.routes && h("p", { class: "muted small" }, "Directions need Google Maps configured on the server. None are estimated here."),
-        r?.loading && h("p", { class: "muted small", role: "status" }, "Calculating route…"),
+        !ctx.config.routes && h("p", { class: "muted small" }, t("Directions need Google Maps configured on the server. None are estimated here.")),
+        r?.loading && h("p", { class: "muted small", role: "status" }, t("Calculating route…")),
         r?.error && h("p", { class: "form-error small" }, r.error),
         r?.data && routeSummary(r.mode, r.data),
       ),
@@ -276,7 +283,7 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
       "button",
       { class: `btn btn-sm xm-pick${on ? " on" : ""}`, type: "button", "aria-pressed": String(on), disabled: full, onclick: () => (on ? picks.remove(p.placeId) : picks.add(p)) },
       icon(on ? "check" : "plus"),
-      on ? "In your picks" : full ? `Up to ${MAX_PICKS} picks` : "Save to my picks",
+      on ? t("In your picks") : full ? t("Up to {n} picks", { n: MAX_PICKS }) : t("Save to my picks"),
     );
   }
 
@@ -285,47 +292,46 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
   // interests, not an itinerary.
   function tray() {
     const P = picks.state;
-    const where = S.origin.source === "location" ? "near you" : S.origin.label;
-    const prefCount = P.food.length + (P.days !== null ? 1 : 0);
+        const prefCount = P.food.length + (P.days !== null ? 1 : 0);
     const chip = (on, label, onclick) => h("button", { type: "button", class: `dx-chip${on ? " on" : ""}`, "aria-pressed": String(on), onclick }, label);
     return h(
       "section",
       { class: "xm-tray", id: "discover", "aria-labelledby": "xm-tray-h" },
-      h("div", { class: "xm-tray-head" }, h("h3", { id: "xm-tray-h", class: "xm-tray-title" }, "Your picks"), h("span", { class: "xm-tray-count" }, P.places.length ? `${P.places.length} of ${MAX_PICKS}` : "")),
+      h("div", { class: "xm-tray-head" }, h("h3", { id: "xm-tray-h", class: "xm-tray-title" }, t("Your picks")), h("span", { class: "xm-tray-count" }, P.places.length ? t("{n} of {max}", { n: P.places.length, max: MAX_PICKS }) : "")),
       P.places.length
         ? h(
             "ul",
-            { class: "xm-picked", "aria-label": "Places you picked" },
+            { class: "xm-picked", "aria-label": t("Places you picked") },
             P.places.map((x) =>
               h(
                 "li",
                 {},
                 h("button", { type: "button", class: "xm-picked-name", onclick: () => select(shown().find((r) => r.placeId === x.placeId)) }, x.label),
-                h("button", { type: "button", class: "xm-picked-x", "aria-label": `Remove ${x.label}`, onclick: () => picks.remove(x.placeId) }, icon("close")),
+                h("button", { type: "button", class: "xm-picked-x", "aria-label": t("Remove {name}", { name: x.label }), onclick: () => picks.remove(x.placeId) }, icon("close")),
               ),
             ),
           )
-        : h("p", { class: "xm-tray-hint" }, `Save places you like from the map, and Wayline finds ready-made plans ${S.origin.source === "location" ? "near you" : `for ${where}`} that go there. Optional.`),
+        : h("p", { class: "xm-tray-hint" }, S.origin.source === "location" ? t("Save places you like from the map, and Wayline finds ready-made plans near you that go there. Optional.") : t("Save places you like from the map, and Wayline finds ready-made plans for {place} that go there. Optional.", { place: S.origin.label })),
       h(
         "button",
         { type: "button", class: "xm-prefs-toggle", "aria-expanded": String(S.prefs), "aria-controls": "xm-prefs", onclick: () => { S.prefs = !S.prefs; render(); } },
         h("span", { "aria-hidden": "true" }, S.prefs ? "\u2212" : "+"),
-        " Length and food",
-        prefCount > 0 ? h("span", { class: "xm-prefs-count" }, ` · ${prefCount} chosen`) : h("span", { class: "xm-prefs-opt" }, " · optional"),
+        t(" Length and food"),
+        prefCount > 0 ? h("span", { class: "xm-prefs-count" }, t(" · {n} chosen", { n: prefCount })) : h("span", { class: "xm-prefs-opt" }, t(" · optional")),
       ),
       h(
         "div",
         { class: "xm-prefs", id: "xm-prefs", hidden: !S.prefs },
-        h("p", { class: "dx-label", id: "xm-days-h" }, "How long"),
-        h("div", { class: "dx-chips", role: "group", "aria-labelledby": "xm-days-h" }, LENGTHS.map(([n, label]) => chip(P.days === n, label, () => picks.setDays(n)))),
-        h("p", { class: "dx-label", id: "xm-food-h" }, "How you like to eat"),
-        h("div", { class: "dx-chips", role: "group", "aria-labelledby": "xm-food-h" }, FOOD.map(([k, label]) => chip(P.food.includes(k), label, () => picks.toggleFood(k)))),
+        h("p", { class: "dx-label", id: "xm-days-h" }, t("How long")),
+        h("div", { class: "dx-chips", role: "group", "aria-labelledby": "xm-days-h" }, LENGTHS.map(([n, label]) => chip(P.days === n, t(label), () => picks.setDays(n)))),
+        h("p", { class: "dx-label", id: "xm-food-h" }, t("How you like to eat")),
+        h("div", { class: "dx-chips", role: "group", "aria-labelledby": "xm-food-h" }, FOOD.map(([k, label]) => chip(P.food.includes(k), t(label), () => picks.toggleFood(k)))),
       ),
       h(
         "div",
         { class: "xm-tray-actions" },
-        h("button", { type: "button", class: "btn btn-primary xm-find", disabled: S.finding, onclick: find }, S.finding ? "Finding\u2026" : "Find journeys"),
-        h("button", { type: "button", class: "linklike small xm-start", onclick: () => onStart(S.origin) }, "or start a trip from scratch"),
+        h("button", { type: "button", class: "btn btn-primary xm-find", disabled: S.finding, onclick: find }, S.finding ? t("Finding\u2026") : t("Find journeys")),
+        h("button", { type: "button", class: "linklike small xm-start", onclick: () => onStart(S.origin) }, t("or start a trip from scratch")),
       ),
     );
   }
@@ -342,12 +348,12 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
   }
 
   function routeSummary(mode, o) {
-    if (o.status !== "ok") return h("p", { class: "leg-warn small" }, o.message ?? "Google found no route for this mode.");
+    if (o.status !== "ok") return h("p", { class: "leg-warn small" }, tServer(o.message) ?? t("Google found no route for this mode."));
     const transit = (o.steps ?? []).filter((s) => s.kind === "transit");
     return h(
       "div",
       { class: "route-result" },
-      h("p", {}, h("strong", {}, dur(Math.max(1, Math.ceil(o.durationSec / 60)))), ` · ${(o.distanceM / 1000).toFixed(1)} km`, mode === "TRANSIT" && transit.length ? ` · ${transit.length - 1} transfer${transit.length === 2 ? "" : "s"}` : ""),
+      h("p", {}, h("strong", {}, dur(Math.max(1, Math.ceil(o.durationSec / 60)))), ` · ${(o.distanceM / 1000).toFixed(1)} km`, mode === "TRANSIT" && transit.length ? tn(transit.length - 1, " · {n} transfer", " · {n} transfers") : ""),
       mode === "TRANSIT" &&
         transit.length > 0 &&
         h(
@@ -357,12 +363,12 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
             h(
               "li",
               {},
-              h("span", { class: "line-chip", style: s.color ? `--lc:${s.color};--lt:${s.textColor ?? "#fff"}` : "" }, [s.vehicle, s.line].filter(Boolean).join(" ") || "Transit"),
+              h("span", { class: "line-chip", style: s.color ? `--lc:${s.color};--lt:${s.textColor ?? "#fff"}` : "" }, [s.vehicle, s.line].filter(Boolean).join(" ") || t("Transit")),
               ` ${s.from ?? "?"} ${s.localDeparture ?? ""} → ${s.to ?? "?"} ${s.localArrival ?? ""}`,
             ),
           ),
         ),
-      mode === "TRANSIT" && h("p", { class: "muted tiny" }, "For a departure now."),
+      mode === "TRANSIT" && h("p", { class: "muted tiny" }, t("For a departure now.")),
     );
   }
 

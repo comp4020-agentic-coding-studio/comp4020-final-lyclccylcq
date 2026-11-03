@@ -1,3 +1,4 @@
+import { getLang, t } from "/i18n.js";
 import { h } from "/ui.js";
 
 // The map: Google's Maps JavaScript API when a browser key is configured,
@@ -17,9 +18,9 @@ function loadGoogle(key) {
       window.dispatchEvent(new Event("wayline:maps-auth-failed"));
     };
     const s = document.createElement("script");
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&loading=async&callback=__waylineMapsReady`;
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&loading=async&language=${getLang() === "zh" ? "zh-CN" : "en"}&callback=__waylineMapsReady`;
     s.async = true;
-    s.onerror = () => reject(new Error("Google Maps couldn't be loaded."));
+    s.onerror = () => reject(new Error(t("Google Maps couldn't be loaded.")));
     document.head.append(s);
   });
   return loader;
@@ -31,7 +32,7 @@ const distanceKm = (a, b) => {
   const x = Math.sin(((b.lat - a.lat) * rad) / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(((b.lng - a.lng) * rad) / 2) ** 2;
   return 12742 * Math.asin(Math.sqrt(x));
 };
-const formatKm = (k) => (k < 1 ? `${Math.round(k * 1000)} m` : `${k < 10 ? k.toFixed(1) : Math.round(k)} km`);
+const formatKm = (k) => (k < 1 ? t("{m} m", { m: Math.round(k * 1000) }) : t("{km} km", { km: k < 10 ? k.toFixed(1) : Math.round(k) }));
 // the start shows "S"; the stops after it are numbered from 1, as in the timeline
 const stopLabel = (stops, i) => (stops[i].start ? "S" : String(i + 1 - (stops[0]?.start ? 1 : 0)));
 // a category is a small dot on the stop; the stop itself is always the line's ink
@@ -112,7 +113,7 @@ async function googleMap(el, config, handlers) {
     peerLayer.replaceChildren(
       ...peers.map((p) => {
         const pt = proj.fromLatLngToContainerPixel(new google.maps.LatLng(p.lat, p.lng));
-        const label = `Jump to ${p.displayName}'s view`;
+        const label = t("Jump to {name}'s view", { name: p.displayName });
         const jump = () => {
           map.panTo({ lat: p.lat, lng: p.lng });
           map.setZoom(Math.round(p.zoom));
@@ -121,9 +122,9 @@ async function googleMap(el, config, handlers) {
         if (inside) {
           return h(
             "button",
-            { class: "peer-marker", type: "button", style: `--pc:${p.colour}; left:${pt.x}px; top:${pt.y}px`, title: `${p.displayName} is looking here`, "aria-label": `${p.displayName} is looking at this area. ${label}`, onclick: jump },
+            { class: "peer-marker", type: "button", style: `--pc:${p.colour}; left:${pt.x}px; top:${pt.y}px`, title: t("{name} is looking here", { name: p.displayName }), "aria-label": t("{name} is looking at this area. {label}", { name: p.displayName, label }), onclick: jump },
             h("span", { class: "peer-initials" }, p.initials),
-            h("span", { class: "peer-name" }, `${p.displayName}'s view`),
+            h("span", { class: "peer-name" }, t("{name}'s view", { name: p.displayName })),
           );
         }
         // off screen: an arrow on the edge, along the line from this map's
@@ -144,7 +145,7 @@ async function googleMap(el, config, handlers) {
         const km = centre ? distanceKm({ lat: centre.lat(), lng: centre.lng() }, p) : null;
         return h(
           "button",
-          { class: `peer-edge${side === "right" ? " peer-edge-right" : ""}`, type: "button", style: `--pc:${p.colour}; left:${x}px; top:${y}px; transform:${shift}`, title: label, "aria-label": `${p.displayName} is exploring ${km === null ? "elsewhere" : `${formatKm(km)} away`}. ${label}`, onclick: jump },
+          { class: `peer-edge${side === "right" ? " peer-edge-right" : ""}`, type: "button", style: `--pc:${p.colour}; left:${x}px; top:${y}px; transform:${shift}`, title: label, "aria-label": km === null ? t("{name} is exploring elsewhere. {label}", { name: p.displayName, label }) : t("{name} is exploring {distance} away. {label}", { name: p.displayName, distance: formatKm(km), label }), onclick: jump },
           h("span", { class: "peer-arrow", style: `transform: rotate(${angle}deg)`, "aria-hidden": "true" }, "➤"),
           h("span", { class: "peer-tag" }, h("strong", {}, p.initials), ` ${p.displayName}${km === null ? "" : ` · ${formatKm(km)}`}`),
         );
@@ -157,14 +158,14 @@ async function googleMap(el, config, handlers) {
   // Its own marker, outside update()'s rebuilt list and never part of a
   // fitBounds, so later renders can't move or drop it. Local to this tab.
   let mySpot = null;
-  const spotPin = h("span", { class: "my-spot", "aria-hidden": "true" }, h("span", { class: "my-spot-dot" }), h("span", { class: "my-spot-label" }, "My spot"));
-  const spotMarker = new AdvancedMarkerElement({ content: spotPin, title: "My spot: the last place you picked on the map", zIndex: 150 });
+  const spotPin = h("span", { class: "my-spot", "aria-hidden": "true" }, h("span", { class: "my-spot-dot" }), h("span", { class: "my-spot-label" }, t("My spot")));
+  const spotMarker = new AdvancedMarkerElement({ content: spotPin, title: t("My spot: the last place you picked on the map"), zIndex: 150 });
   // "Return to my spot", a Google map control
   const returnBtn = h(
     "button",
-    { class: "map-control my-spot-return", type: "button", disabled: true, "data-map": "return", "aria-label": "Return to my spot", title: "Pick a spot on the map first" },
+    { class: "map-control my-spot-return", type: "button", disabled: true, "data-map": "return", "aria-label": t("Return to my spot"), title: t("Pick a spot on the map first") },
     h("span", { class: "my-spot-icon", "aria-hidden": "true" }),
-    h("span", { class: "my-spot-return-text" }, "Return to my spot"),
+    h("span", { class: "my-spot-return-text" }, t("Return to my spot")),
   );
   // a control's events must never reach the map as a click on the map
   for (const type of ["click", "dblclick", "pointerdown", "mousedown", "touchstart", "contextmenu"]) returnBtn.addEventListener(type, (e) => e.stopPropagation());
@@ -215,7 +216,7 @@ async function googleMap(el, config, handlers) {
   map.addListener("idle", report);
 
   const onAuthFail = () => {
-    schematic(el, handlers, "Google Maps rejected the browser key. Check its website restrictions and that the Maps JavaScript API is enabled.").then((s) => {
+    schematic(el, handlers, t("Google Maps rejected the browser key. Check its website restrictions and that the Maps JavaScript API is enabled.")).then((s) => {
       api.update = s.update;
       api.focus = s.focus;
       api.setPeers = s.setPeers;
@@ -245,7 +246,7 @@ async function googleMap(el, config, handlers) {
         const label = stopLabel(stops, i);
         const pin = h(
           "button",
-          { class: `pin${s.start ? " pin-start" : ""}${s.selected ? " pin-on" : ""}`, type: "button", style: `--k:${KIND_COLOUR[s.kind]}`, "aria-label": s.start ? `Start: ${s.title}` : `Stop ${label}: ${s.title}` },
+          { class: `pin${s.start ? " pin-start" : ""}${s.selected ? " pin-on" : ""}`, type: "button", style: `--k:${KIND_COLOUR[s.kind]}`, "aria-label": s.start ? t("Start: {title}", { title: s.title }) : t("Stop {n}: {title}", { n: label, title: s.title }) },
           h("span", {}, label),
           !s.start && h("i", { class: "pin-kind", "aria-hidden": "true" }),
         );
@@ -258,11 +259,11 @@ async function googleMap(el, config, handlers) {
       // the spot just clicked or being considered: shown, never added on its own
       if (data.temp) {
         const dot = h("span", { class: `pin pin-temp${data.temp.start ? " pin-temp-start" : ""}`, "aria-hidden": "true" }, h("span", {}, data.temp.start ? "S" : "+"));
-        markers.push(new AdvancedMarkerElement({ map, position: { lat: data.temp.lat, lng: data.temp.lng }, content: dot, title: data.temp.label ?? "Selected spot", zIndex: 200 }));
+        markers.push(new AdvancedMarkerElement({ map, position: { lat: data.temp.lat, lng: data.temp.lng }, content: dot, title: data.temp.label ?? t("Selected spot"), zIndex: 200 }));
       }
       const picked = new Set(data.picked ?? []);
       results.forEach((r) => {
-        const dot = h("button", { class: `pin pin-result${r.placeId === selectedPlaceId ? " pin-on" : ""}${picked.has(r.placeId) ? " pin-picked" : ""}`, type: "button", "aria-label": picked.has(r.placeId) ? `${r.name} (in your picks)` : r.name }, "");
+        const dot = h("button", { class: `pin pin-result${r.placeId === selectedPlaceId ? " pin-on" : ""}${picked.has(r.placeId) ? " pin-picked" : ""}`, type: "button", "aria-label": picked.has(r.placeId) ? t("{name} (in your picks)", { name: r.name }) : r.name }, "");
         dot.addEventListener("click", (e) => {
           e.stopPropagation();
           handlers.onSelectResult(r.placeId);
@@ -314,7 +315,7 @@ async function googleMap(el, config, handlers) {
       spotMarker.position = spot ? { lat: spot.lat, lng: spot.lng } : null;
       spotMarker.map = spot ? map : null;
       returnBtn.disabled = !spot;
-      returnBtn.title = spot ? "Return to my spot" : "Pick a spot on the map first";
+      returnBtn.title = spot ? t("Return to my spot") : t("Pick a spot on the map first");
     },
     // Moves the camera only: no stops, routes or nearby-place requests.
     returnToMySpot() {
@@ -349,9 +350,9 @@ async function schematic(el, handlers, problem) {
   const note = h(
     "div",
     { class: "map-note" },
-    h("strong", {}, "Schematic view, not a map."),
+    h("strong", {}, t("Schematic view, not a map.")),
     " ",
-    problem ?? "The interactive Google map needs GOOGLE_MAPS_BROWSER_KEY on the server. Stops are placed by their coordinates.",
+    problem ?? t("The interactive Google map needs GOOGLE_MAPS_BROWSER_KEY on the server. Stops are placed by their coordinates."),
   );
   el.replaceChildren(box, note);
   const svgEl = document.createElementNS(NS, "svg");
@@ -377,13 +378,13 @@ async function schematic(el, handlers, problem) {
       const H = Math.max(box.clientHeight, 280) || 640;
       svgEl.setAttribute("viewBox", `0 0 ${W} ${H}`);
       svgEl.replaceChildren();
-      svgEl.setAttribute("aria-label", stops.length ? `Schematic of ${stops.length} stops in plan order` : "Empty schematic");
+      svgEl.setAttribute("aria-label", stops.length ? t("Schematic of {n} stops in plan order", { n: stops.length }) : t("Empty schematic"));
       for (let x = 0; x <= W; x += 50) node("line", { x1: x, y1: 0, x2: x, y2: H, class: "grid" });
       for (let y = 0; y <= H; y += 50) node("line", { x1: 0, y1: y, x2: W, y2: y, class: "grid" });
       const pts = [...stops, ...results];
       if (!pts.length) {
-        const t = node("text", { x: W / 2, y: H / 2, "text-anchor": "middle", class: "schematic-empty" });
-        t.textContent = "Search for a place to see it here";
+        const txt = node("text", { x: W / 2, y: H / 2, "text-anchor": "middle", class: "schematic-empty" });
+        txt.textContent = t("Search for a place to see it here");
         return;
       }
       const lats = pts.map((p) => p.lat);
@@ -409,11 +410,11 @@ async function schematic(el, handlers, problem) {
       const picked = new Set(data.picked ?? []);
       results.forEach((r) => {
         const [x, y] = at(r);
-        const g = node("g", { class: `schematic-result${r.placeId === selectedPlaceId ? " on" : ""}${picked.has(r.placeId) ? " picked" : ""}`, tabindex: 0, role: "button", "aria-label": picked.has(r.placeId) ? `${r.name} (in your picks)` : r.name });
+        const g = node("g", { class: `schematic-result${r.placeId === selectedPlaceId ? " on" : ""}${picked.has(r.placeId) ? " picked" : ""}`, tabindex: 0, role: "button", "aria-label": picked.has(r.placeId) ? t("{name} (in your picks)", { name: r.name }) : r.name });
         node("circle", { cx: x, cy: y, r: 8 }, g);
         const left = x > W * 0.62;
-        const t = node("text", { x: left ? x - 13 : x + 13, y: y + 4.5, "text-anchor": left ? "end" : "start" }, g);
-        t.textContent = r.name;
+        const txt = node("text", { x: left ? x - 13 : x + 13, y: y + 4.5, "text-anchor": left ? "end" : "start" }, g);
+        txt.textContent = r.name;
         const pick = () => handlers.onSelectResult(r.placeId);
         g.addEventListener("click", pick);
         g.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), pick()));
@@ -421,14 +422,14 @@ async function schematic(el, handlers, problem) {
       stops.forEach((s, i) => {
         const [x, y] = at(s);
         const label = stopLabel(stops, i);
-        const g = node("g", { class: `schematic-stop${s.start ? " start" : ""}${s.selected ? " on" : ""}`, tabindex: 0, role: "button", "aria-label": s.start ? `Start: ${s.title}` : `Stop ${label}: ${s.title}`, style: `--k:${KIND_COLOUR[s.kind]}` });
+        const g = node("g", { class: `schematic-stop${s.start ? " start" : ""}${s.selected ? " on" : ""}`, tabindex: 0, role: "button", "aria-label": s.start ? t("Start: {title}", { title: s.title }) : t("Stop {n}: {title}", { n: label, title: s.title }), style: `--k:${KIND_COLOUR[s.kind]}` });
         node("circle", { cx: x, cy: y, r: 14 }, g);
         const n = node("text", { x, y: y + 4.5, "text-anchor": "middle", class: "num" }, g);
         n.textContent = label;
         // labels near the right edge go on the left of the marker
         const left = x > W * 0.62;
-        const t = node("text", { x: left ? x - 20 : x + 20, y: y + 4.5, class: "label", "text-anchor": left ? "end" : "start" }, g);
-        t.textContent = s.title;
+        const txt = node("text", { x: left ? x - 20 : x + 20, y: y + 4.5, class: "label", "text-anchor": left ? "end" : "start" }, g);
+        txt.textContent = s.title;
         const pick = () => handlers.onSelectStop(s.id);
         g.addEventListener("click", pick);
         g.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), pick()));

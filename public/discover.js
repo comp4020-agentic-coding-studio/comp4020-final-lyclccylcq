@@ -1,5 +1,6 @@
 import { itineraryCard } from "/home.js";
 import { api, h, icon, km } from "/ui.js";
+import { getLang, t, tn } from "/i18n.js";
 
 // Trip discovery, map-first. The homepage map holds one shared selection:
 // the destination, the places saved from the map ("my picks"), and the
@@ -23,7 +24,7 @@ export const LENGTHS = [
   [3, "3 days"],
   [4, "4–5 days"],
 ];
-const lengthLabel = (n) => (n >= 4 ? "4–5 days" : n === 1 ? "1 day" : `${n} days`);
+const lengthLabel = (n) => (n >= 4 ? t("4–5 days") : n === 1 ? t("1 day") : t("{n} days", { n }));
 const KEY = "wayline.discover"; // this tab's picks, preferences, last question and the plan it opened
 export const MAX_PICKS = 8;
 
@@ -136,7 +137,7 @@ const kmApart = (a, b) => {
 // the answer into `into` (curated cards with why each is there).
 export async function findJourneys(ctx, picks, origin, into, { onRelax } = {}) {
   const P = picks.state;
-  const asked = { where: origin?.source === "location" ? "near you" : origin?.label ? `in ${origin.label}` : "there", city: origin?.source === "location" ? null : origin?.label ?? null, places: [...P.places], food: [...P.food], days: P.days };
+  const asked = { near: origin?.source === "location", place: origin?.source === "location" ? null : origin?.label ?? null, city: origin?.source === "location" ? null : origin?.label ?? null, places: [...P.places], food: [...P.food], days: P.days };
   picks.setAsked(true);
   const r = await api("/api/itineraries/match", {
     method: "POST",
@@ -149,47 +150,56 @@ export async function findJourneys(ctx, picks, origin, into, { onRelax } = {}) {
 function resultsView(ctx, picks, { inArea, results: list }, asked, onRelax) {
   const wishes = asked.places.length > 0 || asked.food.length > 0 || asked.days !== null;
   if (!list.length) return [emptyState(ctx, picks, inArea, asked, onRelax)];
-  const full = list.filter((t) => t.match.complete).length;
+  const full = list.filter((it) => it.match.complete).length;
+  const n = list.length;
   const lead = !wishes
-    ? `Every ready-made plan ${asked.where}: ${list.length}.`
-    : full === list.length
-      ? `${list.length} ${list.length === 1 ? "plan matches" : "plans match"} everything you picked.`
+    ? asked.near
+      ? t("Every ready-made plan near you: {n}.", { n })
+      : asked.place
+        ? t("Every ready-made plan in {place}: {n}.", { place: asked.place, n })
+        : t("Every ready-made plan there: {n}.", { n })
+    : full === n
+      ? tn(n, "{n} plan matches everything you picked.", "{n} plans match everything you picked.")
       : full
-        ? `${full} of ${list.length} plans match everything you picked; the others match part of it.`
-        : `No plan ${asked.where} has everything you picked. ${list.length === 1 ? "This one has" : `These ${list.length} have`} some of it.`;
+        ? t("{full} of {n} plans match everything you picked; the others match part of it.", { full, n })
+        : asked.near
+          ? tn(n, "No plan near you has everything you picked. This one has some of it.", "No plan near you has everything you picked. These {n} have some of it.")
+          : asked.place
+            ? tn(n, "No plan in {place} has everything you picked. This one has some of it.", "No plan in {place} has everything you picked. These {n} have some of it.", { place: asked.place })
+            : tn(n, "No plan there has everything you picked. This one has some of it.", "No plan there has everything you picked. These {n} have some of it.");
   return [
     h("p", { class: "dx-results-lead" }, lead),
-    h("div", { class: "it-grid dx-grid" }, list.map((t) => resultCard(ctx, picks, t, asked, wishes))),
+    h("div", { class: "it-grid dx-grid" }, list.map((it) => resultCard(ctx, picks, it, asked, wishes))),
   ];
 }
 
 // a curated card, plus why it's here, said only from the plan's own stops
-function resultCard(ctx, picks, t, asked, wishes) {
-  const card = itineraryCard(t, ctx);
+function resultCard(ctx, picks, it, asked, wishes) {
+  const card = itineraryCard(it, ctx);
   card.addEventListener("click", (e) => {
-    if (e.target.closest("a, button")) picks.opened(t.id);
+    if (e.target.closest("a, button")) picks.opened(it.id);
   }, true);
   if (!wishes) return card;
-  const m = t.match;
+  const m = it.match;
   const lines = [];
-  if (m.places.length) lines.push(h("li", { class: "dx-yes" }, `Includes ${listOf(m.places.map((p) => `${p.stop}${t.days > 1 ? ` (day ${p.day})` : ""}`))}.`));
+  if (m.places.length) lines.push(h("li", { class: "dx-yes" }, t("Includes {stops}.", { stops: listOf(m.places.map((p) => (it.days > 1 ? t("{stop} (day {day})", { stop: p.stop, day: p.day }) : p.stop))) })));
   for (const x of m.missing) {
-    const name = asked.places[x.want]?.label ?? "a place you picked";
-    lines.push(h("li", { class: "dx-no" }, Number.isFinite(x.nearestKm) ? `Doesn’t go to ${name}; its nearest stop is ${km(x.nearestKm)} away.` : `Doesn’t go to ${name}.`));
+    const name = asked.places[x.want]?.label ?? t("a place you picked");
+    lines.push(h("li", { class: "dx-no" }, Number.isFinite(x.nearestKm) ? t("Doesn’t go to {name}; its nearest stop is {distance} away.", { name, distance: km(x.nearestKm) }) : t("Doesn’t go to {name}.", { name })));
   }
-  for (const f of m.food) lines.push(h("li", { class: "dx-yes" }, `${FOOD_LABEL[f.style]}: ${listOf(f.stops)}.`));
-  if (asked.food.length && !m.food.length) lines.push(h("li", { class: "dx-no" }, `No stop marked for ${listOf(asked.food.map((f) => FOOD_LABEL[f].toLowerCase()), "or")}.`));
+  for (const f of m.food) lines.push(h("li", { class: "dx-yes" }, t("{food}: {stops}.", { food: t(FOOD_LABEL[f.style]), stops: listOf(f.stops) })));
+  if (asked.food.length && !m.food.length) lines.push(h("li", { class: "dx-no" }, t("No stop marked for {food}.", { food: listOf(asked.food.map((f) => t(FOOD_LABEL[f]).toLowerCase()), "or") })));
   if (m.duration) {
     const d = m.duration;
     lines.push(
       h(
         "li",
         { class: d.fit === "exact" ? "dx-yes" : "dx-no" },
-        d.fit === "exact" ? `${lengthLabel(t.days)}, as you asked.` : d.fit === "shorter" ? `${lengthLabel(t.days)}, shorter than the ${lengthLabel(d.want)} you asked for: room to add your own.` : `${lengthLabel(t.days)}, longer than the ${lengthLabel(d.want)} you asked for.`,
+        d.fit === "exact" ? t("{length}, as you asked.", { length: lengthLabel(it.days) }) : d.fit === "shorter" ? t("{length}, shorter than the {want} you asked for: room to add your own.", { length: lengthLabel(it.days), want: lengthLabel(d.want) }) : t("{length}, longer than the {want} you asked for.", { length: lengthLabel(it.days), want: lengthLabel(d.want) }),
       ),
     );
   }
-  const why = h("div", { class: "dx-why" }, h("p", { class: `dx-fit${m.complete ? " dx-fit-full" : ""}` }, m.complete ? "Matches what you picked" : "Partial match"), h("ul", {}, lines));
+  const why = h("div", { class: "dx-why" }, h("p", { class: `dx-fit${m.complete ? " dx-fit-full" : ""}` }, m.complete ? t("Matches what you picked") : t("Partial match")), h("ul", {}, lines));
   card.querySelector(".it-body").insertBefore(why, card.querySelector(".it-foot"));
   return card;
 }
@@ -200,28 +210,38 @@ function resultCard(ctx, picks, t, asked, wishes) {
 function emptyState(ctx, picks, inArea, asked, onRelax) {
   const relax = [];
   const again = () => onRelax?.();
-  if (asked.places.length) relax.push(["Without my places", () => { picks.set({ places: [] }); again(); }]);
-  if (asked.food.length) relax.push(["Any food", () => { picks.set({ food: [] }); again(); }]);
-  if (asked.days !== null) relax.push(["Any length", () => { picks.set({ days: null }); again(); }]);
+  if (asked.places.length) relax.push([t("Without my places"), () => { picks.set({ places: [] }); again(); }]);
+  if (asked.food.length) relax.push([t("Any food"), () => { picks.set({ food: [] }); again(); }]);
+  if (asked.days !== null) relax.push([t("Any length"), () => { picks.set({ days: null }); again(); }]);
   return h(
     "div",
     { class: "dx-empty" },
     inArea === 0
-      ? [h("p", { class: "dx-empty-title" }, `Wayline doesn’t have ready-made plans ${asked.where} yet.`), h("p", { class: "muted" }, "Start your own trip there and add the places yourself, or pick one of the cities under Explore ready-made trips.")]
+      ? [h("p", { class: "dx-empty-title" }, asked.near ? t("Wayline doesn’t have ready-made plans near you yet.") : asked.place ? t("Wayline doesn’t have ready-made plans in {place} yet.", { place: asked.place }) : t("Wayline doesn’t have ready-made plans there yet.")), h("p", { class: "muted" }, t("Start your own trip there and add the places yourself, or pick one of the cities under Explore ready-made trips."))]
       : [
-          h("p", { class: "dx-empty-title" }, `None of the ${inArea} ${inArea === 1 ? "plan" : "plans"} ${asked.where} ${asked.places.length ? "go to the places you picked" : "match that"}.`),
-          h("p", { class: "muted" }, "Loosen one choice, or start your own trip and add them yourself."),
+          h("p", { class: "dx-empty-title" }, noneMatch(inArea, asked)),
+          h("p", { class: "muted" }, t("Loosen one choice, or start your own trip and add them yourself.")),
         ],
     h(
       "div",
       { class: "dx-empty-actions" },
       relax.map(([label, go]) => h("button", { type: "button", class: "btn btn-ghost btn-sm", onclick: go }, label)),
-      h("button", { type: "button", class: "btn btn-outline btn-sm", onclick: () => ctx.createTrip(asked.city ?? "") }, icon("plus"), "Start my own trip"),
+      h("button", { type: "button", class: "btn btn-outline btn-sm", onclick: () => ctx.createTrip(asked.city ?? "") }, icon("plus"), t("Start my own trip")),
     ),
   );
 }
 
+// "None of the 3 plans in Kyoto go to the places you picked."
+function noneMatch(n, asked) {
+  const places = asked.places.length > 0;
+  if (asked.near) return places ? tn(n, "None of the {n} plan near you go to the places you picked.", "None of the {n} plans near you go to the places you picked.") : tn(n, "None of the {n} plan near you match that.", "None of the {n} plans near you match that.");
+  if (asked.place) return places ? tn(n, "None of the {n} plan in {place} go to the places you picked.", "None of the {n} plans in {place} go to the places you picked.", { place: asked.place }) : tn(n, "None of the {n} plan in {place} match that.", "None of the {n} plans in {place} match that.", { place: asked.place });
+  return places ? tn(n, "None of the {n} plan there go to the places you picked.", "None of the {n} plans there go to the places you picked.") : tn(n, "None of the {n} plan there match that.", "None of the {n} plans there match that.");
+}
+
 function listOf(items, joiner = "and") {
   if (items.length <= 1) return items.join("");
+  // Chinese: 、 between items, 和/或 before the last
+  if (getLang() === "zh") return `${items.slice(0, -1).join("、")}${t(joiner)}${items[items.length - 1]}`;
   return `${items.slice(0, -1).join(", ")} ${joiner} ${items[items.length - 1]}`;
 }

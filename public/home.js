@@ -4,6 +4,7 @@ import { journeyHero } from "/journey-hero.js";
 import { photoStream, streamItems } from "/media.js";
 import { coverImg, photoFor } from "/photos.js";
 import { placeDialog } from "/places.js";
+import { t, tn } from "/i18n.js";
 import { api, CATEGORY_LABEL, dur, fmtRange, h, icon, km, relTime, uid } from "/ui.js";
 
 const CATEGORY_ICON = { "food-culture": "food", "nature-outdoors": "leaf", "city-highlights": "city" };
@@ -41,39 +42,39 @@ const kmApart = (a, b) => {
 const permissionState = () =>
   navigator.permissions?.query({ name: "geolocation" }).then((p) => p.state, () => null) ?? Promise.resolve(null);
 
-export function itineraryCard(t, { navigate }, n = null) {
-  const shared = t.source === "user";
-  const primary = t.categories.find((c) => !["half-day", "one-day", "weekend"].includes(c)) ?? t.categories[0];
-  const length = t.days > 1 ? `${t.days} days` : `About ${dur(Math.round(t.durationMin / 30) * 30)}`;
-  const open = () => navigate(`/itineraries/${t.id}`);
-  const photo = photoFor(shared ? t.cover : t.id);
+export function itineraryCard(it, { navigate }, n = null) {
+  const shared = it.source === "user";
+  const primary = it.categories.find((c) => !["half-day", "one-day", "weekend"].includes(c)) ?? it.categories[0];
+  const length = it.days > 1 ? t("{n} days", { n: it.days }) : t("About {time}", { time: dur(Math.round(it.durationMin / 30) * 30) });
+  const open = () => navigate(`/itineraries/${it.id}`);
+  const photo = photoFor(shared ? it.cover : it.id);
   return h(
     "article",
-    { class: "it-card", dataset: { id: t.id } },
+    { class: "it-card", dataset: { id: it.id } },
     n !== null && h("span", { class: "it-n", "aria-hidden": "true" }, String(n + 1).padStart(2, "0")),
     h(
       "div",
-      { class: `it-cover cover-${primary}${photo ? " has-photo" : ""}`, style: `--hue:${(CATEGORY_HUE[primary] ?? 260) + (hue(t.title) % 28)}` },
+      { class: `it-cover cover-${primary}${photo ? " has-photo" : ""}`, style: `--hue:${(CATEGORY_HUE[primary] ?? 260) + (hue(it.title) % 28)}` },
       coverImg(photo),
       h("span", { class: "it-cover-glyph", "aria-hidden": "true" }, icon(CATEGORY_ICON[primary] ?? "spark")),
-      h("span", { class: "it-cover-dest", "aria-hidden": "true" }, t.destination),
+      h("span", { class: "it-cover-dest", "aria-hidden": "true" }, it.destination),
     ),
     h(
       "div",
       { class: "it-body" },
-      h("p", { class: "it-tags" }, t.categories.map((c) => h("span", { class: "tag" }, CATEGORY_LABEL[c] ?? c))),
-      h("h3", {}, h("a", { href: `/itineraries/${t.id}`, "data-link": true }, t.title)),
+      h("p", { class: "it-tags" }, it.categories.map((c) => h("span", { class: "tag" }, CATEGORY_LABEL[c] ?? c))),
+      h("h3", {}, h("a", { href: `/itineraries/${it.id}`, "data-link": true }, it.title)),
       h(
         "p",
         { class: "it-meta" },
-        h("span", {}, t.destination),
+        h("span", {}, it.destination),
         h("span", {}, length),
-        h("span", {}, `${t.stopCount} ${t.stopCount === 1 ? "stop" : "stops"}`),
-        typeof t.distanceKm === "number" && h("span", { class: "it-distance" }, t.distanceKm < 1 ? "Right here" : `${km(t.distanceKm)} away`),
+        h("span", {}, tn(it.stopCount, "{n} stop", "{n} stops")),
+        typeof it.distanceKm === "number" && h("span", { class: "it-distance" }, it.distanceKm < 1 ? t("Right here") : t("{distance} away", { distance: km(it.distanceKm) })),
       ),
-      h("p", { class: "it-desc" }, t.description),
-      shared && h("p", { class: "it-rating small", "data-rating": t.rating.count }, t.rating.count ? `★ ${t.rating.average.toFixed(1)} / 5 · ${t.rating.count} ${t.rating.count === 1 ? "review" : "reviews"}` : "No ratings yet"),
-      h("div", { class: "it-foot" }, h("span", { class: `it-source${shared ? " it-source-user" : ""}` }, shared ? `Shared by ${t.author}` : "Curated by Wayline"), h("button", { class: "btn btn-outline btn-sm", type: "button", onclick: open }, "Preview")),
+      h("p", { class: "it-desc" }, it.description),
+      shared && h("p", { class: "it-rating small", "data-rating": it.rating.count }, it.rating.count ? tn(it.rating.count, "★ {avg} / 5 · {n} review", "★ {avg} / 5 · {n} reviews", { avg: it.rating.average.toFixed(1) }) : t("No ratings yet")),
+      h("div", { class: "it-foot" }, h("span", { class: `it-source${shared ? " it-source-user" : ""}` }, shared ? t("Shared by {name}", { name: it.author }) : t("Curated by Wayline")), h("button", { class: "btn btn-outline btn-sm", type: "button", onclick: open }, t("Preview"))),
     ),
   );
 }
@@ -82,24 +83,24 @@ const hue = (s) => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
 
 // the band shows the trip's cover photo when there is one (credited on
 // /credits), else its colour; a photo that fails to load leaves the colour
-export function tripCard(t, { cls = "trip-card" } = {}) {
-  const photo = photoFor(t.cover);
+export function tripCard(it, { cls = "trip-card" } = {}) {
+  const photo = photoFor(it.cover);
   return h(
     "a",
-    { class: cls, href: `/trips/${t.id}`, "data-link": true, style: `--hue:${hue(t.destination)}` },
-    h("div", { class: `trip-card-band${photo ? " has-photo" : ""}` }, coverImg(photo, { decorative: true }), h("span", { class: "trip-card-dest" }, t.destination)),
+    { class: cls, href: `/trips/${it.id}`, "data-link": true, style: `--hue:${hue(it.destination)}` },
+    h("div", { class: `trip-card-band${photo ? " has-photo" : ""}` }, coverImg(photo, { decorative: true }), h("span", { class: "trip-card-dest" }, it.destination)),
     h(
       "div",
       { class: "trip-card-body" },
-      h("h3", {}, t.title),
-      h("p", { class: "trip-card-dates" }, fmtRange(t.startDate, t.endDate)),
-      t.basedOn && h("p", { class: "trip-card-origin small muted" }, `Based on a trip by ${t.basedOn}`),
+      h("h3", {}, it.title),
+      h("p", { class: "trip-card-dates" }, fmtRange(it.startDate, it.endDate)),
+      it.basedOn && h("p", { class: "trip-card-origin small muted" }, t("Based on a trip by {name}", { name: it.basedOn })),
       h(
         "p",
         { class: "trip-card-meta" },
-        h("span", {}, `${t.people} ${t.people === 1 ? "traveller" : "travellers"}`),
-        t.role !== "owner" && h("span", {}, `Owner: ${t.ownerName}`),
-        h("span", {}, `Updated ${relTime(t.updatedAt)}`),
+        h("span", {}, tn(it.people, "{n} traveller", "{n} travellers")),
+        it.role !== "owner" && h("span", {}, t("Owner: {name}", { name: it.ownerName })),
+        h("span", {}, t("Updated {when}", { when: relTime(it.updatedAt) })),
       ),
     ),
   );
@@ -129,7 +130,7 @@ export function renderHome(app, ctx) {
   const input = h("input", {
     type: "search",
     id: "dest-search",
-    placeholder: "Search a city or destination",
+    placeholder: t("Search a city or destination"),
     autocomplete: "off",
     role: "combobox",
     "aria-expanded": "false",
@@ -138,25 +139,25 @@ export function renderHome(app, ctx) {
     maxlength: 80,
   });
   const list = h("ul", { id: "dest-list", class: "suggest", role: "listbox", hidden: true });
-  const geoBtn = h("button", { class: "btn btn-ghost geo-btn", type: "button", onclick: () => useMyLocation() }, icon("locate"), "Use my location");
+  const geoBtn = h("button", { class: "btn btn-ghost geo-btn", type: "button", onclick: () => useMyLocation() }, icon("locate"), t("Use my location"));
   const status = h("p", { class: "hero-status", role: "status" });
   const placeChip = h("div", { class: "place-chip" });
   // first visit only: the browser's own prompt appears after "Use my location" is pressed
   const geoPrompt = h(
     "div",
-    { class: "geo-prompt", role: "region", "aria-label": "Use your location", hidden: true },
+    { class: "geo-prompt", role: "region", "aria-label": t("Use your location"), hidden: true },
     h("span", { class: "geo-prompt-icon", "aria-hidden": "true" }, icon("locate")),
     h(
       "div",
       { class: "geo-prompt-text" },
-      h("strong", {}, "See what's near you?"),
-      h("p", {}, "Your browser asks first. Wayline keeps only a rough copy (about 1 km), on this device."),
+      h("strong", {}, t("See what's near you?")),
+      h("p", {}, t("Your browser asks first. Wayline keeps only a rough copy (about 1 km), on this device.")),
     ),
     h(
       "div",
       { class: "geo-prompt-actions" },
-      h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => useMyLocation() }, "Use my location"),
-      h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: notNow }, "Not now"),
+      h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => useMyLocation() }, t("Use my location")),
+      h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: notNow }, t("Not now")),
     ),
   );
 
@@ -178,10 +179,10 @@ export function renderHome(app, ctx) {
     h(
       "form",
       { class: "hero-search", role: "search", onsubmit: (e) => { e.preventDefault(); pick(S.active >= 0 ? S.active : 0); } },
-      h("label", { for: "dest-search", class: "sr-only" }, "Search a destination"),
+      h("label", { for: "dest-search", class: "sr-only" }, t("Search a destination")),
       icon("search"),
       input,
-      h("button", { class: "btn btn-primary", type: "submit" }, "Explore"),
+      h("button", { class: "btn btn-primary", type: "submit" }, t("Explore")),
       list,
     ),
     geoPrompt,
@@ -221,7 +222,7 @@ export function renderHome(app, ctx) {
       if (err.name === "AbortError") return;
       S.suggestions = [];
       list.hidden = false;
-      list.replaceChildren(h("li", { class: "suggest-empty" }, err.message || "Search isn't available right now."));
+      list.replaceChildren(h("li", { class: "suggest-empty" }, err.message || t("Search isn't available right now.")));
     }
   }
 
@@ -229,7 +230,7 @@ export function renderHome(app, ctx) {
     list.hidden = false;
     input.setAttribute("aria-expanded", "true");
     if (!S.suggestions.length) {
-      list.replaceChildren(h("li", { class: "suggest-empty" }, S.source === "demo" ? "Without Google configured, only Canberra, Sydney and Tokyo can be searched. The cities under Explore ready-made trips work too." : "No matching destinations."));
+      list.replaceChildren(h("li", { class: "suggest-empty" }, S.source === "demo" ? t("Without Google configured, only Canberra, Sydney and Tokyo can be searched. The cities under Explore ready-made trips work too.") : t("No matching destinations.")));
       return;
     }
     list.replaceChildren(
@@ -241,7 +242,7 @@ export function renderHome(app, ctx) {
           s.secondary && h("span", {}, s.secondary),
         ),
       ),
-      S.source === "demo" ? h("li", { class: "suggest-foot" }, "Demo destinations (Google not configured)") : h("li", { class: "suggest-foot attrib", translate: "no" }, "Google Maps"),
+      S.source === "demo" ? h("li", { class: "suggest-foot" }, t("Demo destinations (Google not configured)")) : h("li", { class: "suggest-foot attrib", translate: "no" }, "Google Maps"),
     );
     if (S.active >= 0) input.setAttribute("aria-activedescendant", `dest-opt-${S.active}`);
   }
@@ -256,7 +257,7 @@ export function renderHome(app, ctx) {
     const s = S.suggestions[i];
     if (!s) return;
     closeList();
-    status.textContent = `Loading ${s.main}…`;
+    status.textContent = t("Loading {place}…", { place: s.main });
     try {
       const p = await api(`/api/places/${encodeURIComponent(s.placeId)}?view=basic${S.session ? `&session=${S.session}` : ""}`);
       S.session = null; // the session ends with the details call
@@ -273,7 +274,7 @@ export function renderHome(app, ctx) {
   // --- location ---
   async function useMyLocation() {
     if (geoDenied() && (await permissionState()) !== "granted") {
-      status.textContent = "Location access is off for Wayline in this browser. Search for a destination instead, or allow location in your browser settings and reload.";
+      status.textContent = t("Location access is off for Wayline in this browser. Search for a destination instead, or allow location in your browser settings and reload.");
       return;
     }
     locate();
@@ -288,11 +289,11 @@ export function renderHome(app, ctx) {
   // the browser still grants permission, so no prompt can appear
   function locate({ quiet = false } = {}) {
     if (!navigator.geolocation) {
-      if (!quiet) status.textContent = "This browser can't share its location. Search for a destination instead.";
+      if (!quiet) status.textContent = t("This browser can't share its location. Search for a destination instead.");
       return;
     }
     geoBtn.disabled = true;
-    if (!quiet) status.textContent = "Finding your location…";
+    if (!quiet) status.textContent = t("Finding your location…");
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
@@ -302,7 +303,7 @@ export function renderHome(app, ctx) {
           try {
             label = (await api(`/api/geo/reverse?lat=${here.lat}&lng=${here.lng}`)).label;
           } catch {
-            label = "Your location";
+            label = t("Your location");
           }
         }
         geoBtn.disabled = false;
@@ -316,10 +317,10 @@ export function renderHome(app, ctx) {
           store.set(GEO_KEY, "denied");
           S.current = null; // permission withdrawn: don't keep using an old position
           store.set(LOC_KEY, null);
-          if (!quiet) status.textContent = "Location permission was denied, so Wayline won't ask again. Search for a destination instead.";
+          if (!quiet) status.textContent = t("Location permission was denied, so Wayline won't ask again. Search for a destination instead.");
           refresh();
         } else if (!quiet) {
-          status.textContent = err.code === 3 ? "Finding your location took too long. Try again, or search for a destination." : "Your location couldn't be determined. Search for a destination instead.";
+          status.textContent = err.code === 3 ? t("Finding your location took too long. Try again, or search for a destination.") : t("Your location couldn't be determined. Search for a destination instead.");
         }
       },
       { enableHighAccuracy: false, timeout: 10_000, maximumAge: 10 * 60_000 },
@@ -376,21 +377,21 @@ export function renderHome(app, ctx) {
   }
 
   function renderPlaceChip() {
-    if (!S.place) return placeChip.replaceChildren(geoDenied() ? h("span", { class: "muted small" }, "Location is off. Search for a destination above.") : "");
-    const change = h("button", { class: "linklike small", type: "button", onclick: () => input.focus() }, "Change");
+    if (!S.place) return placeChip.replaceChildren(geoDenied() ? h("span", { class: "muted small" }, t("Location is off. Search for a destination above.")) : "");
+    const change = h("button", { class: "linklike small", type: "button", onclick: () => input.focus() }, t("Change"));
     if (S.place.source === "location") {
       return placeChip.replaceChildren(
-        h("span", { class: "chip chip-place" }, icon("locate"), "Current location: ", h("strong", {}, S.place.label)),
+        h("span", { class: "chip chip-place" }, icon("locate"), t("Current location: "), h("strong", {}, S.place.label)),
         change,
-        h("button", { class: "linklike small", type: "button", onclick: forgetLocation }, "Forget"),
+        h("button", { class: "linklike small", type: "button", onclick: forgetLocation }, t("Forget")),
       );
     }
     placeChip.replaceChildren(
-      h("span", { class: "chip chip-place" }, icon("pin"), "Exploring: ", h("strong", {}, S.place.label)),
+      h("span", { class: "chip chip-place" }, icon("pin"), t("Exploring: "), h("strong", {}, S.place.label)),
       change,
       S.current
-        ? h("button", { class: "linklike small", type: "button", onclick: clearDestination }, `Back to ${S.current.label}`)
-        : h("button", { class: "linklike small", type: "button", onclick: clearDestination }, "Clear"),
+        ? h("button", { class: "linklike small", type: "button", onclick: clearDestination }, t("Back to {place}", { place: S.current.label }))
+        : h("button", { class: "linklike small", type: "button", onclick: clearDestination }, t("Clear")),
     );
   }
 
@@ -400,16 +401,16 @@ export function renderHome(app, ctx) {
   // that match the visitor's picks, with why each is there.
   const nearTitle = h("h2", {});
   const nearSub = h("p", { class: "section-sub" });
-  const chips = h("div", { class: "cat-chips", role: "group", "aria-label": "Filter by category" });
+  const chips = h("div", { class: "cat-chips", role: "group", "aria-label": t("Filter by category") });
   const nearGrid = h("div", { class: "it-grid", "aria-live": "polite" });
   const matchBox = h("div", { class: "dx-results", "aria-live": "polite" });
-  const backToAll = h("button", { class: "linklike small", type: "button", onclick: () => { picks.setAsked(false); renderNearMode(); loadNear(); } }, "Show every plan here instead");
+  const backToAll = h("button", { class: "linklike small", type: "button", onclick: () => { picks.setAsked(false); renderNearMode(); loadNear(); } }, t("Show every plan here instead"));
   const near = h("section", { class: "home-section near", id: "near" }, h("div", { class: "section-head" }, h("div", {}, nearTitle, nearSub)), chips, nearGrid, matchBox);
   const picks = createPicks();
 
   function renderChips() {
     chips.replaceChildren(
-      ...[["all", "All"], ...Object.entries(CATEGORY_LABEL)].map(([k, label]) =>
+      ...[["all", t("All")], ...Object.entries(CATEGORY_LABEL)].map(([k, label]) =>
         h("button", { type: "button", class: `cat-chip${S.category === k ? " on" : ""}`, "aria-pressed": String(S.category === k), onclick: () => { S.category = k; renderChips(); loadNear(); } }, label),
       ),
     );
@@ -435,14 +436,16 @@ export function renderHome(app, ctx) {
     renderNearMode();
     near.hidden = false;
     const P = picks.state;
-    nearTitle.textContent = S.place.source === "location" ? "Journeys near you" : `Journeys for ${S.place.label}`;
+    nearTitle.textContent = S.place.source === "location" ? t("Journeys near you") : t("Journeys for {place}", { place: S.place.label });
     nearSub.replaceChildren(
       P.places.length || P.food.length || P.days !== null
-        ? `Wayline\u2019s ready-made plans, ranked by the places, length and food you picked on the map. `
-        : `Every ready-made plan ${S.place.source === "location" ? "near you" : `for ${S.place.label}`}. Save places on the map to rank them. `,
+        ? t("Wayline\u2019s ready-made plans, ranked by the places, length and food you picked on the map. ")
+        : S.place.source === "location"
+          ? t("Every ready-made plan near you. Save places on the map to rank them. ")
+          : t("Every ready-made plan for {place}. Save places on the map to rank them. ", { place: S.place.label }),
       backToAll,
     );
-    matchBox.replaceChildren(h("p", { class: "muted" }, "Looking through Wayline\u2019s plans\u2026"));
+    matchBox.replaceChildren(h("p", { class: "muted" }, t("Looking through Wayline\u2019s plans\u2026")));
     if (scroll) near.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
     try {
       const into = h("div", {});
@@ -459,10 +462,12 @@ export function renderHome(app, ctx) {
     renderNearMode();
     const seq = ++loadSeq;
     const cat = S.category === "all" ? "" : `&category=${S.category}`;
-    nearTitle.textContent = S.place ? (S.place.source === "location" ? "Near you" : `Ideas for ${S.place.label}`) : "Ideas to get you started";
+    nearTitle.textContent = S.place ? (S.place.source === "location" ? t("Near you") : t("Ideas for {place}", { place: S.place.label })) : t("Ideas to get you started");
     nearSub.textContent = S.place
-      ? `Curated itineraries ranked by distance from ${S.place.source === "location" ? "where you are" : S.place.label}.`
-      : "Use your location or search a destination to see itineraries near you. Meanwhile, here are all of Wayline's curated routes.";
+      ? S.place.source === "location"
+        ? t("Curated itineraries ranked by distance from where you are.")
+        : t("Curated itineraries ranked by distance from {place}.", { place: S.place.label })
+      : t("Use your location or search a destination to see itineraries near you. Meanwhile, here are all of Wayline's curated routes.");
     near.hidden = !S.place;
     nearGrid.replaceChildren(...skeletons());
     try {
@@ -475,17 +480,17 @@ export function renderHome(app, ctx) {
       if (seq !== loadSeq) return;
       if (itineraries.length) return fill(itineraries);
       if (S.category !== "all") {
-        nearGrid.replaceChildren(h("div", { class: "empty-inline" }, h("p", {}, `No ${CATEGORY_LABEL[S.category]} itineraries near ${S.place.label} yet.`), h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.category = "all"; renderChips(); loadNear(); } }, "Show all categories")));
+        nearGrid.replaceChildren(h("div", { class: "empty-inline" }, h("p", {}, t("No {category} itineraries near {place} yet.", { category: CATEGORY_LABEL[S.category], place: S.place.label })), h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.category = "all"; renderChips(); loadNear(); } }, t("Show all categories"))));
         return;
       }
       await attractionsFallback(seq);
     } catch (err) {
-      if (seq === loadSeq) nearGrid.replaceChildren(h("div", { class: "empty-inline" }, h("p", { class: "form-error" }, err.message), h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: loadNear }, "Try again")));
+      if (seq === loadSeq) nearGrid.replaceChildren(h("div", { class: "empty-inline" }, h("p", { class: "form-error" }, err.message), h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: loadNear }, t("Try again"))));
     }
   }
 
   function fill(items) {
-    nearGrid.replaceChildren(...(items.length ? items.map((t) => itineraryCard(t, ctx)) : [h("div", { class: "empty-inline" }, h("p", {}, "No itineraries in this category yet."))]));
+    nearGrid.replaceChildren(...(items.length ? items.map((it) => itineraryCard(it, ctx)) : [h("div", { class: "empty-inline" }, h("p", {}, t("No itineraries in this category yet.")))]));
   }
 
   // No curated itinerary nearby: individual places from Google, clearly
@@ -494,22 +499,22 @@ export function renderHome(app, ctx) {
     const intro = h(
       "div",
       { class: "empty-inline wide" },
-      h("h3", {}, `Wayline doesn't have itineraries near ${S.place.label} yet`),
-      h("p", { class: "muted" }, "Curated routes cover a set of cities across Europe, North America, East Asia and Oceania (see Explore ready-made trips). Below are individual places nearby, not complete itineraries."),
+      h("h3", {}, t("Wayline doesn't have itineraries near {place} yet", { place: S.place.label })),
+      h("p", { class: "muted" }, t("Curated routes cover a set of cities across Europe, North America, East Asia and Oceania (see Explore ready-made trips). Below are individual places nearby, not complete itineraries.")),
     );
     nearGrid.replaceChildren(intro);
     try {
       const res = await api(`/api/places/nearby?lat=${S.place.lat}&lng=${S.place.lng}&radius=15000`);
       if (seq !== loadSeq) return;
       if (!res.places.length) {
-        intro.append(h("p", { class: "muted small" }, res.source === "demo" ? "Nearby places need Google Maps configured on the server." : "Google Maps found no notable places nearby."));
+        intro.append(h("p", { class: "muted small" }, res.source === "demo" ? t("Nearby places need Google Maps configured on the server.") : t("Google Maps found no notable places nearby.")));
         return;
       }
       nearGrid.append(
         h(
           "div",
           { class: "attractions wide" },
-          h("h3", { class: "attractions-title" }, "Individual places nearby"),
+          h("h3", { class: "attractions-title" }, t("Individual places nearby")),
           h(
             "ul",
             { class: "place-list" },
@@ -527,7 +532,7 @@ export function renderHome(app, ctx) {
               ),
             ),
           ),
-          res.source === "google" ? h("p", { class: "attrib", translate: "no" }, "Google Maps") : h("p", { class: "demo-note" }, "Demo places (Google not configured)."),
+          res.source === "google" ? h("p", { class: "attrib", translate: "no" }, "Google Maps") : h("p", { class: "demo-note" }, t("Demo places (Google not configured).")),
         ),
       );
     } catch (err) {
@@ -555,7 +560,7 @@ export function renderHome(app, ctx) {
     return h(
       "div",
       {},
-      h("p", { class: "xm-ideas-title" }, "Or start with a city"),
+      h("p", { class: "xm-ideas-title" }, t("Or start with a city")),
       h("div", { class: "xm-ideas" }, D.destinations.slice(0, 12).map((d) => h("button", { type: "button", class: "cat-chip", onclick: () => setDestination({ label: d.name, lat: d.lat, lng: d.lng }) }, d.name))),
     );
   }
@@ -564,13 +569,13 @@ export function renderHome(app, ctx) {
   // Global browsing by region and country, separate from "near you" (which
   // only ever uses a place the visitor chose or a location they shared).
   const AREA_ALL = "all";
-  const regionTabs = h("div", { class: "rx-tabs", role: "tablist", "aria-label": "Regions" });
-  const countryTabs = h("div", { class: "rx-countries", role: "group", "aria-label": "Countries", hidden: true });
+  const regionTabs = h("div", { class: "rx-tabs", role: "tablist", "aria-label": t("Regions") });
+  const countryTabs = h("div", { class: "rx-countries", role: "group", "aria-label": t("Countries"), hidden: true });
   const destGrid = h("div", { class: "rx-grid", "aria-live": "polite" });
   const regions = h(
     "section",
     { class: "home-section rx", id: "explore" },
-    h("div", { class: "section-head rx-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "03"), "Curated by Wayline"), h("h2", {}, "Explore ready-made trips"), h("p", { class: "section-sub" }, "Itineraries written by the Wayline team, city by city. To find the ones that fit you, save a few places on the map above."))),
+    h("div", { class: "section-head rx-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "03"), t("Curated by Wayline")), h("h2", {}, t("Explore ready-made trips")), h("p", { class: "section-sub" }, t("Itineraries written by the Wayline team, city by city. To find the ones that fit you, save a few places on the map above.")))),
     h("div", { class: "rx-filters" }, regionTabs, countryTabs),
     destGrid,
   );
@@ -580,17 +585,17 @@ export function renderHome(app, ctx) {
   function renderRegions() {
     const tab = (value, label) =>
       h("button", { type: "button", role: "tab", class: `rx-tab${S.area === value ? " on" : ""}`, "aria-selected": String(S.area === value), "data-area": value, onclick: () => setArea(value) }, label);
-    regionTabs.replaceChildren(tab(AREA_ALL, "All destinations"), ...D.areas.map((a) => tab(a.area, a.area)));
+    regionTabs.replaceChildren(tab(AREA_ALL, t("All destinations")), ...D.areas.map((a) => tab(a.area, t(a.area))));
     // a country filter only where a region has more than one country
     const countries = D.areas.find((a) => a.area === S.area)?.countries ?? [];
     countryTabs.hidden = countries.length < 2;
     countryTabs.replaceChildren(
       ...(countries.length < 2
         ? []
-        : [null, ...countries].map((c) => h("button", { type: "button", class: `cat-chip${S.country === c ? " on" : ""}`, "aria-pressed": String(S.country === c), "data-country": c ?? "", onclick: () => { S.country = c; renderRegions(); renderStream(); renderFeatured(); } }, c ?? "All"))),
+        : [null, ...countries].map((c) => h("button", { type: "button", class: `cat-chip${S.country === c ? " on" : ""}`, "aria-pressed": String(S.country === c), "data-country": c ?? "", onclick: () => { S.country = c; renderRegions(); renderStream(); renderFeatured(); } }, c ? t(c) : t("All")))),
     );
     const list = visibleDests();
-    destGrid.replaceChildren(...(list.length ? list.map(destCard) : [h("p", { class: "muted" }, "No destinations here yet.")]));
+    destGrid.replaceChildren(...(list.length ? list.map(destCard) : [h("p", { class: "muted" }, t("No destinations here yet."))]));
   }
 
   function setArea(value) {
@@ -611,16 +616,16 @@ export function renderHome(app, ctx) {
       h(
         "div",
         { class: "rx-media" },
-        h("button", { type: "button", class: `rx-photo${photo ? " has-photo" : ""}`, style: `--hue:${hue(d.name)}`, "aria-label": `Show itineraries for ${d.name}`, onclick: () => openCity(d) }, coverImg(photo, { decorative: true })),
+        h("button", { type: "button", class: `rx-photo${photo ? " has-photo" : ""}`, style: `--hue:${hue(d.name)}`, "aria-label": t("Show itineraries for {place}", { place: d.name }), onclick: () => openCity(d) }, coverImg(photo, { decorative: true })),
       ),
       h(
         "div",
         { class: "rx-body" },
-        h("p", { class: "rx-country" }, d.country),
+        h("p", { class: "rx-country" }, t(d.country)),
         h("h3", {}, d.name),
         // how long its trips run, and nothing else: the photo and name say the rest
-        d.days > 0 && h("p", { class: "rx-meta" }, d.days === 1 ? "1 day" : `Up to ${d.days} days`),
-        h("button", { class: "linklike rx-go", type: "button", onclick: () => openCity(d) }, "See itineraries →"),
+        d.days > 0 && h("p", { class: "rx-meta" }, d.days === 1 ? t("1 day") : t("Up to {n} days", { n: d.days })),
+        h("button", { class: "linklike rx-go", type: "button", onclick: () => openCity(d) }, t("See itineraries →")),
       ),
     );
   }
@@ -643,7 +648,7 @@ export function renderHome(app, ctx) {
     .catch((err) => destGrid.replaceChildren(h("p", { class: "form-error" }, err.message)));
 
   // --- travel photo stream ---
-  const streamHead = h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "02"), "Destinations"), h("h2", {}, "Where people are going")));
+  const streamHead = h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "02"), t("Destinations")), h("h2", {}, t("Where people are going"))));
   const stream = photoStream([], { onCity: openCity, navigate });
   const streamSection = h("section", { class: "ps", "aria-labelledby": "ps-h" }, h("div", { class: "home-section ps-head" }, streamHead), stream.el);
   streamHead.querySelector("h2").id = "ps-h";
@@ -671,24 +676,24 @@ export function renderHome(app, ctx) {
   // region or country: every itinerary there. Never ranked by popularity.
   const featTitle = h("h3", { class: "rx-sub" });
   const featGrid = h("div", { class: "it-grid it-index", "aria-live": "polite" }, ...skeletons());
-  const featMore = h("button", { class: "btn btn-ghost btn-sm", type: "button", hidden: true, onclick: () => { S.showAll = true; renderFeatured(); } }, "Show all itineraries");
+  const featMore = h("button", { class: "btn btn-ghost btn-sm", type: "button", hidden: true, onclick: () => { S.showAll = true; renderFeatured(); } }, t("Show all itineraries"));
   const featured = h("div", { class: "rx-its", id: "itineraries" }, featTitle, featGrid, featMore);
   let featuredIds = null;
   api("/api/itineraries/featured?limit=8")
     .then(({ itineraries }) => {
-      featuredIds = itineraries.map((t) => t.id);
+      featuredIds = itineraries.map((it) => it.id);
       renderFeatured();
     })
     .catch((err) => featGrid.replaceChildren(h("p", { class: "form-error" }, err.message)));
   function renderFeatured() {
     if (!featuredIds || !D.itineraries.length) return;
     const where = S.country ?? (S.area === AREA_ALL ? null : S.area);
-    const inPlace = D.itineraries.filter((t) => t.source !== "user" && (S.area === AREA_ALL || t.area === S.area) && (!S.country || t.country === S.country));
-    const list = where || S.showAll ? inPlace : featuredIds.map((id) => D.itineraries.find((t) => t.id === id)).filter(Boolean);
-    featTitle.textContent = where ? `Itineraries in ${where}` : S.showAll ? "All itineraries" : "Featured itineraries";
-    featGrid.replaceChildren(...(list.length ? list.map((t, i) => itineraryCard(t, ctx, i)) : [h("p", { class: "muted" }, "No itineraries here yet.")]));
+    const inPlace = D.itineraries.filter((it) => it.source !== "user" && (S.area === AREA_ALL || it.area === S.area) && (!S.country || it.country === S.country));
+    const list = where || S.showAll ? inPlace : featuredIds.map((id) => D.itineraries.find((it) => it.id === id)).filter(Boolean);
+    featTitle.textContent = where ? t("Itineraries in {place}", { place: t(where) }) : S.showAll ? t("All itineraries") : t("Featured itineraries");
+    featGrid.replaceChildren(...(list.length ? list.map((it, i) => itineraryCard(it, ctx, i)) : [h("p", { class: "muted" }, t("No itineraries here yet."))]));
     featMore.hidden = Boolean(where || S.showAll) || inPlace.length <= list.length;
-    featMore.textContent = `Show all ${inPlace.length} itineraries`;
+    featMore.textContent = t("Show all {n} itineraries", { n: inPlace.length });
   }
 
   // --- my trips ---
@@ -696,24 +701,24 @@ export function renderHome(app, ctx) {
   const myTrips = h(
     "section",
     { class: "home-section", id: "my-trips" },
-    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "04"), "Yours"), h("h2", {}, "My trips")), me && h("a", { class: "btn btn-ghost btn-sm", href: "/trips", "data-link": true }, "View all")),
+    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "04"), t("Yours")), h("h2", {}, t("My trips"))), me && h("a", { class: "btn btn-ghost btn-sm", href: "/trips", "data-link": true }, t("View all"))),
     tripsBox,
   );
   if (!me) {
     tripsBox.replaceChildren(
-      h("div", { class: "empty-inline" }, h("p", {}, "Sign in to see your trips and plan with others."), h("a", { class: "btn btn-primary btn-sm", href: "/login?next=/", "data-link": true }, "Sign in or create an account")),
+      h("div", { class: "empty-inline" }, h("p", {}, t("Sign in to see your trips and plan with others.")), h("a", { class: "btn btn-primary btn-sm", href: "/login?next=/", "data-link": true }, t("Sign in or create an account"))),
     );
   } else {
-    tripsBox.replaceChildren(h("p", { class: "muted" }, "Loading your trips…"));
+    tripsBox.replaceChildren(h("p", { class: "muted" }, t("Loading your trips…")));
     api("/api/trips")
       .then(({ owned, shared }) => {
         const all = [...owned, ...shared].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 4);
         tripsBox.replaceChildren(
           ...(all.length
-            ? all.map((t) =>
-  tripCard(t, { cls: "trip-card mini-trip" }),
+            ? all.map((it) =>
+  tripCard(it, { cls: "trip-card mini-trip" }),
               )
-            : [h("div", { class: "empty-inline" }, h("p", {}, "No trips yet. Preview an itinerary above and copy it into a trip, or start from scratch."), h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: ctx.createTrip }, "Create a trip"))]),
+            : [h("div", { class: "empty-inline" }, h("p", {}, t("No trips yet. Preview an itinerary above and copy it into a trip, or start from scratch.")), h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: ctx.createTrip }, t("Create a trip")))]),
         );
       })
       .catch((err) => tripsBox.replaceChildren(h("p", { class: "form-error" }, err.message)));
@@ -725,13 +730,13 @@ export function renderHome(app, ctx) {
   const sharedSection = h(
     "section",
     { class: "home-section", id: "shared", hidden: true },
-    h("div", { class: "section-head" }, h("div", {}, h("h2", {}, "Shared by travellers"), h("p", { class: "section-sub" }, "Trips other Wayline travellers published. Preview one, rate it, or use it as the start of your own."))),
+    h("div", { class: "section-head" }, h("div", {}, h("h2", {}, t("Shared by travellers")), h("p", { class: "section-sub" }, t("Trips other Wayline travellers published. Preview one, rate it, or use it as the start of your own.")))),
     sharedGrid,
   );
   api("/api/publications")
     .then(({ publications }) => {
       sharedSection.hidden = publications.length === 0;
-      sharedGrid.replaceChildren(...publications.slice(0, 9).map((t) => itineraryCard(t, ctx)));
+      sharedGrid.replaceChildren(...publications.slice(0, 9).map((it) => itineraryCard(it, ctx)));
     })
     .catch(() => {});
 

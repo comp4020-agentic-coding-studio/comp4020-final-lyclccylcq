@@ -1,5 +1,6 @@
 import { coverImg, PHOTOS, photoFor } from "/photos.js";
 import { h } from "/ui.js";
+import { t } from "/i18n.js";
 
 // The homepage's moving pictures: the cinematic hero and the photo stream.
 // Every clip and photo is freely licensed, self-hosted, and credited here and
@@ -45,7 +46,7 @@ export function videoHero({ title, tagline, actions, fallbackKey }) {
   if (still) {
     stage.append(h("img", { class: "vh-poster", src: still.src, alt: "", fetchpriority: "high", decoding: "async" }));
     showCredit(still.credit);
-    if (HERO_CLIPS[0]) label.textContent = `${HERO_CLIPS[0].city}, ${HERO_CLIPS[0].country}`;
+    if (HERO_CLIPS[0]) label.textContent = `${HERO_CLIPS[0].city}, ${t(HERO_CLIPS[0].country)}`;
   }
 
   const el = h(
@@ -78,7 +79,7 @@ export function videoHero({ title, tagline, actions, fallbackKey }) {
     stage.append(v);
     const begin = () => {
       v.classList.add("on");
-      label.textContent = `${clip.city}, ${clip.country}`;
+      label.textContent = `${clip.city}, ${t(clip.country)}`;
       showCredit(clip);
       // fade the previous layer out, then drop it so only one video decodes
       for (const old of [...stage.children]) if (old !== v) setTimeout(() => old.remove(), 1200);
@@ -135,7 +136,7 @@ function creditLine(c) {
   return h(
     "span",
     {},
-    c.mp4 ? "Video: " : "Photo: ",
+    c.mp4 ? t("Video: ") : t("Photo: "),
     h("a", { href: c.page, target: "_blank", rel: "noopener" }, c.author ?? "Wikimedia Commons"),
     ", ",
     h("a", { href: c.licenseUrl, target: "_blank", rel: "noopener license" }, c.license),
@@ -180,7 +181,7 @@ export function streamItems(destinations, itineraries, area = null) {
 
 export function photoStream(items, { onCity, navigate }) {
   const track = h("div", { class: "ps-track" });
-  const scroller = h("div", { class: "ps-scroller", role: "list", "aria-label": "Travel photos" }, track);
+  const scroller = h("div", { class: "ps-scroller", role: "list", "aria-label": t("Travel photos") }, track);
   const tile = (it, n) =>
     h(
       "a",
@@ -197,7 +198,7 @@ export function photoStream(items, { onCity, navigate }) {
         },
       },
       coverImg(it.photo, { decorative: true }),
-      h("span", { class: "ps-cap" }, h("b", {}, it.dest.name), h("small", {}, it.dest.country)),
+      h("span", { class: "ps-cap" }, h("b", {}, it.dest.name), h("small", {}, t(it.dest.country))),
     );
   const render = (list) => {
     // the row twice, so the slow loop is seamless; the copy is hidden from readers

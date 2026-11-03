@@ -3,12 +3,13 @@ import type { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import { displayNameKey, transaction } from "./db.ts";
 import { bad, HttpError } from "./errors.ts";
+import type { Lang } from "./lang.ts";
 
 const scryptAsync = promisify(scrypt) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 const SESSION_DAYS = 30;
 export const COOKIE = "wl_session";
 
-export type User = { id: string; username: string; displayName: string };
+export type User = { id: string; username: string; displayName: string; lang: Lang };
 
 export const sha256 = (s: string): string => createHash("sha256").update(s).digest("hex");
 export const newToken = (): string => randomBytes(32).toString("base64url");
@@ -64,6 +65,7 @@ export function createAuth(db: DatabaseSync, now = () => Date.now()) {
     id: String(row.id),
     username: String(row.username),
     displayName: String(row.display_name),
+    lang: row.lang === "zh" ? "zh" : "en",
   });
 
   const usernameTaken = (username: string): boolean => Boolean(db.prepare("select 1 from users where username = ?").get(usernameKey(username)));
@@ -111,6 +113,8 @@ export function createAuth(db: DatabaseSync, now = () => Date.now()) {
       if (password.length < 8 || password.length > 200) throw new HttpError(400, "Passwords need at least 8 characters.", { field: "password" });
       const displayName = displayNameInput(input.displayName ?? username);
       const nameKey = displayNameKey(displayName);
+      // the language they were browsing in carries over to the new account
+      const lang: Lang = input.lang === "zh" ? "zh" : "en";
       // early answers, before the slow password hash; the insert below is
       // what actually decides, inside one transaction
       if (usernameTaken(username)) throw taken("username");
@@ -124,10 +128,10 @@ export function createAuth(db: DatabaseSync, now = () => Date.now()) {
         const token = transaction(db, () => {
           if (usernameTaken(username)) throw taken("username");
           if (displayNameTaken(nameKey)) throw taken("displayName");
-          db.prepare("insert into users (id, username, display_name, display_name_key, password_hash, created_at) values (?, ?, ?, ?, ?, ?)").run(id, username, displayName, nameKey, hash, now());
+          db.prepare("insert into users (id, username, display_name, display_name_key, password_hash, created_at, lang) values (?, ?, ?, ?, ?, ?, ?)").run(id, username, displayName, nameKey, hash, now(), lang);
           return startSession(id);
         });
-        return { user: { id, username, displayName }, token };
+        return { user: { id, username, displayName, lang }, token };
       } catch (err) {
         throw constraintError(err);
       }
@@ -161,10 +165,10 @@ export function createAuth(db: DatabaseSync, now = () => Date.now()) {
 
     // A person's own profile: what the account holds, nothing invented.
     // Accounts have no email address, so none is shown or asked for.
-    profile(userId: string): { id: string; username: string; displayName: string; bio: string; createdAt: number } {
-      const r = db.prepare("select id, username, display_name, bio, created_at from users where id = ?").get(userId);
+    profile(userId: string): { id: string; username: string; displayName: string; bio: string; lang: Lang; createdAt: number } {
+      const r = db.prepare("select id, username, display_name, bio, lang, created_at from users where id = ?").get(userId);
       if (!r) throw new HttpError(404, "That account doesn't exist.");
-      return { id: String(r.id), username: String(r.username), displayName: String(r.display_name), bio: String(r.bio ?? ""), createdAt: Number(r.created_at) };
+      return { id: String(r.id), username: String(r.username), displayName: String(r.display_name), bio: String(r.bio ?? ""), lang: r.lang === "zh" ? "zh" : "en", createdAt: Number(r.created_at) };
     },
 
     // Display name (same rules and uniqueness as at sign-up) and a short bio.
@@ -186,6 +190,11 @@ export function createAuth(db: DatabaseSync, now = () => Date.now()) {
         if (/[\p{Cc}\p{Cf}\u2028\u2029]/u.test(bio.replace(/\n/g, ""))) throw new HttpError(400, "Bio can't contain control or invisible characters.", { field: "bio" });
         sets.push("bio = ?");
         args.push(bio);
+      }
+      if (input.lang !== undefined) {
+        if (input.lang !== "en" && input.lang !== "zh") throw new HttpError(400, "Language must be en or zh.", { field: "lang" });
+        sets.push("lang = ?");
+        args.push(input.lang);
       }
       if (!sets.length) throw bad("Nothing to change.");
       try {

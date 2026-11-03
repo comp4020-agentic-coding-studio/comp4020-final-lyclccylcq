@@ -18,6 +18,7 @@ import {
   searchPlaces,
   type Waypoint,
 } from "./google.ts";
+import { requestLang } from "./lang.ts";
 import { FOOD_STYLES, type FoodStyle } from "./curated.ts";
 import { type ItineraryStore, type MatchInput, parseCategory } from "./itineraries.ts";
 import { clientIp, createLimiter } from "./ratelimit.ts";
@@ -254,7 +255,7 @@ export function createDiscovery(deps: { itineraries: ItineraryStore; trips: Trip
       if (!googleConfigured()) {
         throw new HttpError(503, "Route calculation needs Google Maps configured on the server (GOOGLE_MAPS_SERVER_KEY). No route was estimated.");
       }
-      const key = JSON.stringify([origin, destination, mode, departure?.toISOString() ?? null]);
+      const key = JSON.stringify([origin, destination, mode, departure?.toISOString() ?? null, requestLang()]);
       const hit = routeCache.get(key);
       if (hit && Date.now() - hit.at < 10 * 60_000) return ok(hit.data);
       const running = routeInflight.get(key);

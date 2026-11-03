@@ -1,3 +1,4 @@
+import { locale, t } from "/i18n.js";
 import { api, avatar, h, openDialog, toast } from "/ui.js";
 
 // The trip's sharing dialogs, opened from the editor's trip bar: the people
@@ -11,24 +12,25 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
   const linkBox = h("div", { class: "stack" });
   const expiry = (link) => {
     const left = link.expiresAt - Date.now();
-    if (left <= 0) return "Link expired.";
+    if (left <= 0) return t("Link expired.");
     const mins = Math.max(1, Math.ceil(left / 60_000));
     const h_ = Math.floor(mins / 60);
     const m = mins % 60;
-    const when = new Date(link.expiresAt).toLocaleString("en-AU", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-    return `Active until ${when} (${h_ ? `${h_} h` : ""}${h_ && m ? " " : ""}${m || !h_ ? `${m} min` : ""} left)`;
+    const when = new Date(link.expiresAt).toLocaleString(locale(), { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    const left_ = `${h_ ? t("{h} h", { h: h_ }) : ""}${h_ && m ? " " : ""}${m || !h_ ? t("{m} min", { m }) : ""}`;
+    return t("Active until {when} ({left} left)", { when, left: left_ });
   };
   // token: shown once, right after it's made; link: its times, from the server
   const renderLink = (token, link) => {
     linkBox.replaceChildren();
     if (!isOwner) return;
-    linkBox.append(h("p", { class: "small", "data-share": "approval-note" }, "Lasts 24 hours. People ask to join; you approve them."));
+    linkBox.append(h("p", { class: "small", "data-share": "approval-note" }, t("Lasts 24 hours. People ask to join; you approve them.")));
     if (token) {
       const url = `${location.origin}/join/${token}`;
-      const input = h("input", { readonly: true, value: url, "aria-label": "Invite link", onfocus: (e) => e.target.select() });
+      const input = h("input", { readonly: true, value: url, "aria-label": t("Invite link"), onfocus: (e) => e.target.select() });
       linkBox.append(
-        h("div", { class: "copy-row" }, input, h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: async () => { await navigator.clipboard?.writeText(url).catch(() => {}); input.select(); toast("Invite link copied."); } }, "Copy")),
-        h("p", { class: "small muted" }, "Copy it now; it's shown once."),
+        h("div", { class: "copy-row" }, input, h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: async () => { await navigator.clipboard?.writeText(url).catch(() => {}); input.select(); toast(t("Invite link copied.")); } }, t("Copy"))),
+        h("p", { class: "small muted" }, t("Copy it now; it's shown once.")),
       );
     }
     if (link) linkBox.append(h("p", { class: `small ${link.expired ? "leg-warn" : "muted"}`, "data-share": "expiry" }, expiry(link)));
@@ -37,8 +39,8 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
       h(
         "div",
         { class: "row-actions" },
-        h("button", { class: "btn btn-outline btn-sm", type: "button", "data-share": "new-link", onclick: async () => { const r = await act(api(`${base}/invite`, { method: "POST", body: {} })); renderLink(r.token, r.link); } }, link ? "Create a new link" : "Create invite link"),
-        (live || token) && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: async () => { await act(api(`${base}/invite`, { method: "DELETE" })); toast("Invite link turned off."); renderLink(null, null); } }, "Turn off link"),
+        h("button", { class: "btn btn-outline btn-sm", type: "button", "data-share": "new-link", onclick: async () => { const r = await act(api(`${base}/invite`, { method: "POST", body: {} })); renderLink(r.token, r.link); } }, link ? t("Create a new link") : t("Create invite link")),
+        (live || token) && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: async () => { await act(api(`${base}/invite`, { method: "DELETE" })); toast(t("Invite link turned off.")); renderLink(null, null); } }, t("Turn off link")),
       ),
     );
   };
@@ -49,7 +51,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
   const REQ_LABEL = { pending: "Waiting", approved: "Approved", rejected: "Rejected" };
   const renderRequests = (list) =>
     requests.replaceChildren(
-      ...(list.length ? [] : [h("li", { class: "muted small" }, "No requests yet.")]),
+      ...(list.length ? [] : [h("li", { class: "muted small" }, t("No requests yet."))]),
       ...list.map((r) =>
         h(
           "li",
@@ -60,10 +62,10 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
             ? h(
                 "span",
                 { class: "row-actions" },
-                h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-request-action": "reject", onclick: () => decide(r, "reject") }, "Reject"),
-                h("button", { class: "btn btn-primary btn-sm", type: "button", "data-request-action": "approve", onclick: () => decide(r, "approve") }, "Approve"),
+                h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-request-action": "reject", onclick: () => decide(r, "reject") }, t("Reject")),
+                h("button", { class: "btn btn-primary btn-sm", type: "button", "data-request-action": "approve", onclick: () => decide(r, "approve") }, t("Approve")),
               )
-            : h("span", { class: `chip ${r.status === "approved" ? "chip-live" : "chip-soft"}`, "data-status": r.status }, REQ_LABEL[r.status]),
+            : h("span", { class: `chip ${r.status === "approved" ? "chip-live" : "chip-soft"}`, "data-status": r.status }, t(REQ_LABEL[r.status])),
         ),
       ),
     );
@@ -72,7 +74,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
     for (const b of requests.querySelectorAll(`[data-request="${r.id}"] button`)) b.disabled = true;
     try {
       const res = await api(`${base}/requests/${r.id}/${what}`, { method: "POST", body: {} });
-      toast(what === "approve" ? `${r.user.displayName} can now plan this trip with you.` : `Request from ${r.user.displayName} rejected.`);
+      toast(what === "approve" ? t("{name} can now plan this trip with you.", { name: r.user.displayName }) : t("Request from {name} rejected.", { name: r.user.displayName }));
       renderRequests(res.requests);
     } catch (err) {
       toast(err.message, { kind: "error" });
@@ -88,8 +90,8 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
           "li",
           {},
           avatar(m),
-          h("span", { class: "grow" }, h("strong", {}, m.displayName), m.id === me.id && " (you)", h("br"), h("small", { class: "muted" }, m.role === "owner" ? "Owner" : "Collaborator")),
-          S.presence.some((p) => p.id === m.id) && h("span", { class: "chip chip-live" }, "Here now"),
+          h("span", { class: "grow" }, h("strong", {}, m.displayName), m.id === me.id && t(" (you)"), h("br"), h("small", { class: "muted" }, m.role === "owner" ? t("Owner") : t("Collaborator"))),
+          S.presence.some((p) => p.id === m.id) && h("span", { class: "chip chip-live" }, t("Here now")),
           m.role !== "owner" &&
             (isOwner || m.id === me.id) &&
             h(
@@ -98,13 +100,13 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
                 class: "btn btn-ghost btn-sm btn-danger-text",
                 type: "button",
                 onclick: async () => {
-                  if (!confirm(m.id === me.id ? "Leave this trip?" : `Remove ${m.displayName} from this trip?`)) return;
+                  if (!confirm(m.id === me.id ? t("Leave this trip?") : t("Remove {name} from this trip?", { name: m.displayName }))) return;
                   await act(api(`${base}/members/${m.id}`, { method: "DELETE" })).catch(() => {});
                   if (m.id === me.id) navigate("/", { replace: true });
                   else renderMembers();
                 },
               },
-              m.id === me.id ? "Leave" : "Remove",
+              m.id === me.id ? t("Leave") : t("Remove"),
             ),
         ),
       ),
@@ -116,20 +118,20 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
 
   // --- invite by nickname: search, choose, then an explicit Invite ---
   const STATUS = { you: "You", member: "Already a member", invited: "Invited", available: null };
-  const nameInput = h("input", { type: "search", class: "invitee-input", placeholder: "Search by nickname", "aria-label": "Search by nickname", autocomplete: "off", spellcheck: "false", maxlength: 80 });
-  const results = h("ul", { class: "invitee-results", role: "listbox", "aria-label": "Matching accounts" });
+  const nameInput = h("input", { type: "search", class: "invitee-input", placeholder: t("Search by nickname"), "aria-label": t("Search by nickname"), autocomplete: "off", spellcheck: "false", maxlength: 80 });
+  const results = h("ul", { class: "invitee-results", role: "listbox", "aria-label": t("Matching accounts") });
   const searchNote = h("p", { class: "small muted", role: "status", "aria-live": "polite" }, "");
   const sent = h("ul", { class: "invitations" });
   let chosen = null;
   let seq = 0;
   let timer = null;
-  const inviteBtn = h("button", { class: "btn btn-primary btn-sm", type: "button", "data-share": "invite", disabled: true }, "Invite");
+  const inviteBtn = h("button", { class: "btn btn-primary btn-sm", type: "button", "data-share": "invite", disabled: true }, t("Invite"));
   const choose = (r) => {
     chosen = r;
     for (const li of results.children) li.setAttribute("aria-selected", String(li.dataset.user === r?.id));
     inviteBtn.disabled = !r || r.status !== "available";
-    inviteBtn.textContent = r && r.status !== "available" ? STATUS[r.status] : "Invite";
-    inviteBtn.setAttribute("aria-label", r?.status === "available" ? `Invite ${r.displayName}` : inviteBtn.textContent);
+    inviteBtn.textContent = r && r.status !== "available" ? t(STATUS[r.status]) : t("Invite");
+    inviteBtn.setAttribute("aria-label", r?.status === "available" ? t("Invite {name}", { name: r.displayName }) : inviteBtn.textContent);
   };
   const resultRow = (r) =>
     h(
@@ -146,7 +148,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
       },
       avatar(r, "sm"),
       h("span", { class: "grow" }, h("strong", {}, r.displayName), h("br"), h("small", { class: "muted" }, `@${r.username}`)),
-      STATUS[r.status] && h("span", { class: `chip ${r.status === "invited" ? "chip-soft" : ""}` }, STATUS[r.status]),
+      STATUS[r.status] && h("span", { class: `chip ${r.status === "invited" ? "chip-soft" : ""}` }, t(STATUS[r.status])),
     );
   const search = () => {
     clearTimeout(timer);
@@ -159,16 +161,16 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
       return;
     }
     if ([...q].length > 40) {
-      searchNote.textContent = "Nicknames have at most 40 characters.";
+      searchNote.textContent = t("Nicknames have at most 40 characters.");
       return;
     }
-    searchNote.textContent = "Searching…";
+    searchNote.textContent = t("Searching…");
     timer = setTimeout(async () => {
       try {
         const r = await api(`${base}/invitees?${new URLSearchParams({ q })}`);
         if (mine !== seq || !dialog.open) return;
         results.replaceChildren(...r.results.map(resultRow));
-        searchNote.textContent = r.results.length ? "" : `No nickname matches “${q}”.`;
+        searchNote.textContent = r.results.length ? "" : t("No nickname matches “{q}”.", { q });
       } catch (err) {
         if (mine !== seq || !dialog.open) return;
         results.replaceChildren();
@@ -188,7 +190,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
             { "data-invitation": i.id },
             avatar(i.user, "sm"),
             h("span", { class: "grow" }, h("strong", {}, i.user.displayName), h("br"), h("small", { class: "muted" }, `@${i.user.username}`)),
-            h("span", { class: `chip ${i.status === "accepted" ? "chip-live" : "chip-soft"}`, "data-status": i.status }, LABEL[i.status]),
+            h("span", { class: `chip ${i.status === "accepted" ? "chip-live" : "chip-soft"}`, "data-status": i.status }, t(LABEL[i.status])),
             i.status === "pending" &&
               h(
                 "button",
@@ -196,7 +198,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
                   class: "btn btn-ghost btn-sm",
                   type: "button",
                   "data-share": "cancel",
-                  "aria-label": `Cancel the invitation to @${i.user.username}`,
+                  "aria-label": t("Cancel the invitation to @{username}", { username: i.user.username }),
                   onclick: async (e) => {
                     e.target.disabled = true;
                     await api(`${base}/invitations/${i.id}`, { method: "DELETE" }).catch((err) => toast(err.message, { kind: "error" }));
@@ -204,7 +206,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
                     if (nameInput.value.trim()) search();
                   },
                 },
-                "Cancel",
+                t("Cancel"),
               ),
           ),
         ),
@@ -224,7 +226,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
       nameInput.value = "";
       results.replaceChildren();
       choose(null);
-      searchNote.textContent = `Invitation sent to ${who.displayName}.`;
+      searchNote.textContent = t("Invitation sent to {name}.", { name: who.displayName });
       await loadSent();
     } catch (err) {
       searchNote.textContent = err.message;
@@ -235,7 +237,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
   const byName = isOwner && h(
     "section",
     { class: "share-method", "aria-labelledby": "share-by-name" },
-    h("h3", { id: "share-by-name" }, "Invite by nickname"),
+    h("h3", { id: "share-by-name" }, t("Invite by nickname")),
     h("div", { class: "invitee-search" }, nameInput, inviteBtn),
     searchNote,
     results,
@@ -244,9 +246,9 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
   const byLink = isOwner && h(
     "section",
     { class: "share-method", "aria-labelledby": "share-by-link" },
-    h("h3", { id: "share-by-link" }, "Invite by link"),
+    h("h3", { id: "share-by-link" }, t("Invite by link")),
     linkBox,
-    h("h4", { class: "small" }, "Requests to join"),
+    h("h4", { class: "small" }, t("Requests to join")),
     requests,
   );
   if (isOwner) loadSent();
@@ -262,11 +264,11 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
     }
   };
   const onSnap = () => {
-    const t = setTimeout(() => {
-      following.delete(t);
+    const tm = setTimeout(() => {
+      following.delete(tm);
       follow();
     }, 0);
-    following.add(t);
+    following.add(tm);
   };
   events.addEventListener("snapshot", onSnap);
 
@@ -277,18 +279,18 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
       h(
         "div",
         { class: "stack" },
-        h("h2", {}, "People on this trip"),
+        h("h2", {}, t("People on this trip")),
         list,
-        h("p", { class: "small muted", "data-share": "view-note" }, "Others here see where your map is looking, never your location."),
-        isOwner ? byName : h("p", { class: "small muted" }, "Only the owner can invite people."),
+        h("p", { class: "small muted", "data-share": "view-note" }, t("Others here see where your map is looking, never your location.")),
+        isOwner ? byName : h("p", { class: "small muted" }, t("Only the owner can invite people.")),
         byLink,
-        h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-primary", type: "button", onclick: () => dialog.close() }, "Done")),
+        h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-primary", type: "button", onclick: () => dialog.close() }, t("Done"))),
       ),
     ),
   );
   dialog.addEventListener("close", () => {
     events.removeEventListener("snapshot", onSnap);
-    for (const t of following) clearTimeout(t);
+    for (const tm of following) clearTimeout(tm);
     following.clear();
     clearTimeout(timer);
     seq++;
@@ -303,7 +305,7 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
 // default; listing it puts it under Shared by travellers too. Editing this
 // trip afterwards never changes it until "Update published version".
 export async function publishDialog({ S, base, applySnapshot }) {
-  const t = S.trip;
+  const trip = S.trip;
   let pub = null;
   try {
     pub = (await api(`${base}/publication`)).publication;
@@ -313,51 +315,51 @@ export async function publishDialog({ S, base, applySnapshot }) {
   const live = pub?.status === "published";
   const url = (id) => `${location.origin}/journeys/${id}`;
   const error = h("p", { class: "form-error", role: "alert", hidden: true });
-  const hasStops = t.days.some((d) => d.activities.some((a) => a.role !== "start"));
+  const hasStops = trip.days.some((d) => d.activities.some((a) => a.role !== "start"));
   const vis = pub?.visibility ?? "link";
   const choice = (value, title, note) =>
     h("label", { class: "pub-choice" }, h("input", { type: "radio", name: "visibility", value, checked: vis === value }), h("span", {}, h("strong", {}, title), h("small", { class: "muted" }, note)));
   const form = h(
     "form",
     { method: "dialog", class: "stack" },
-    h("h2", {}, live ? "Your published journey" : "Publish as a journey"),
-    h("p", { class: "small muted" }, "A read-only page of this plan as it is now, to share with anyone. It never lets people edit: to plan together, use Share. Notes and the people on the trip stay private."),
+    h("h2", {}, live ? t("Your published journey") : t("Publish as a journey")),
+    h("p", { class: "small muted" }, t("A read-only page of this plan as it is now, to share with anyone. It never lets people edit: to plan together, use Share. Notes and the people on the trip stay private.")),
     live &&
       h(
         "div",
         { class: "pub-live", "data-publish": "state" },
-        h("p", { class: "small" }, `Published ${new Date(pub.publishedAt).toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}. `, t.publication?.outdated ? h("strong", {}, "You've changed the trip since; the journey still shows the earlier plan.") : "It matches the current plan."),
-        h("div", { class: "pub-link" }, h("input", { type: "text", readonly: true, value: url(pub.id), "aria-label": "Journey link", onfocus: (e) => e.target.select() }), h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-publish": "copy", onclick: () => copy(url(pub.id)) }, "Copy link"), h("a", { class: "btn btn-quiet btn-sm", href: `/journeys/${pub.id}`, target: "_blank", rel: "noopener" }, "Preview")),
+        h("p", { class: "small" }, t("Published {when}. ", { when: new Date(pub.publishedAt).toLocaleString(locale(), { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) }), trip.publication?.outdated ? h("strong", {}, t("You've changed the trip since; the journey still shows the earlier plan.")) : t("It matches the current plan.")),
+        h("div", { class: "pub-link" }, h("input", { type: "text", readonly: true, value: url(pub.id), "aria-label": t("Journey link"), onfocus: (e) => e.target.select() }), h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-publish": "copy", onclick: () => copy(url(pub.id)) }, t("Copy link")), h("a", { class: "btn btn-quiet btn-sm", href: `/journeys/${pub.id}`, target: "_blank", rel: "noopener" }, t("Preview"))),
       ),
-    pub?.status === "unpublished" && h("p", { class: "small muted" }, "Unpublished: its link shows nothing until you publish again."),
-    h("fieldset", { class: "pub-choices" }, h("legend", { class: "small" }, "Who can find it"), choice("link", "Anyone with the link", "Not listed anywhere. Share the link with who you like."), choice("listed", "Listed on Wayline", "Also shown under Shared by travellers, where others can rate and copy it.")),
-    h("label", { class: "field" }, h("span", {}, "A line about it"), h("textarea", { name: "description", required: true, maxlength: 600, rows: 3, placeholder: "What made this trip special?" }, pub?.description ?? "")),
-    !hasStops && h("p", { class: "small leg-warn" }, "Add at least one stop before publishing."),
+    pub?.status === "unpublished" && h("p", { class: "small muted" }, t("Unpublished: its link shows nothing until you publish again.")),
+    h("fieldset", { class: "pub-choices" }, h("legend", { class: "small" }, t("Who can find it")), choice("link", t("Anyone with the link"), t("Not listed anywhere. Share the link with who you like.")), choice("listed", t("Listed on Wayline"), t("Also shown under Shared by travellers, where others can rate and copy it."))),
+    h("label", { class: "field" }, h("span", {}, t("A line about it")), h("textarea", { name: "description", required: true, maxlength: 600, rows: 3, placeholder: t("What made this trip special?") }, pub?.description ?? "")),
+    !hasStops && h("p", { class: "small leg-warn" }, t("Add at least one stop before publishing.")),
     error,
     h(
       "div",
       { class: "dialog-actions" },
-      live && h("button", { class: "btn btn-ghost btn-danger-text", type: "button", "data-publish": "unpublish", onclick: unpublish }, "Unpublish"),
+      live && h("button", { class: "btn btn-ghost btn-danger-text", type: "button", "data-publish": "unpublish", onclick: unpublish }, t("Unpublish")),
       h("span", { class: "spacer" }),
-      h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, "Cancel"),
-      h("button", { class: "btn btn-primary", type: "submit", "data-publish": "submit", disabled: !hasStops }, live ? "Update published version" : pub ? "Publish again" : "Publish"),
+      h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, t("Cancel")),
+      h("button", { class: "btn btn-primary", type: "submit", "data-publish": "submit", disabled: !hasStops }, live ? t("Update published version") : pub ? t("Publish again") : t("Publish")),
     ),
   );
   const dialog = openDialog(h("dialog", { class: "dialog" }, form));
   async function copy(link) {
     try {
       await navigator.clipboard.writeText(link);
-      toast("Link copied. It opens a read-only journey.");
+      toast(t("Link copied. It opens a read-only journey."));
     } catch {
-      prompt("Copy this link:", link);
+      prompt(t("Copy this link:"), link);
     }
   }
   async function unpublish() {
-    if (!confirm("Unpublish this journey? Its link stops showing it; your trip and copies others made stay as they are.")) return;
+    if (!confirm(t("Unpublish this journey? Its link stops showing it; your trip and copies others made stay as they are."))) return;
     try {
       await api(`${base}/publication`, { method: "DELETE" });
       dialog.close();
-      toast("Unpublished. Your trip is untouched.");
+      toast(t("Unpublished. Your trip is untouched."));
       applySnapshot(await api(base));
     } catch (err) {
       error.textContent = err.message;
@@ -370,7 +372,7 @@ export async function publishDialog({ S, base, applySnapshot }) {
       const r = await api(`${base}/publication`, { method: "PUT", body: { description: form.description.value, visibility: form.visibility.value } });
       applySnapshot(await api(base));
       dialog.close();
-      if (live) return toast("Published version updated.");
+      if (live) return toast(t("Published version updated."));
       // first publication: show its link, ready to copy
       publishedDialog(url(r.publication.id), r.publication.id, copy);
     } catch (err) {
@@ -388,10 +390,10 @@ function publishedDialog(link, id, copy) {
       h(
         "form",
         { method: "dialog", class: "stack" },
-        h("h2", {}, "Your journey is published"),
-        h("p", { class: "small muted" }, "Anyone with this link can read it. Nobody can edit it, and your trip keeps changing only for you and your crew until you update the journey."),
-        h("div", { class: "pub-link" }, h("input", { type: "text", readonly: true, value: link, "aria-label": "Journey link", onfocus: (e) => e.target.select() }), h("button", { class: "btn btn-primary btn-sm", type: "button", "data-publish": "copy", onclick: () => copy(link) }, "Copy link")),
-        h("div", { class: "dialog-actions" }, h("a", { class: "btn btn-ghost", href: `/journeys/${id}`, target: "_blank", rel: "noopener" }, "Preview the journey"), h("span", { class: "spacer" }), h("button", { class: "btn btn-ghost", type: "submit" }, "Done")),
+        h("h2", {}, t("Your journey is published")),
+        h("p", { class: "small muted" }, t("Anyone with this link can read it. Nobody can edit it, and your trip keeps changing only for you and your crew until you update the journey.")),
+        h("div", { class: "pub-link" }, h("input", { type: "text", readonly: true, value: link, "aria-label": t("Journey link"), onfocus: (e) => e.target.select() }), h("button", { class: "btn btn-primary btn-sm", type: "button", "data-publish": "copy", onclick: () => copy(link) }, t("Copy link"))),
+        h("div", { class: "dialog-actions" }, h("a", { class: "btn btn-ghost", href: `/journeys/${id}`, target: "_blank", rel: "noopener" }, t("Preview the journey")), h("span", { class: "spacer" }), h("button", { class: "btn btn-ghost", type: "submit" }, t("Done"))),
       ),
     ),
   );

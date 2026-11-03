@@ -1,5 +1,7 @@
+import { requestLang } from "./lang.ts";
 import { log, sanitize } from "./log.ts";
 import { DESTINATIONS } from "./curated.ts";
+import { DESTINATIONS_ZH } from "./curated-zh.ts";
 import { type GHours, hoursFromGoogle } from "./hours.ts";
 import { HttpError } from "./errors.ts";
 import { haversineKm, type LatLng } from "./geo.ts";
@@ -13,6 +15,10 @@ import type { Mode, RouteOption, RouteStep, TransitStep } from "./schedule.ts";
 //
 // The base URLs can be pointed elsewhere (GOOGLE_*_BASE_URL) so the spec can
 // run against a local stand-in; in production they're Google's.
+
+// The language Google answers in (place names, addresses, transit lines and
+// directions): the request's site language (src/lang.ts), English by default.
+const languageCode = (): string => (requestLang() === "zh" ? "zh-CN" : "en");
 
 const serverKey = (): string | undefined => process.env.GOOGLE_MAPS_SERVER_KEY || undefined;
 export const googleConfigured = (): boolean => Boolean(serverKey());
@@ -115,20 +121,22 @@ export function describeGoogleError(httpStatus: number, data: any, api: string):
 
 const apiName = (url: string) => (url.includes("routes") || url.includes("computeRoutes") ? "Routes API" : url.includes("geocode") ? "Geocoding API" : "Places API (New)");
 
+const withLanguage = (body: unknown) => (body && typeof body === "object" ? { languageCode: languageCode(), ...body } : body);
+
 async function google(url: string, init: { method: string; fieldMask?: string; body?: unknown }): Promise<any> {
   const key = serverKey();
   if (!key) throw new HttpError(503, "Google Maps isn't configured on this server (GOOGLE_MAPS_SERVER_KEY is missing).");
   const api = apiName(url);
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetch(init.method === "GET" && !url.includes("/media?") ? `${url}${url.includes("?") ? "&" : "?"}languageCode=${languageCode()}` : url, {
       method: init.method,
       headers: {
         "content-type": "application/json",
         "x-goog-api-key": key,
         ...(init.fieldMask ? { "x-goog-fieldmask": init.fieldMask } : {}),
       },
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      body: init.body === undefined ? undefined : JSON.stringify(withLanguage(init.body)),
       signal: AbortSignal.timeout(10_000),
     });
   } catch (err) {
@@ -170,13 +178,15 @@ export async function autocomplete(
   opts: { kind: "city" | "place"; session: string | null; bias: LatLng | null },
 ): Promise<{ source: "google" | "demo"; suggestions: { placeId: string; main: string; secondary: string | null }[] }> {
   if (!googleConfigured()) {
+    // matched in either language, shown in the request's
     const needle = input.toLowerCase();
+    const zh = requestLang() === "zh";
     return {
       source: "demo",
-      suggestions: DESTINATIONS.filter((d) => `${d.name} ${d.region}`.toLowerCase().includes(needle)).map((d) => ({
+      suggestions: DESTINATIONS.filter((d) => `${d.name} ${d.region} ${DESTINATIONS_ZH[d.id]?.name ?? ""} ${DESTINATIONS_ZH[d.id]?.region ?? ""}`.toLowerCase().includes(needle)).map((d) => ({
         placeId: `demo-city:${d.id}`,
-        main: d.name,
-        secondary: d.region,
+        main: zh ? (DESTINATIONS_ZH[d.id]?.name ?? d.name) : d.name,
+        secondary: zh ? (DESTINATIONS_ZH[d.id]?.region ?? d.region) : d.region,
       })),
     };
   }
@@ -291,7 +301,8 @@ export async function nearbyPlaces(center: LatLng, radiusM: number, type: string
 // Just enough to place something on the map (choosing a destination).
 export async function placeBasic(placeId: string, session: string | null): Promise<PlaceSummary> {
   const city = DESTINATIONS.find((d) => `demo-city:${d.id}` === placeId);
-  if (city) return { placeId, name: city.name, address: city.region, lat: city.lat, lng: city.lng, category: "City", types: ["locality"], source: "demo" };
+  const cityZh = city && requestLang() === "zh" ? DESTINATIONS_ZH[city.id] : undefined;
+  if (city) return { placeId, name: cityZh?.name ?? city.name, address: cityZh?.region ?? city.region, lat: city.lat, lng: city.lng, category: "City", types: ["locality"], source: "demo" };
   const demo = DEMO_PLACES.find((p) => p.placeId === placeId);
   if (demo) return demo;
   if (!validPlaceId(placeId)) throw new HttpError(400, "That isn't a place id.");
@@ -462,7 +473,7 @@ export async function reverseGeocode(p: LatLng): Promise<{ label: string; source
   let data: any;
   try {
     const res = await fetch(
-      `${GEOCODE()}/maps/api/geocode/json?latlng=${p.lat},${p.lng}&result_type=locality|administrative_area_level_2|administrative_area_level_1&key=${encodeURIComponent(key)}`,
+      `${GEOCODE()}/maps/api/geocode/json?latlng=${p.lat},${p.lng}&language=${languageCode()}&result_type=locality|administrative_area_level_2|administrative_area_level_1&key=${encodeURIComponent(key)}`,
       { signal: AbortSignal.timeout(8_000) },
     );
     data = await res.json();
@@ -528,7 +539,7 @@ const TRANSIT_FUTURE_MS = 100 * 86_400_000;
 // One mode between two points. polyline is Google's encoded route geometry,
 // returned only when Google provides it.
 export async function computeRoute(origin: Waypoint, destination: Waypoint, mode: Mode, departure: Date | null, now = Date.now()): Promise<RouteOption> {
-  const body: Record<string, unknown> = { origin: waypoint(origin), destination: waypoint(destination), travelMode: mode, languageCode: "en", units: "METRIC" };
+  const body: Record<string, unknown> = { origin: waypoint(origin), destination: waypoint(destination), travelMode: mode, languageCode: languageCode(), units: "METRIC" };
   if (mode === "TRANSIT") {
     const t = (departure ?? new Date(now)).getTime();
     if (t < now - TRANSIT_PAST_MS || t > now + TRANSIT_FUTURE_MS) {

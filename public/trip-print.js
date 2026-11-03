@@ -1,4 +1,5 @@
 import { coverImg, photoFor } from "/photos.js";
+import { locale, t, tn } from "/i18n.js";
 import { api, dur, fmtDay, fmtRange, h, hhmm, icon, KIND_LABEL, toast } from "/ui.js";
 
 // A trip as a document to keep, in three forms, with nothing published:
@@ -19,14 +20,14 @@ const MEAL_LABEL = { breakfast: "Breakfast", brunch: "Brunch", lunch: "Lunch", a
 const MODE_WORD = { WALK: "Walk", TRANSIT: "Public transport", DRIVE: "Drive" };
 
 export async function renderTripPrint(app, tripId, ctx) {
-  app.replaceChildren(h("main", { class: "tp" }, h("div", { class: "boot", role: "status" }, "Preparing your trip…")));
-  let t = await api(`/api/trips/${tripId}`); // a 404 for non-members, handled by the router
+  app.replaceChildren(h("main", { class: "tp" }, h("div", { class: "boot", role: "status" }, t("Preparing your trip…"))));
+  let trip = await api(`/api/trips/${tripId}`); // a 404 for non-members, handled by the router
   let routes = null;
   if (ctx.config.routes) {
-    fill(h("div", { class: "boot", role: "status", "data-export-routes": "running" }, "Calculating every route between your stops…"));
+    fill(h("div", { class: "boot", role: "status", "data-export-routes": "running" }, t("Calculating every route between your stops…")));
     try {
       const r = await api(`/api/trips/${tripId}/routes/all`, { method: "POST", body: {} });
-      t = r.trip;
+      trip = r.trip;
       routes = r;
     } catch (err) {
       routes = { error: err.message };
@@ -34,21 +35,21 @@ export async function renderTripPrint(app, tripId, ctx) {
   }
   let link = (await api(`/api/trips/${tripId}/export-link`).catch(() => ({ link: null }))).link;
   let token = null; // only known right after it's made: the server keeps a hash
-  const linkPanel = h("section", { class: "tp-share", "aria-label": "Read-only link" });
+  const linkPanel = h("section", { class: "tp-share", "aria-label": t("Read-only link") });
 
   function renderLink() {
     const url = token && `${location.origin}/export/${token}`;
     linkPanel.replaceChildren(
-      h("h2", {}, "Read-only link"),
-      h("p", { class: "small muted" }, "Anyone with the link sees this trip as it stands, notes included, and can save it as a PDF or image. Nobody can change anything through it. It isn't a publication and isn't listed anywhere."),
+      h("h2", {}, t("Read-only link")),
+      h("p", { class: "small muted" }, t("Anyone with the link sees this trip as it stands, notes included, and can save it as a PDF or image. Nobody can change anything through it. It isn't a publication and isn't listed anywhere.")),
       url
-        ? h("div", { class: "tp-link" }, h("input", { readonly: true, value: url, "aria-label": "Read-only link", onfocus: (e) => e.target.select() }), h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-export-link": "copy", onclick: () => copy(url) }, "Copy"))
-        : link && h("p", { class: "small" }, `A link was made ${new Date(link.createdAt).toLocaleDateString("en-AU", { day: "numeric", month: "short" })}. It's shown only once; make a new one to copy it again (the old one stops working).`),
+        ? h("div", { class: "tp-link" }, h("input", { readonly: true, value: url, "aria-label": t("Read-only link"), onfocus: (e) => e.target.select() }), h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-export-link": "copy", onclick: () => copy(url) }, t("Copy")))
+        : link && h("p", { class: "small" }, t("A link was made {date}. It's shown only once; make a new one to copy it again (the old one stops working).", { date: new Date(link.createdAt).toLocaleDateString(locale(), { day: "numeric", month: "short" }) })),
       h(
         "div",
         { class: "tp-link-actions" },
-        h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-export-link": "make", onclick: makeLink }, link ? "Make a new link" : "Make a read-only link"),
-        link && h("button", { class: "btn btn-quiet btn-sm btn-danger-text", type: "button", "data-export-link": "revoke", onclick: revoke }, "Stop sharing"),
+        h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-export-link": "make", onclick: makeLink }, link ? t("Make a new link") : t("Make a read-only link")),
+        link && h("button", { class: "btn btn-quiet btn-sm btn-danger-text", type: "button", "data-export-link": "revoke", onclick: revoke }, t("Stop sharing")),
       ),
     );
   }
@@ -69,20 +70,20 @@ export async function renderTripPrint(app, tripId, ctx) {
       link = null;
       token = null;
       renderLink();
-      toast("Link switched off. It no longer opens the trip.");
+      toast(t("Link switched off. It no longer opens the trip."));
     } catch (err) {
       toast(err.message);
     }
   }
   renderLink();
 
-  const doc = tripDocument(t, { routes, routing: ctx.config.routes });
+  const doc = tripDocument(trip, { routes, routing: ctx.config.routes });
   fill(
     h(
       "div",
       { class: "tp-bar" },
-      h("a", { class: "btn btn-quiet btn-sm", href: `/trips/${t.id}`, "data-link": true }, icon("back"), "Back to the trip"),
-      exportButtons(doc, t),
+      h("a", { class: "btn btn-quiet btn-sm", href: `/trips/${trip.id}`, "data-link": true }, icon("back"), t("Back to the trip")),
+      exportButtons(doc, trip),
     ),
     linkPanel,
     doc,
@@ -96,66 +97,66 @@ export async function renderTripPrint(app, tripId, ctx) {
 
 // The read-only link: no account needed, nothing to change
 export async function renderTripExport(app, token) {
-  app.replaceChildren(h("main", { class: "tp" }, h("div", { class: "boot", role: "status" }, "Opening the trip…")));
-  let t;
+  app.replaceChildren(h("main", { class: "tp" }, h("div", { class: "boot", role: "status" }, t("Opening the trip…"))));
+  let trip;
   try {
-    t = await api(`/api/exports/${encodeURIComponent(token)}`);
+    trip = await api(`/api/exports/${encodeURIComponent(token)}`);
   } catch {
     app.replaceChildren(
-      h("main", { class: "tp" }, h("div", { class: "invite-card" }, h("h1", {}, "This link isn't available"), h("p", {}, "It may have been switched off by someone on the trip, or the address is incomplete."), h("a", { class: "btn btn-primary", href: "/", "data-link": true }, "Explore Wayline"))),
+      h("main", { class: "tp" }, h("div", { class: "invite-card" }, h("h1", {}, t("This link isn't available")), h("p", {}, t("It may have been switched off by someone on the trip, or the address is incomplete.")), h("a", { class: "btn btn-primary", href: "/", "data-link": true }, t("Explore Wayline")))),
     );
     return () => {};
   }
-  const doc = tripDocument(t, { routes: null, routing: t.routing, shared: true });
+  const doc = tripDocument(trip, { routes: null, routing: trip.routing, shared: true });
   app.replaceChildren(
     h(
       "main",
       { class: "tp tp-shared" },
-      h("div", { class: "tp-bar" }, h("a", { class: "btn btn-quiet btn-sm", href: "/", "data-link": true }, "Wayline"), h("p", { class: "small muted" }, "A read-only copy of a trip, as it stands now."), exportButtons(doc, t)),
+      h("div", { class: "tp-bar" }, h("a", { class: "btn btn-quiet btn-sm", href: "/", "data-link": true }, "Wayline"), h("p", { class: "small muted" }, t("A read-only copy of a trip, as it stands now.")), exportButtons(doc, trip)),
       doc,
     ),
   );
   return () => {};
 }
 
-function exportButtons(doc, t) {
+function exportButtons(doc, trip) {
   return h(
     "div",
     { class: "tp-actions" },
-    h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-export": "image", onclick: (e) => saveImage(doc, t, e.currentTarget) }, "Save as image"),
-    h("button", { class: "btn btn-primary btn-sm", type: "button", "data-print": "go", title: "Choose “Save as PDF” as the printer", onclick: () => print() }, "Save as PDF / print"),
+    h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-export": "image", onclick: (e) => saveImage(doc, trip, e.currentTarget) }, t("Save as image")),
+    h("button", { class: "btn btn-primary btn-sm", type: "button", "data-print": "go", title: t("Choose “Save as PDF” as the printer"), onclick: () => print() }, t("Save as PDF / print")),
   );
 }
 
-function tripDocument(t, { routes, routing, shared = false }) {
-  const cover = photoFor(t.cover ?? null);
-  const nDays = t.days.length;
-  const printed = new Date().toLocaleString("en-AU", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+function tripDocument(trip, { routes, routing, shared = false }) {
+  const cover = photoFor(trip.cover ?? null);
+  const nDays = trip.days.length;
+  const printed = new Date().toLocaleString(locale(), { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
   const travel = (d, a, b) => {
     const seg = d.segments.find((s) => s.fromId === a.id && s.toId === b.id);
     const o = seg?.options.find((x) => x.mode === seg.selectedMode);
     if (!o || o.status !== "ok") {
-      const why = !a.place || !b.place || a.place.source === "demo" || b.place.source === "demo" ? "No route: demo places can't be routed" : !routing ? "No route: Google Maps isn't set up here" : seg ? "No route from Google for this leg" : "Route not calculated";
+      const why = !a.place || !b.place || a.place.source === "demo" || b.place.source === "demo" ? t("No route: demo places can't be routed") : !routing ? t("No route: Google Maps isn't set up here") : seg ? t("No route from Google for this leg") : t("Route not calculated");
       return h("li", { class: "tp-leg tp-leg-none" }, why);
     }
     const transit = (o.steps ?? []).filter((s) => s.kind === "transit");
     return h(
       "li",
       { class: "tp-leg" },
-      `${MODE_WORD[o.mode]} · ${dur(Math.max(1, Math.ceil(o.durationSec / 60)))} · ${(o.distanceM / 1000).toFixed(1)} km`,
+      `${t(MODE_WORD[o.mode])} · ${dur(Math.max(1, Math.ceil(o.durationSec / 60)))} · ${t("{km} km", { km: (o.distanceM / 1000).toFixed(1) })}`,
       o.mode === "TRANSIT" && transit.length ? ` · ${transit.map((s) => [s.vehicle, s.line].filter(Boolean).join(" ")).filter(Boolean).join(", ")}` : "",
-      o.assumedDeparture && h("span", { class: "tp-stale" }, ` (transit looked up for ${o.assumedDeparture})`),
-      seg.stale && h("span", { class: "tp-stale" }, " (times changed since; look it up again)"),
+      o.assumedDeparture && h("span", { class: "tp-stale" }, t(" (transit looked up for {when})", { when: o.assumedDeparture })),
+      seg.stale && h("span", { class: "tp-stale" }, t(" (times changed since; look it up again)")),
     );
   };
 
   const summary =
     routes &&
     (routes.error
-      ? h("p", { class: "tp-note", role: "status" }, `Routes couldn't be calculated: ${routes.error}`)
+      ? h("p", { class: "tp-note", role: "status" }, t("Routes couldn't be calculated: {error}", { error: routes.error }))
       : routes.failed
-        ? h("p", { class: "tp-note", role: "status" }, `${routes.failed} ${routes.failed === 1 ? "route" : "routes"} couldn't be looked up; they're marked below.`)
+        ? h("p", { class: "tp-note", role: "status" }, tn(routes.failed, "{n} route couldn't be looked up; they're marked below.", "{n} routes couldn't be looked up; they're marked below."))
         : null);
 
   return h(
@@ -165,23 +166,23 @@ function tripDocument(t, { routes, routing, shared = false }) {
       "header",
       { class: "tp-head" },
       cover && h("div", { class: "tp-cover" }, coverImg(cover, { eager: true, decorative: true })),
-      h("p", { class: "tp-kicker" }, t.destination),
-      h("h1", { class: "tp-title" }, t.title),
-      h("p", { class: "tp-sub" }, `${fmtRange(t.startDate, t.endDate)} · ${nDays} ${nDays === 1 ? "day" : "days"} · ${t.members.map((m) => m.displayName).join(", ")}`),
+      h("p", { class: "tp-kicker" }, trip.destination),
+      h("h1", { class: "tp-title" }, trip.title),
+      h("p", { class: "tp-sub" }, `${fmtRange(trip.startDate, trip.endDate)} · ${tn(nDays, "{n} day", "{n} days")} · ${trip.members.map((m) => m.displayName).join(", ")}`),
     ),
     summary,
-    t.days.map((d, i) =>
+    trip.days.map((d, i) =>
       h(
         "section",
         { class: "tp-day" },
-        h("h2", { class: "tp-day-h" }, h("span", { class: "tp-day-n" }, `Day ${i + 1}`), fmtDay(d.date, { weekday: "long", day: "numeric", month: "long" })),
+        h("h2", { class: "tp-day-h" }, h("span", { class: "tp-day-n" }, t("Day {n}", { n: i + 1 })), fmtDay(d.date, { weekday: "long", day: "numeric", month: "long" })),
         d.activities.length
           ? h(
               "ol",
               { class: "tp-stops" },
               d.activities.flatMap((a, k) => {
                 const next = d.activities[k + 1];
-                const what = a.role === "start" ? "Starting point" : a.meal ? MEAL_LABEL[a.meal] : KIND_LABEL[a.kind];
+                const what = a.role === "start" ? t("Starting point") : a.meal ? t(MEAL_LABEL[a.meal]) : KIND_LABEL[a.kind];
                 const end = a.startMin !== null && a.role !== "start" ? a.startMin + a.durationMin : null;
                 return [
                   h(
@@ -192,7 +193,7 @@ function tripDocument(t, { routes, routing, shared = false }) {
                       "div",
                       {},
                       h("h3", {}, a.title),
-                      h("p", { class: "tp-meta" }, [what, a.role !== "start" && a.durationMin ? dur(a.durationMin) : null, a.place?.source === "demo" && "Demo place", a.place?.source === "custom" && "Pinned spot"].filter(Boolean).join(" · ")),
+                      h("p", { class: "tp-meta" }, [what, a.role !== "start" && a.durationMin ? dur(a.durationMin) : null, a.place?.source === "demo" && t("Demo place"), a.place?.source === "custom" && t("Pinned spot")].filter(Boolean).join(" · ")),
                       a.notes && h("p", { class: "tp-notes" }, a.notes),
                     ),
                   ),
@@ -200,17 +201,17 @@ function tripDocument(t, { routes, routing, shared = false }) {
                 ].filter(Boolean);
               }),
             )
-          : h("p", { class: "tp-empty" }, "Nothing planned yet."),
+          : h("p", { class: "tp-empty" }, t("Nothing planned yet.")),
       ),
     ),
-    h("p", { class: "tp-foot" }, `Planned on Wayline · ${shared ? "read-only copy" : "exported"} ${printed}. Travel times come from Google Maps routes for the times in the plan; arrival times aren't guaranteed.`),
+    h("p", { class: "tp-foot" }, shared ? t("Planned on Wayline · read-only copy {when}. Travel times come from Google Maps routes for the times in the plan; arrival times aren't guaranteed.", { when: printed }) : t("Planned on Wayline · exported {when}. Travel times come from Google Maps routes for the times in the plan; arrival times aren't guaranteed.", { when: printed })),
   );
 }
 
 async function copy(url) {
   try {
     await navigator.clipboard.writeText(url);
-    toast("Link copied. It opens a read-only copy; nobody can edit through it.");
+    toast(t("Link copied. It opens a read-only copy; nobody can edit through it."));
   } catch {
     // the field shows it, selected on focus
   }
@@ -221,21 +222,21 @@ async function copy(url) {
 // font), so the PNG matches what's on screen without any library. The
 // cover photo is same-origin, so the canvas stays exportable.
 
-async function saveImage(doc, t, button) {
+async function saveImage(doc, trip, button) {
   button.disabled = true;
   const label = button.textContent;
-  button.textContent = "Making the image…";
+  button.textContent = t("Making the image…");
   try {
     await document.fonts.ready;
     const blob = await drawDocument(doc);
-    const a = h("a", { href: URL.createObjectURL(blob), download: `${slug(t.title)}.png` });
+    const a = h("a", { href: URL.createObjectURL(blob), download: `${slug(trip.title)}.png` });
     document.body.append(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-    toast("Image saved.");
+    toast(t("Image saved."));
   } catch {
-    toast("The image couldn't be made in this browser. Try Save as PDF instead.");
+    toast(t("The image couldn't be made in this browser. Try Save as PDF instead."));
   } finally {
     button.disabled = false;
     button.textContent = label;

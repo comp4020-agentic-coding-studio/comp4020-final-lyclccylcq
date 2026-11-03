@@ -1,3 +1,4 @@
+import { t } from "/i18n.js";
 import { api, avatar, fill, h, svg } from "/ui.js";
 
 // Two-person voice calls between people on the same trip (ADR 0004).
@@ -76,7 +77,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
   audio.dataset.testid = "remote-audio";
   audio.addEventListener("playing", () => audio.srcObject?.getAudioTracks().length && setQuiet({ playing: true, playError: null, needsSound: false }));
   audio.addEventListener("pause", () => setQuiet({ playing: false }));
-  const card = h("section", { class: "call-card", hidden: true, role: "region", "aria-label": "Voice call" });
+  const card = h("section", { class: "call-card", hidden: true, role: "region", "aria-label": t("Voice call") });
   const announcer = h("div", { class: "sr-only", role: "status", "aria-live": "assertive" });
   document.body.append(card, audio, announcer);
   let drag = null; // desktop: where the user moved the card to, kept for this page
@@ -131,7 +132,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
     clearTimeout(ringTimer);
     stopMedia();
     set({ phase: "ended", callId: null, role: null, muted: false, peerMuted: false, endedReason: reason, error, elsewhere: false, connectedAt: null, minimized: false });
-    announce(error ?? ENDED[reason] ?? "The call ended.");
+    announce(error ?? (ENDED[reason] ? t(ENDED[reason]) : null) ?? t("The call ended."));
   }
 
   function announce(text) {
@@ -141,7 +142,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
   }
 
   async function microphone() {
-    if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error("This browser can't make calls here. Calls need a secure (https) page."), { soft: true });
+    if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error(t("This browser can't make calls here. Calls need a secure (https) page.")), { soft: true });
     try {
       // audio only, and only after an explicit Call or Accept
       return await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
@@ -149,12 +150,12 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
       const name = err?.name;
       const msg =
         name === "NotAllowedError" || name === "SecurityError"
-          ? "Microphone access was blocked. Allow the microphone for this site in your browser settings, then try again."
+          ? t("Microphone access was blocked. Allow the microphone for this site in your browser settings, then try again.")
           : name === "NotFoundError" || name === "OverconstrainedError"
-            ? "No microphone was found. Connect one and try again."
+            ? t("No microphone was found. Connect one and try again.")
             : name === "NotReadableError" || name === "AbortError"
-              ? "Your microphone is being used by another app or tab. Close it there and try again."
-              : "The microphone couldn't be started.";
+              ? t("Your microphone is being used by another app or tab. Close it there and try again.")
+              : t("The microphone couldn't be started.");
       throw Object.assign(new Error(msg), { soft: true });
     }
   }
@@ -259,7 +260,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
         audio.srcObject = new MediaStream(remote?.getAudioTracks() ?? []);
         return void play();
       }
-      set({ playError: "The call is connected but its sound isn't playing. Press Turn on sound.", needsSound: true, minimized: false });
+      set({ playError: t("The call is connected but its sound isn't playing. Press Turn on sound."), needsSound: true, minimized: false });
     }, 2500);
   }
 
@@ -279,9 +280,9 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
         // Anything else is a real playback failure, and we say so.
         if (err?.name === "NotAllowedError") {
           set({ needsSound: true, minimized: false, playError: null });
-          announce("Your browser blocked the call's sound. Press Turn on sound.");
+          announce(t("Your browser blocked the call's sound. Press Turn on sound."));
         } else if (err?.name !== "AbortError") {
-          set({ playError: "Your browser couldn't play the call's audio.", minimized: false });
+          set({ playError: t("Your browser couldn't play the call's audio."), minimized: false });
         }
         return false;
       },
@@ -360,14 +361,14 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
   // measurements only. Silence from the other person isn't a fault.
   function audioState() {
     if (V.phase !== "connected") return null;
-    if (V.needsSound) return { kind: "blocked", text: "Your browser blocked the sound. Press Turn on sound to hear them." };
+    if (V.needsSound) return { kind: "blocked", text: t("Your browser blocked the sound. Press Turn on sound to hear them.") };
     if (V.playError) return { kind: "error", text: V.playError };
     const mic = stream?.getAudioTracks()[0];
-    if (!mic || mic.readyState === "ended") return { kind: "error", text: "Your microphone stopped. Hang up and call again." };
-    if (V.receiving === false) return { kind: "warn", text: `No audio is arriving from ${V.peer?.displayName ?? "them"}. The connection may be blocked.` };
-    if (V.sending === false && !V.muted) return { kind: "warn", text: "Your audio isn't being sent. The connection may be blocked." };
-    if (V.peerMuted) return { kind: "info", text: `${V.peer?.displayName ?? "They"} muted their microphone.` };
-    if (V.muted) return { kind: "info", text: "You're muted. They can't hear you." };
+    if (!mic || mic.readyState === "ended") return { kind: "error", text: t("Your microphone stopped. Hang up and call again.") };
+    if (V.receiving === false) return { kind: "warn", text: V.peer?.displayName ? t("No audio is arriving from {name}. The connection may be blocked.", { name: V.peer.displayName }) : t("No audio is arriving from them. The connection may be blocked.") };
+    if (V.sending === false && !V.muted) return { kind: "warn", text: t("Your audio isn't being sent. The connection may be blocked.") };
+    if (V.peerMuted) return { kind: "info", text: V.peer?.displayName ? t("{name} muted their microphone.", { name: V.peer.displayName }) : t("They muted their microphone.") };
+    if (V.muted) return { kind: "info", text: t("You're muted. They can't hear you.") };
     return null;
   }
 
@@ -523,7 +524,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
         clearTimeout(ringTimer);
         ringTimer = setTimeout(() => V.phase === "incoming" && V.callId === ev.callId && finish("no-answer"), Math.max(1000, ev.expiresAt - Date.now()));
         set({ phase: "incoming", callId: ev.callId, peer: ev.peer, role: "callee", error: null, endedReason: null, elsewhere: false, lastPeerId: ev.peer.id, minimized: false });
-        return announce(`${ev.peer.displayName} is calling you. Accept or decline in the call window.`);
+        return announce(t("{name} is calling you. Accept or decline in the call window.", { name: ev.peer.displayName }));
       case "outgoing":
         if (ev.session !== session) return set({ phase: "idle", callId: ev.callId, peer: ev.peer, elsewhere: true });
         return;
@@ -681,27 +682,27 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
   // the call window while one is on. Never the controls themselves.
   function render() {
     const online = getPresence().filter((p) => p.id !== me.id);
-    const box = h("div", { class: `call call-${V.phase}`, "data-phase": V.phase, role: "group", "aria-label": "Voice call" });
+    const box = h("div", { class: `call call-${V.phase}`, "data-phase": V.phase, role: "group", "aria-label": t("Voice call") });
     const add = (...kids) => box.append(fill(document.createDocumentFragment(), ...kids));
 
     if (V.elsewhere) {
-      add(h("span", { class: "call-status" }, `In a call with ${V.peer?.displayName ?? "someone"} in another tab`));
+      add(h("span", { class: "call-status" }, V.peer?.displayName ? t("In a call with {name} in another tab", { name: V.peer.displayName }) : t("In a call with someone in another tab")));
       return box;
     }
     if (live() || V.phase === "incoming") {
       add(
         h(
           "button",
-          { class: `btn btn-sm call-pill call-pill-${V.phase}`, type: "button", "data-call": "show", "aria-label": `${LABEL[V.phase]} ${V.peer?.displayName ?? ""}. Show the call window`, onclick: restore },
+          { class: `btn btn-sm call-pill call-pill-${V.phase}`, type: "button", "data-call": "show", "aria-label": t("{state} {name}. Show the call window", { state: t(LABEL[V.phase]), name: V.peer?.displayName ?? "" }), onclick: restore },
           h("span", { class: "call-dot", "aria-hidden": "true" }),
-          h("span", { class: "hide-sm" }, LABEL[V.phase]),
+          h("span", { class: "hide-sm" }, t(LABEL[V.phase])),
         ),
       );
       return box;
     }
     const target = online.find((p) => p.id === V.lastPeerId) ?? online[0];
     if (target) {
-      const label = V.phase === "ended" && V.endedReason !== "left" && V.endedReason !== "declined-by-me" ? "Call again" : online.length > 1 ? "Call…" : `Call ${target.displayName}`;
+      const label = V.phase === "ended" && V.endedReason !== "left" && V.endedReason !== "declined-by-me" ? t("Call again") : online.length > 1 ? t("Call…") : t("Call {name}", { name: target.displayName });
       add(
         h(
           "button",
@@ -709,7 +710,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
             class: "btn btn-ghost btn-sm",
             type: "button",
             "data-call": "start",
-            "aria-label": online.length > 1 ? "Start a voice call" : `Start a voice call with ${target.displayName}`,
+            "aria-label": online.length > 1 ? t("Start a voice call") : t("Start a voice call with {name}", { name: target.displayName }),
             onclick: () => (online.length > 1 ? choose(online) : call(target)),
           },
           ico("phone"),
@@ -748,27 +749,27 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
     if (drag && !mini) Object.assign(card.style, { left: `${drag.x}px`, top: `${drag.y}px`, right: "auto", bottom: "auto" });
     else Object.assign(card.style, { left: "", top: "", right: anchorRight(), bottom: "" });
 
-    const who = V.peer ?? { id: "?", displayName: "Someone" };
+    const who = V.peer ?? { id: "?", displayName: t("Someone") };
     const timer = V.phase === "connected" && V.connectedAt ? h("span", { class: "call-timer", "data-call": "timer" }, clock(Date.now() - V.connectedAt)) : null;
     const state = audioState();
     const muteBtn = stream && (V.phase === "connected" || V.phase === "reconnecting" || V.phase === "connecting")
       && h(
         "button",
-        { class: `call-btn call-mute${V.muted ? " on" : ""}`, type: "button", "data-call": "mute", "aria-pressed": String(V.muted), "aria-label": V.muted ? "Unmute your microphone" : "Mute your microphone", onclick: toggleMute },
+        { class: `call-btn call-mute${V.muted ? " on" : ""}`, type: "button", "data-call": "mute", "aria-pressed": String(V.muted), "aria-label": V.muted ? t("Unmute your microphone") : t("Mute your microphone"), onclick: toggleMute },
         ico(V.muted ? "micOff" : "mic"),
-        h("span", {}, V.muted ? "Unmute" : "Mute"),
+        h("span", {}, V.muted ? t("Unmute") : t("Mute")),
       );
     const hangBtn = h(
       "button",
-      { class: "call-btn call-hang", type: "button", "data-call": "hangup", "aria-label": V.phase === "outgoing" ? "Cancel the call" : "Hang up", onclick: () => hangup() },
+      { class: "call-btn call-hang", type: "button", "data-call": "hangup", "aria-label": V.phase === "outgoing" ? t("Cancel the call") : t("Hang up"), onclick: () => hangup() },
       ico("hang"),
-      h("span", {}, V.phase === "outgoing" ? "Cancel" : "Hang up"),
+      h("span", {}, V.phase === "outgoing" ? t("Cancel") : t("Hang up")),
     );
     const soundBtn = V.needsSound && h(
       "button",
       { class: "call-btn call-sound", type: "button", "data-call": "sound", onclick: () => play() },
       ico("sound"),
-      h("span", {}, "Turn on sound"),
+      h("span", {}, t("Turn on sound")),
     );
 
     if (mini) {
@@ -777,9 +778,9 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
         h(
           "div",
           { class: "call-mini" },
-          h("button", { class: "call-mini-open", type: "button", "data-call": "restore", "aria-label": `Show the call with ${who.displayName}`, onclick: restore },
+          h("button", { class: "call-mini-open", type: "button", "data-call": "restore", "aria-label": t("Show the call with {name}", { name: who.displayName }), onclick: restore },
             h("span", { class: "call-dot", "aria-hidden": "true" }),
-            h("span", { class: "call-mini-text" }, h("b", {}, who.displayName), " ", h("span", { class: "call-mini-state" }, timer ?? LABEL[V.phase])),
+            h("span", { class: "call-mini-text" }, h("b", {}, who.displayName), " ", h("span", { class: "call-mini-state" }, timer ?? t(LABEL[V.phase]))),
             ico("max")),
           soundBtn,
           muteBtn,
@@ -790,9 +791,9 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
       const head = h(
         "header",
         { class: "call-head", onpointerdown: startDrag },
-        h("span", { class: "call-head-label" }, h("span", { class: "call-dot", "aria-hidden": "true" }), V.phase === "incoming" ? "Incoming voice call" : "Voice call"),
-        live() && h("button", { class: "call-icon-btn", type: "button", "data-call": "minimize", "aria-label": "Minimize the call window", onclick: minimize }, ico("min")),
-        showEnded && h("button", { class: "call-icon-btn", type: "button", "data-call": "dismiss", "aria-label": "Close", onclick: dismiss }, "×"),
+        h("span", { class: "call-head-label" }, h("span", { class: "call-dot", "aria-hidden": "true" }), V.phase === "incoming" ? t("Incoming voice call") : t("Voice call")),
+        live() && h("button", { class: "call-icon-btn", type: "button", "data-call": "minimize", "aria-label": t("Minimize the call window"), onclick: minimize }, ico("min")),
+        showEnded && h("button", { class: "call-icon-btn", type: "button", "data-call": "dismiss", "aria-label": t("Close"), onclick: dismiss }, "×"),
       );
       const body = h(
         "div",
@@ -805,7 +806,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
           h(
             "span",
             { class: "call-state", role: "status", "data-call": "state" },
-            V.phase === "ended" || showEnded ? (V.error ?? ENDED[V.endedReason] ?? "The call ended.") : LABEL[V.phase],
+            V.phase === "ended" || showEnded ? (V.error ?? (ENDED[V.endedReason] ? t(ENDED[V.endedReason]) : null) ?? t("The call ended.")) : t(LABEL[V.phase]),
             timer && " · ",
             timer,
           ),
@@ -814,7 +815,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
       const meters = V.phase === "connected" && h(
         "div",
         { class: "call-meters", "aria-hidden": "true" },
-        level("You", "me"),
+        level(t("You"), "me"),
         level(who.displayName, "peer"),
       );
       const note = state && h("p", { class: `call-note call-note-${state.kind}`, role: state.kind === "info" ? null : "alert", "data-call": "note" }, state.text);
@@ -823,14 +824,14 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
           ? h(
               "div",
               { class: "call-actions" },
-              h("button", { class: "call-btn call-decline", type: "button", "data-call": "decline", onclick: decline }, ico("hang"), h("span", {}, "Decline")),
-              h("button", { class: "call-btn call-accept", type: "button", "data-call": "accept", onclick: accept }, ico("phone"), h("span", {}, "Accept")),
+              h("button", { class: "call-btn call-decline", type: "button", "data-call": "decline", onclick: decline }, ico("hang"), h("span", {}, t("Decline"))),
+              h("button", { class: "call-btn call-accept", type: "button", "data-call": "accept", onclick: accept }, ico("phone"), h("span", {}, t("Accept"))),
             )
           : live()
             ? h("div", { class: "call-actions" }, soundBtn, muteBtn, hangBtn)
             : showEnded && callAgainButton();
-      const privacy = V.phase === "incoming" && h("p", { class: "call-fine" }, "Audio only, between the two of you. Nothing is recorded.");
-      const diag = debug && V.diag && h("details", { class: "call-debug" }, h("summary", {}, "Connection details"), h("span", { class: "call-diag", "data-call": "diag" }, V.diag));
+      const privacy = V.phase === "incoming" && h("p", { class: "call-fine" }, t("Audio only, between the two of you. Nothing is recorded."));
+      const diag = debug && V.diag && h("details", { class: "call-debug" }, h("summary", {}, t("Connection details")), h("span", { class: "call-diag", "data-call": "diag" }, V.diag));
       fill(card, head, body, meters, note, privacy, actions, diag);
     }
     if (focused) card.querySelector(`[data-call="${focused}"]`)?.focus();
@@ -928,8 +929,8 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
     const dialog = h(
       "dialog",
       { class: "dialog" },
-      h("h2", {}, "Voice call"),
-      h("p", { class: "muted small" }, "Audio only, between the two of you. Nothing is recorded or sent to the AI."),
+      h("h2", {}, t("Voice call")),
+      h("p", { class: "muted small" }, t("Audio only, between the two of you. Nothing is recorded or sent to the AI.")),
       h(
         "div",
         { class: "call-pick" },
@@ -937,7 +938,7 @@ export function createVoice({ base, session, me, getMembers, getPresence, onChan
           h("button", { class: "btn btn-ghost", type: "button", onclick: () => { dialog.close(); call(p); } }, avatar(p, "sm"), p.displayName),
         ),
       ),
-      h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, "Cancel")),
+      h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, t("Cancel"))),
     );
     dialog.addEventListener("close", () => dialog.remove());
     document.body.append(dialog);

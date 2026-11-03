@@ -402,7 +402,8 @@ contradict the README, stop and ask. Don't quietly change the product.
 - `/profile` is the person's own page only (`/api/me/profile`,
   `/api/me/publications`): display name, username, optional bio, joined
   date; no email (accounts have none), initials for avatars, no public
-  profiles. The header's avatar and name lead there.
+  profiles. The header's avatar and name open the account menu: the profile,
+  the site language and Sign out.
 - Usernames and display names are each unique. Usernames keep their ASCII
   rule and compare case-insensitively (`usernameKey`, the NOCASE column).
   Display names are stored as typed (trimmed) with a separate
@@ -445,6 +446,32 @@ contradict the README, stop and ask. Don't quietly change the product.
   options are a temporary copy dropped/refreshed after 30 days; addresses,
   hours and details are fetched live and never stored. Show "Google Maps"
   attribution where Google data appears without a Google map.
+
+## Languages
+
+- The site is in English or Simplified Chinese (November 2026). English is
+  the default and the source of every string. A visitor switches beside
+  Sign in (kept in localStorage, sent as `x-wayline-lang`); signed in, the
+  account menu holds the choice, saved to `users.lang` (`PATCH
+  /api/me/profile { lang }`), and the account's language wins on sign-in
+  and on other devices. Sign-up carries the visitor's choice over.
+- Every user-visible string in `public/` goes through `t("English", vars)`
+  (`public/i18n.js`); the English text is the key and the Chinese lives in
+  `public/i18n/*.js`, one dictionary per part of the site.
+  `spec/i18n.test.ts` fails on a `t()` string without Chinese, a changed
+  `{placeholder}` or an entry left in English. Compute strings at render
+  time, never at module load, so a switch re-renders them.
+- The server's messages stay English on the wire: a trip snapshot goes to
+  every member, whatever their language. The browser translates them
+  (`tServer()`, `public/i18n/server.js`: exact text, then patterns).
+  `ApiError` messages already pass through it; wrap other server text
+  (review notes, issue messages, route messages) where it's shown.
+- What people write (trip and stop titles, notes, names, bios) and Google's
+  content (place names, reviews) are never translated by Wayline. Google
+  answers in the request's language (`src/lang.ts`, `languageCode`).
+  Wayline's own curated content has a Chinese version
+  (`src/curated-zh.ts`), served by language at read time; the database
+  keeps the English, and filters match on the English keys.
 
 ## Engineering rules
 

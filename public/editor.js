@@ -25,6 +25,7 @@ import {
   toast,
   uid,
 } from "/ui.js";
+import { locale, t, tn, tServer } from "/i18n.js";
 
 const MODE_LABEL = { WALK: "Walk", TRANSIT: "Transit", DRIVE: "Drive" };
 const MODE_WORD = { WALK: "Walking", TRANSIT: "Transit", DRIVE: "Driving" };
@@ -85,7 +86,7 @@ export async function openEditor(root, tripId, ctx) {
   const isOwner = () => role() === "owner";
   const canEdit = (a) => isOwner() || (a.role !== "start" && a.createdBy === me.id);
   const day = () => S.trip.days.find((d) => d.id === S.dayId) ?? S.trip.days[0];
-  const memberName = (id) => (id === me.id ? "you" : S.trip.members.find((m) => m.id === id)?.displayName ?? "someone");
+  const memberName = (id) => (id === me.id ? t("you") : S.trip.members.find((m) => m.id === id)?.displayName ?? t("someone"));
   const colourOf = (id) => memberColour(S.trip.members, id);
 
   // --- skeleton ---
@@ -94,37 +95,37 @@ export async function openEditor(root, tripId, ctx) {
   const searchInput = h("input", {
     type: "search",
     name: "q",
-    placeholder: `Search places in ${S.trip.destination}`,
-    "aria-label": "Search for places",
+    placeholder: t("Search places in {destination}", { destination: S.trip.destination }),
+    "aria-label": t("Search for places"),
     autocomplete: "off",
     maxlength: 120,
   });
-  const searchForm = h("form", { class: "search", role: "search" }, icon("search"), searchInput, h("button", { class: "btn btn-primary btn-sm", type: "submit" }, "Search"));
+  const searchForm = h("form", { class: "search", role: "search" }, icon("search"), searchInput, h("button", { class: "btn btn-primary btn-sm", type: "submit" }, t("Search")));
   const searchPanel = h("div", { class: "search-panel", hidden: true });
   const mapHost = h("div", { class: "map-host" });
-  const dayTabs = h("nav", { class: "day-tabs", role: "tablist", "aria-label": "Trip days" });
+  const dayTabs = h("nav", { class: "day-tabs", role: "tablist", "aria-label": t("Trip days") });
   const dayHead = h("div", { class: "day-head" });
-  const timeline = h("ol", { class: "timeline", "aria-label": "Itinerary for the selected day" });
+  const timeline = h("ol", { class: "timeline", "aria-label": t("Itinerary for the selected day") });
   // under the timeline: the day in four numbers, and who put what on it
-  const daySummary = h("aside", { class: "day-summary", "aria-label": "This day at a glance" });
+  const daySummary = h("aside", { class: "day-summary", "aria-label": t("This day at a glance") });
   const planFoot = h(
     "div",
     { class: "plan-foot" },
-    h("button", { class: "btn btn-quiet", type: "button", onclick: () => activityDialog({}) }, icon("plus"), "Add custom activity"),
+    h("button", { class: "btn btn-quiet", type: "button", onclick: () => activityDialog({}) }, icon("plus"), t("Add custom activity")),
   );
-  const copilotPane = h("aside", { class: "pane pane-copilot", "aria-label": "Planning assistant" });
-  const mobileTabs = h("nav", { class: "mobile-tabs", "aria-label": "Workspace" });
+  const copilotPane = h("aside", { class: "pane pane-copilot", "aria-label": t("Planning assistant") });
+  const mobileTabs = h("nav", { class: "mobile-tabs", "aria-label": t("Workspace") });
   // the day as a line across the top: its stations left to right by time,
   // the legs between them coloured by how you go. An overview and a way to
   // pick a stop; the timeline beside the map stays where editing happens.
   const lineDays = h("div", { class: "line-days" });
-  const lineTrack = h("ol", { class: "line-track", "aria-label": "The selected day as a line" });
-  const lineBand = h("section", { class: "line-band", "aria-label": "Day overview" }, lineDays, lineTrack);
+  const lineTrack = h("ol", { class: "line-track", "aria-label": t("The selected day as a line") });
+  const lineBand = h("section", { class: "line-band", "aria-label": t("Day overview") }, lineDays, lineTrack);
   const workspace = h(
     "main",
     { class: "workspace" },
-    h("section", { class: "pane pane-map", "aria-label": "Map and place search" }, searchForm, searchPanel, mapHost),
-    h("section", { class: "pane pane-plan", "aria-label": "Itinerary" }, dayTabs, dayHead, h("div", { class: "plan-scroll" }, timeline, daySummary), planFoot),
+    h("section", { class: "pane pane-map", "aria-label": t("Map and place search") }, searchForm, searchPanel, mapHost),
+    h("section", { class: "pane pane-plan", "aria-label": t("Itinerary") }, dayTabs, dayHead, h("div", { class: "plan-scroll" }, timeline, daySummary), planFoot),
     copilotPane,
   );
   const editorEl = h("div", { class: "editor" }, bar, lineBand, workspace, mobileTabs);
@@ -200,11 +201,11 @@ export async function openEditor(root, tripId, ctx) {
       const by = prev ? a.updatedBy : a.createdBy;
       if (!by || by === me.id || (prev && prev.version === a.version)) continue;
       S.glow.set(a.id, { by, until: Date.now() + 4000 });
-      said.push(`${memberName(by)} ${prev ? "changed" : "added"} ${a.title}`);
+      said.push(prev ? t("{who} changed {title}", { who: memberName(by), title: a.title }) : t("{who} added {title}", { who: memberName(by), title: a.title }));
     }
-    for (const [id, a] of was) if (!now.some((x) => x.id === id) && a.createdBy !== me.id && a.updatedBy !== me.id) said.push(`${a.title} was removed`);
+    for (const [id, a] of was) if (!now.some((x) => x.id === id) && a.createdBy !== me.id && a.updatedBy !== me.id) said.push(t("{title} was removed", { title: a.title }));
     if (said.length) {
-      toast(said.length > 2 ? `${said[0]} and ${said.length - 1} more changes` : said.join(" · "));
+      toast(said.length > 2 ? t("{first} and {n} more changes", { first: said[0], n: said.length - 1 }) : said.join(" · "));
       clearTimeout(S.glowTimer);
       S.glowTimer = setTimeout(() => { S.glow.clear(); renderTimeline(); renderLine(); }, 4100);
     }
@@ -276,7 +277,7 @@ export async function openEditor(root, tripId, ctx) {
     const list = [...views.values()]
       .filter((v) => here.has(v.userId))
       .map((v) => {
-        const name = v.userId === me.id ? `${v.displayName} (another tab)` : v.displayName;
+        const name = v.userId === me.id ? t("{name} (another tab)", { name: v.displayName }) : v.displayName;
         return { displayName: name, initials: initials(v.displayName), colour: colourOf(v.userId), lat: v.lat, lng: v.lng, zoom: v.zoom };
       });
     map.setPeers(list);
@@ -294,7 +295,7 @@ export async function openEditor(root, tripId, ctx) {
     const { reason } = JSON.parse(e.data);
     events.close();
     voice.destroy();
-    toast(reason === "deleted" ? "This trip was deleted." : "You no longer have access to this trip.", { kind: "error" });
+    toast(reason === "deleted" ? t("This trip was deleted.") : t("You no longer have access to this trip."), { kind: "error" });
     ctx.navigate("/", { replace: true });
   });
   events.onopen = () => {
@@ -333,12 +334,12 @@ export async function openEditor(root, tripId, ctx) {
   // connection that brings others' changes is down.
   function saveState() {
     const [cls, label, title] = saves.pending
-      ? ["conn-saving", "Saving\u2026", "Your change is on its way to the server."]
+      ? ["conn-saving", t("Saving…"), t("Your change is on its way to the server.")]
       : saves.failed
-        ? ["conn-failed", "Not saved", `${saves.failed} Make the change again when you're back online.`]
+        ? ["conn-failed", t("Not saved"), t("{error} Make the change again when you're back online.", { error: saves.failed })]
         : !S.live
-          ? ["conn-off", "Reconnecting\u2026", "Your saved changes are safe; others' changes will appear when the connection is back."]
-          : ["conn-live", "Saved", "Every change is saved to your account as you make it, and shared live with the trip's members."];
+          ? ["conn-off", t("Reconnecting…"), t("Your saved changes are safe; others' changes will appear when the connection is back.")]
+          : ["conn-live", t("Saved"), t("Every change is saved to your account as you make it, and shared live with the trip's members.")];
     return h("span", { class: `conn ${cls}`, role: "status", title, "data-save": cls.slice(5) }, label);
   }
   const onSaves = () => renderBar();
@@ -352,18 +353,18 @@ export async function openEditor(root, tripId, ctx) {
   addEventListener("beforeunload", onLeave);
 
   function renderBar() {
-    const t = S.trip;
+    const tr = S.trip;
     const online = S.presence.length ? S.presence : [{ id: me.id, displayName: me.displayName }];
-    const issues = t.days.reduce((n, d) => n + d.analysis.issues.length, 0);
+    const issues = tr.days.reduce((n, d) => n + d.analysis.issues.length, 0);
     fill(
       bar,
-      h("a", { class: "icon-btn", href: "/", "data-link": true, "aria-label": "Back to your trips" }, icon("back")),
+      h("a", { class: "icon-btn", href: "/", "data-link": true, "aria-label": t("Back to your trips") }, icon("back")),
       h(
         "div",
         { class: "trip-title" },
-        h("h1", {}, t.title),
-        h("p", {}, `${t.destination} · ${fmtRange(t.startDate, t.endDate)}`),
-        t.forkedFrom && h("p", { class: "trip-origin small" }, "Based on ", h("a", { href: `/itineraries/${t.forkedFrom.publicationId}`, "data-link": true }, t.forkedFrom.title), t.forkedFrom.author ? ` by ${t.forkedFrom.author}` : ""),
+        h("h1", {}, tr.title),
+        h("p", {}, `${tr.destination} · ${fmtRange(tr.startDate, tr.endDate)}`),
+        tr.forkedFrom && h("p", { class: "trip-origin small" }, t("Based on "), h("a", { href: `/itineraries/${tr.forkedFrom.publicationId}`, "data-link": true }, tr.forkedFrom.title), tr.forkedFrom.author ? t(" by {author}", { author: tr.forkedFrom.author }) : ""),
       ),
       h(
         "div",
@@ -372,31 +373,31 @@ export async function openEditor(root, tripId, ctx) {
           "span",
           { class: "avatars crew" },
           // everyone on the trip: here now in full colour with a live dot, the rest faded
-          [...online, ...t.members.filter((m) => !online.some((p) => p.id === m.id))].slice(0, 6).map((p) => {
+          [...online, ...tr.members.filter((m) => !online.some((p) => p.id === m.id))].slice(0, 6).map((p) => {
             const here = online.some((o) => o.id === p.id);
             const a = avatar(p, "sm");
             a.style.setProperty("--c", colourOf(p.id));
             a.classList.toggle("is-here", here);
             a.classList.toggle("is-away", !here);
-            a.title = `${p.displayName}${p.id === me.id ? " (you)" : ""}${here ? " · here now" : " · not here"}`;
+            a.title = `${p.displayName}${p.id === me.id ? t(" (you)") : ""}${here ? t(" · here now") : t(" · not here")}`;
             return a;
           }),
         ),
-        h("span", { class: "presence-label" }, online.length > 1 ? `${online.length} people are planning this trip` : "Just you right now"),
+        h("span", { class: "presence-label" }, online.length > 1 ? t("{n} people are planning this trip", { n: online.length }) : t("Just you right now")),
       ),
       saveState(),
       voice.render(),
-      h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => shareDialog(sharing()) }, icon("share"), h("span", { class: "hide-sm" }, "Share"), isOwner() && t.pendingRequests > 0 && h("span", { class: "badge badge-danger", "aria-label": `${t.pendingRequests} requests to join` }, String(t.pendingRequests))),
-      isOwner() && h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-publish": t.publication?.status ?? "none", onclick: () => publishDialog(sharing()) }, icon("spark"), h("span", { class: "hide-sm" }, t.publication?.status === "published" ? (t.publication.outdated ? "Update published" : "Published") : "Publish Trip")),
+      h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => shareDialog(sharing()) }, icon("share"), h("span", { class: "hide-sm" }, t("Share")), isOwner() && tr.pendingRequests > 0 && h("span", { class: "badge badge-danger", "aria-label": t("{n} requests to join", { n: tr.pendingRequests }) }, String(tr.pendingRequests))),
+      isOwner() && h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-publish": tr.publication?.status ?? "none", onclick: () => publishDialog(sharing()) }, icon("spark"), h("span", { class: "hide-sm" }, tr.publication?.status === "published" ? (tr.publication.outdated ? t("Update published") : t("Published")) : t("Publish Trip"))),
       // a printable copy for anyone on the trip, published or not
-      h("a", { class: "btn btn-ghost btn-sm", href: `/trips/${tripId}/print`, "data-link": true, "data-export": "print", title: "Print the plan or save it as a PDF" }, h("span", {}, "Export")),
-      isOwner() && h("button", { class: "icon-btn", type: "button", "aria-label": "Trip settings", onclick: settingsDialog }, icon("settings")),
+      h("a", { class: "btn btn-ghost btn-sm", href: `/trips/${tripId}/print`, "data-link": true, "data-export": "print", title: t("Print the plan or save it as a PDF") }, h("span", {}, t("Export"))),
+      isOwner() && h("button", { class: "icon-btn", type: "button", "aria-label": t("Trip settings"), onclick: settingsDialog }, icon("settings")),
       h(
         "button",
         { class: `btn btn-sm ${S.copilotOpen ? "btn-dark" : "btn-ghost"} hide-phone`, type: "button", "aria-pressed": String(S.copilotOpen), onclick: () => { S.copilotOpen = !S.copilotOpen; render(); } },
         icon("spark"),
-        "Assistant",
-        issues > 0 && h("span", { class: "badge badge-danger", "aria-label": `${issues} issues` }, String(issues)),
+        t("Assistant"),
+        issues > 0 && h("span", { class: "badge badge-danger", "aria-label": t("{n} issues", { n: issues }) }, String(issues)),
       ),
     );
   }
@@ -417,7 +418,7 @@ export async function openEditor(root, tripId, ctx) {
     const d = day();
     const stops = d?.activities ?? [];
     if (!stops.length) {
-      lineTrack.replaceChildren(h("li", { class: "line-empty" }, "Nothing on this day yet. Search the map to add a first stop."));
+      lineTrack.replaceChildren(h("li", { class: "line-empty" }, t("Nothing on this day yet. Search the map to add a first stop.")));
       return;
     }
     const timed = stops.filter((a) => a.startMin !== null);
@@ -479,20 +480,20 @@ export async function openEditor(root, tripId, ctx) {
     for (const a of stops) if (a.createdBy) by.set(a.createdBy, (by.get(a.createdBy) ?? 0) + 1);
     const stat = (n, label) => h("div", { class: "ds-stat" }, h("b", {}, n), h("span", {}, label));
     daySummary.replaceChildren(
-      h("p", { class: "ds-kicker" }, "This day at a glance"),
+      h("p", { class: "ds-kicker" }, t("This day at a glance")),
       h(
         "div",
         { class: "ds-stats" },
-        stat(from === null ? "—" : `${hhmm(from)}–${hhmm(to)}`, "Out and about"),
-        stat(dur(visit), "At the stops"),
-        stat(travel ? dur(travel) : "—", unrouted ? `Travel, ${unrouted} leg${unrouted === 1 ? "" : "s"} not routed` : "Travelling"),
-        stat(String(stops.length), stops.length === 1 ? "Stop" : "Stops"),
+        stat(from === null ? "—" : `${hhmm(from)}–${hhmm(to)}`, t("Out and about")),
+        stat(dur(visit), t("At the stops")),
+        stat(travel ? dur(travel) : "—", unrouted ? tn(unrouted, "Travel, {n} leg not routed", "Travel, {n} legs not routed") : t("Travelling")),
+        stat(String(stops.length), stops.length === 1 ? t("Stop") : t("Stops")),
       ),
       by.size > 0 ? h(
         "div",
         { class: "ds-people" },
-        h("p", { class: "ds-kicker" }, "Added by"),
-        h("ul", {}, [...by].map(([id, n]) => h("li", { style: `--c:${colourOf(id)}` }, h("i", { "aria-hidden": "true" }), h("span", {}, memberName(id) === "you" ? "You" : memberName(id)), h("b", {}, String(n))))),
+        h("p", { class: "ds-kicker" }, t("Added by")),
+        h("ul", {}, [...by].map(([id, n]) => h("li", { style: `--c:${colourOf(id)}` }, h("i", { "aria-hidden": "true" }), h("span", {}, id === me.id ? t("You") : memberName(id)), h("b", {}, String(n))))),
       ) : "",
     );
   }
@@ -510,10 +511,10 @@ export async function openEditor(root, tripId, ctx) {
             "aria-selected": String(d.id === S.dayId),
             onclick: () => setDay(d.id),
           },
-          h("span", { class: "day-tab-n" }, `Day ${i + 1}`),
+          h("span", { class: "day-tab-n" }, t("Day {n}", { n: i + 1 })),
           h("span", { class: "day-tab-date" }, fmtDay(d.date)),
-          h("span", { class: "day-tab-count" }, d.activities.length ? `${d.activities.length} stop${d.activities.length === 1 ? "" : "s"}` : "Empty"),
-          conflicts > 0 && h("span", { class: "dot-danger", "aria-label": `${conflicts} conflicts` }),
+          h("span", { class: "day-tab-count" }, d.activities.length ? tn(d.activities.length, "{n} stop", "{n} stops") : t("Empty")),
+          conflicts > 0 && h("span", { class: "dot-danger", "aria-label": t("{n} conflicts", { n: conflicts }) }),
         );
         tab.addEventListener("dragover", (e) => {
           if (!S.dragging) return;
@@ -525,7 +526,7 @@ export async function openEditor(root, tripId, ctx) {
           e.preventDefault();
           tab.classList.remove("drop-target");
           const id = S.dragging;
-          if (id) move(id, d.id, 9999).then(() => toast(`Moved to Day ${i + 1}.`));
+          if (id) move(id, d.id, 9999).then(() => toast(t("Moved to Day {n}.", { n: i + 1 })));
         });
         return tab;
       }),
@@ -547,13 +548,13 @@ export async function openEditor(root, tripId, ctx) {
     const idx = S.trip.days.indexOf(d);
     const conflicts = d.analysis.issues.filter((x) => x.severity === "conflict").length;
     dayHead.replaceChildren(
-      h("p", { class: "day-kicker" }, `Day ${String(idx + 1).padStart(2, "0")} / ${String(S.trip.days.length).padStart(2, "0")}`),
+      h("p", { class: "day-kicker" }, t("Day {n} / {total}", { n: String(idx + 1).padStart(2, "0"), total: String(S.trip.days.length).padStart(2, "0") })),
       h("h2", {}, fmtDay(d.date, { weekday: "long", day: "numeric", month: "long" })),
       h(
         "p",
         { class: conflicts ? "day-sum day-sum-bad" : "day-sum" },
-        d.activities.length === 0 ? "Nothing planned yet" : `${d.activities.length} stop${d.activities.length === 1 ? "" : "s"}`,
-        conflicts > 0 && ` · ${conflicts} schedule conflict${conflicts === 1 ? "" : "s"}`,
+        d.activities.length === 0 ? t("Nothing planned yet") : tn(d.activities.length, "{n} stop", "{n} stops"),
+        conflicts > 0 && tn(conflicts, " · {n} schedule conflict", " · {n} schedule conflicts"),
       ),
     );
 
@@ -563,12 +564,12 @@ export async function openEditor(root, tripId, ctx) {
         h(
           "p",
           { class: "day-routes" },
-          h("button", { class: "btn btn-sm btn-primary", type: "button", disabled: missing.some(([a, b]) => S.busyLegs.has(`${a.id}>${b.id}`)), onclick: () => calcMissing(d) }, icon("transit"), `Calculate ${missing.length} missing routes`),
+          h("button", { class: "btn btn-sm btn-primary", type: "button", disabled: missing.some(([a, b]) => S.busyLegs.has(`${a.id}>${b.id}`)), onclick: () => calcMissing(d) }, icon("transit"), t("Calculate {n} missing routes", { n: missing.length })),
         ),
       );
     }
     if (!startOf() && !S.starting && idx === 0 && isOwner()) {
-      dayHead.append(h("p", { class: "day-start-link" }, h("button", { class: "linklike small", type: "button", onclick: () => beginStart() }, icon("pin"), "Set a starting point")));
+      dayHead.append(h("p", { class: "day-start-link" }, h("button", { class: "linklike small", type: "button", onclick: () => beginStart() }, icon("pin"), t("Set a starting point"))));
     }
 
     if (!d.activities.length) {
@@ -576,9 +577,9 @@ export async function openEditor(root, tripId, ctx) {
         h(
           "li",
           { class: "timeline-empty" },
-          h("h3", {}, "Start by searching for somewhere you want to visit"),
-          h("p", {}, "Explore the map or search to add a stop: click a place on the map, or click anywhere to see what's nearby. You can also add your own activity below. Wayline works out the travel time between consecutive stops."),
-          h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => { if (isPhone()) setTab("map"); searchInput.focus(); } }, icon("search"), "Search places"),
+          h("h3", {}, t("Start by searching for somewhere you want to visit")),
+          h("p", {}, t("Explore the map or search to add a stop: click a place on the map, or click anywhere to see what's nearby. You can also add your own activity below. Wayline works out the travel time between consecutive stops.")),
+          h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => { if (isPhone()) setTab("map"); searchInput.focus(); } }, icon("search"), t("Search places")),
         ),
       );
       return;
@@ -594,9 +595,9 @@ export async function openEditor(root, tripId, ctx) {
     const proposalRow = () =>
       h(
         "li",
-        { class: "stop stop-proposed", "aria-label": `Proposed, not saved: ${proposal.candidate.name}` },
-        h("div", { class: "stop-rail" }, h("span", { class: "stop-clock" }, proposal.startMin === null ? "No time" : hhmm(proposal.startMin)), h("span", { class: "stop-num" }, "+")),
-        h("article", { class: "stop-card" }, h("p", { class: "stop-top" }, h("span", { class: "start-badge" }, "Proposed · not saved")), h("h3", {}, proposal.candidate.name), h("p", { class: "stop-meta" }, h("span", {}, `Visit ${dur(proposal.durationMin)}`), proposal.meal && h("span", { class: "tag tag-meal" }, MEAL_LABEL[proposal.meal]))),
+        { class: "stop stop-proposed", "aria-label": t("Proposed, not saved: {name}", { name: proposal.candidate.name }) },
+        h("div", { class: "stop-rail" }, h("span", { class: "stop-clock" }, proposal.startMin === null ? t("No time") : hhmm(proposal.startMin)), h("span", { class: "stop-num" }, "+")),
+        h("article", { class: "stop-card" }, h("p", { class: "stop-top" }, h("span", { class: "start-badge" }, t("Proposed · not saved"))), h("h3", {}, proposal.candidate.name), h("p", { class: "stop-meta" }, h("span", {}, t("Visit {duration}", { duration: dur(proposal.durationMin) })), proposal.meal && h("span", { class: "tag tag-meal" }, t(MEAL_LABEL[proposal.meal])))),
       );
     d.activities.forEach((a, i) => {
       if (i === proposalAt) items.push(proposalRow());
@@ -609,8 +610,8 @@ export async function openEditor(root, tripId, ctx) {
         h(
           "li",
           { class: "timeline-hint" },
-          h("p", {}, h("strong", {}, "Explore the map or search to add your next stop."), " Click a place on the map for details, or click anywhere to see what's nearby."),
-          h("button", { class: "icon-btn", type: "button", "aria-label": "Dismiss", onclick: () => { S.hint = false; renderTimeline(); } }, icon("close")),
+          h("p", {}, h("strong", {}, t("Explore the map or search to add your next stop.")), t(" Click a place on the map for details, or click anywhere to see what's nearby.")),
+          h("button", { class: "icon-btn", type: "button", "aria-label": t("Dismiss"), onclick: () => { S.hint = false; renderTimeline(); } }, icon("close")),
         ),
       );
     }
@@ -639,42 +640,42 @@ export async function openEditor(root, tripId, ctx) {
       h(
         "div",
         { class: "stop-rail" },
-        h("span", { class: "stop-clock" }, timed ? hhmm(a.startMin) : isStart ? "" : "No time"),
-        h("span", { class: "stop-num", title: isStart ? "Start" : `Marker ${i + 1 - first} on the map` }, isStart ? "S" : String(i + 1 - first)),
+        h("span", { class: "stop-clock" }, timed ? hhmm(a.startMin) : isStart ? "" : t("No time")),
+        h("span", { class: "stop-num", title: isStart ? t("Start") : t("Marker {n} on the map", { n: i + 1 - first }) }, isStart ? "S" : String(i + 1 - first)),
       ),
       h(
         "article",
         { class: "stop-card", tabindex: "-1" },
-        isStart && h("p", { class: "stop-top" }, h("span", { class: "start-badge" }, "Start"), a.startMin === null ? "" : h("span", { class: "muted small" }, ` leave ${hhmm(a.startMin)}`)),
+        isStart && h("p", { class: "stop-top" }, h("span", { class: "start-badge" }, t("Start")), a.startMin === null ? "" : h("span", { class: "muted small" }, t(" leave {time}", { time: hhmm(a.startMin) }))),
         h("h3", {}, h("button", { class: "linklike", type: "button", onclick: () => openStop(a) }, a.title)),
         h(
           "p",
           { class: "stop-meta" },
-          !isStart && h("span", {}, `Visit ${dur(a.durationMin)}`),
-          a.meal && h("span", { class: "tag tag-meal" }, MEAL_LABEL[a.meal]),
+          !isStart && h("span", {}, t("Visit {duration}", { duration: dur(a.durationMin) })),
+          a.meal && h("span", { class: "tag tag-meal" }, t(MEAL_LABEL[a.meal])),
           !isStart && !a.meal && h("span", { class: `tag tag-${a.kind}` }, KIND_LABEL[a.kind]),
-          a.place?.source === "custom" && h("span", { class: "tag", title: "A spot picked on the map, not a Google place" }, "Pinned spot"),
-          a.place?.source === "demo" && h("span", { class: "tag tag-demo", title: "Demo fixture, not data from Google" }, "Demo place"),
-          a.place?.source === "curated" && h("span", { class: "tag tag-demo", title: "From Wayline's curated sample data, not matched to a Google place" }, "Approximate location"),
-          !a.place && h("span", { class: "muted" }, "No place"),
+          a.place?.source === "custom" && h("span", { class: "tag", title: t("A spot picked on the map, not a Google place") }, t("Pinned spot")),
+          a.place?.source === "demo" && h("span", { class: "tag tag-demo", title: t("Demo fixture, not data from Google") }, t("Demo place")),
+          a.place?.source === "curated" && h("span", { class: "tag tag-demo", title: t("From Wayline's curated sample data, not matched to a Google place") }, t("Approximate location")),
+          !a.place && h("span", { class: "muted" }, t("No place")),
         ),
         a.notes && h("p", { class: "stop-notes" }, a.notes),
-        touched && h("p", { class: "stop-touched", style: `--c:${colourOf(a.updatedBy)}` }, h("i", { "aria-hidden": "true" }), `Changed by ${memberName(a.updatedBy)} ${relTime(a.updatedAt)}`),
-        a.createdBy && a.createdBy !== me.id && !touched && h("p", { class: "stop-added-by small muted", style: `--c:${colourOf(a.createdBy)}` }, h("i", { "aria-hidden": "true" }), `Added by ${memberName(a.createdBy)}${a.version === 1 && Date.now() - a.updatedAt < 120_000 ? ` ${relTime(a.updatedAt)}` : ""}`),
+        touched && h("p", { class: "stop-touched", style: `--c:${colourOf(a.updatedBy)}` }, h("i", { "aria-hidden": "true" }), t("Changed by {who} {when}", { who: memberName(a.updatedBy), when: relTime(a.updatedAt) })),
+        a.createdBy && a.createdBy !== me.id && !touched && h("p", { class: "stop-added-by small muted", style: `--c:${colourOf(a.createdBy)}` }, h("i", { "aria-hidden": "true" }), t("Added by {who}", { who: memberName(a.createdBy) }) + `${a.version === 1 && Date.now() - a.updatedAt < 120_000 ? ` ${relTime(a.updatedAt)}` : ""}`),
         mine && h(
           "div",
           { class: "stop-actions" },
           isStart
-            ? h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => beginStart() }, icon("pin"), "Change start")
+            ? h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => beginStart() }, icon("pin"), t("Change start"))
             : timed
-              ? h("button", { class: "btn btn-ghost btn-sm", type: "button", "aria-label": `Change the time of ${a.title}`, onclick: () => activityDialog({ activity: a, focus: "start" }) }, "Change time")
+              ? h("button", { class: "btn btn-ghost btn-sm", type: "button", "aria-label": t("Change the time of {title}", { title: a.title }), onclick: () => activityDialog({ activity: a, focus: "start" }) }, t("Change time"))
               : [
-                  h("button", { class: "icon-btn", type: "button", "aria-label": `Move ${a.title} earlier`, disabled: i <= Math.max(first, firstUntimed), onclick: () => move(a.id, d.id, i - 1) }, icon("up")),
-                  h("button", { class: "icon-btn", type: "button", "aria-label": `Move ${a.title} later`, disabled: i === n - 1, onclick: () => move(a.id, d.id, i + 1) }, icon("down")),
+                  h("button", { class: "icon-btn", type: "button", "aria-label": t("Move {title} earlier", { title: a.title }), disabled: i <= Math.max(first, firstUntimed), onclick: () => move(a.id, d.id, i - 1) }, icon("up")),
+                  h("button", { class: "icon-btn", type: "button", "aria-label": t("Move {title} later", { title: a.title }), disabled: i === n - 1, onclick: () => move(a.id, d.id, i + 1) }, icon("down")),
                 ],
-          !isStart && h("button", { class: "icon-btn", type: "button", title: "Change place", "aria-label": `Change the place of ${a.title}`, onclick: () => beginReplace(a) }, icon("pin")),
-          h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => activityDialog({ activity: a }) }, icon("edit"), "Edit"),
-          h("button", { class: "icon-btn icon-btn-danger", type: "button", "aria-label": `Remove ${a.title}`, onclick: () => removeActivity(a) }, icon("trash")),
+          !isStart && h("button", { class: "icon-btn", type: "button", title: t("Change place"), "aria-label": t("Change the place of {title}", { title: a.title }), onclick: () => beginReplace(a) }, icon("pin")),
+          h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => activityDialog({ activity: a }) }, icon("edit"), t("Edit")),
+          h("button", { class: "icon-btn icon-btn-danger", type: "button", "aria-label": t("Remove {title}", { title: a.title }), onclick: () => removeActivity(a) }, icon("trash")),
         ),
       ),
     );
@@ -707,7 +708,7 @@ export async function openEditor(root, tripId, ctx) {
     const id = S.dragging;
     S.dragging = null;
     const a = day()?.activities.find((x) => x.id === id);
-    if (a?.startMin !== null) return void activityDialog({ activity: a, focus: "start", note: "This stop has a time, so it sits where its time puts it. Change the time to move it." });
+    if (a?.startMin !== null) return void activityDialog({ activity: a, focus: "start", note: t("This stop has a time, so it sits where its time puts it. Change the time to move it.") });
     move(id, S.dayId, index);
   });
 
@@ -735,38 +736,38 @@ export async function openEditor(root, tripId, ctx) {
 
     const body = [];
     if (gap?.status === "no_places") {
-      body.push(h("p", { class: "leg-line muted" }, "No travel time: ", !prev.place ? prev.title : next.title, " has no place on the map."));
+      body.push(h("p", { class: "leg-line muted" }, t("No travel time: "), !prev.place ? prev.title : next.title, t(" has no place on the map.")));
     } else if (gap?.status === "not_calculated") {
-      body.push(h("div", { class: "leg-line leg-pending" }, h("span", { class: "muted" }, "Travel time not calculated"), routeButton(prev, next, busy, "Calculate")));
+      body.push(h("div", { class: "leg-line leg-pending" }, h("span", { class: "muted" }, t("Travel time not calculated")), routeButton(prev, next, busy, t("Calculate"))));
     } else if (seg) {
       body.push(
         h(
           "div",
           { class: "leg-main" },
           sel
-            ? h("p", { class: "leg-summary" }, icon(MODE_ICON[sel.mode]), h("strong", {}, `${MODE_WORD[sel.mode]} · ${dur(Math.max(1, Math.ceil(sel.durationSec / 60)))}`))
-            : h("p", { class: "leg-summary muted" }, seg.options.map((o) => o.message).filter(Boolean)[0] ?? "No route was found."),
+            ? h("p", { class: "leg-summary" }, icon(MODE_ICON[sel.mode]), h("strong", {}, `${t(MODE_WORD[sel.mode])} · ${dur(Math.max(1, Math.ceil(sel.durationSec / 60)))}`))
+            : h("p", { class: "leg-summary muted" }, tServer(seg.options.map((o) => o.message).filter(Boolean)[0]) ?? t("No route was found.")),
           modeChips(seg),
         ),
       );
       if (sel) body.push(routeDetails(sel, key));
-      if (seg.stale) body.push(h("div", { class: "leg-line leg-warn" }, "Times changed since this was calculated.", routeButton(prev, next, busy, "Recalculate", true)));
+      if (seg.stale) body.push(h("div", { class: "leg-line leg-warn" }, t("Times changed since this was calculated."), routeButton(prev, next, busy, t("Recalculate"), true)));
       body.push(h("p", { class: "leg-attrib", translate: "no" }, `Google Maps · ${relTime(seg.computedAt)}`));
     }
 
     return h(
       "li",
-      { class: `leg${issues.some((x) => x.severity === "conflict") ? " leg-bad" : ""}${gap?.status === "not_calculated" || gap?.status === "no_places" ? " leg-open" : ""}${sel ? ` leg-${sel.mode.toLowerCase()}` : ""}`, "aria-label": `Travel from ${prev.title} to ${next.title}` },
+      { class: `leg${issues.some((x) => x.severity === "conflict") ? " leg-bad" : ""}${gap?.status === "not_calculated" || gap?.status === "no_places" ? " leg-open" : ""}${sel ? ` leg-${sel.mode.toLowerCase()}` : ""}`, "aria-label": t("Travel from {from} to {to}", { from: prev.title, to: next.title }) },
       ...body,
       issues.map((x) =>
         h(
           "p",
           { class: "leg-issue" },
-          h("span", { class: "chip chip-danger" }, x.kind === "overlap" ? `Overlaps by ${dur(x.minutes)}` : `${dur(x.minutes)} short`),
+          h("span", { class: "chip chip-danger" }, x.kind === "overlap" ? t("Overlaps by {duration}", { duration: dur(x.minutes) }) : t("{duration} short", { duration: dur(x.minutes) })),
           " ",
-          x.message,
+          tServer(x.message),
           " ",
-          h("button", { class: "linklike", type: "button", onclick: openCopilot }, "See options"),
+          h("button", { class: "linklike", type: "button", onclick: openCopilot }, t("See options")),
         ),
       ),
     );
@@ -787,9 +788,9 @@ export async function openEditor(root, tripId, ctx) {
   function routeButton(prev, next, busy, label, force = false) {
     const unverified = !routable(prev) || !routable(next);
     const disabledWhy = !ctx.config.routes
-      ? "Routes need Google Maps configured on the server"
+      ? t("Routes need Google Maps configured on the server")
       : unverified
-        ? "Only Google places and spots picked on the map can be routed"
+        ? t("Only Google places and spots picked on the map can be routed")
         : null;
     return h(
       "span",
@@ -797,7 +798,7 @@ export async function openEditor(root, tripId, ctx) {
       h(
         "button",
         { class: "btn btn-sm btn-outline", type: "button", disabled: Boolean(disabledWhy) || busy, onclick: () => calcRoute(prev, next, force) },
-        busy ? "Calculating…" : label,
+        busy ? t("Calculating…") : label,
       ),
       disabledWhy && h("small", { class: "muted" }, disabledWhy),
     );
@@ -809,18 +810,18 @@ export async function openEditor(root, tripId, ctx) {
   // from Google, looked up for an assumed time, or the lookup failed (retry
   // with Recalculate). Only the owner chooses; others see why they can't.
   function modeState(o) {
-    if ((S.prefs?.travel?.avoidModes ?? []).includes(o.mode)) return { state: "excluded", why: `${MODE_WORD[o.mode]} is excluded in your travel preferences.` };
-    if (o.status === "ok") return { state: "ok", why: `${MODE_WORD[o.mode]}, ${dur(Math.max(1, Math.ceil(o.durationSec / 60)))}${o.assumedDeparture ? `, looked up for ${o.assumedDeparture.slice(11)} because the earlier stop has no time` : ""}` };
-    if (o.status === "none") return { state: "none", why: o.mode === "TRANSIT" ? "Google Maps returned no public transport route here. In some countries (Japan, for example) Google's routing service doesn't provide transit at all." : `Google Maps found no ${MODE_WORD[o.mode].toLowerCase()} route here.` };
-    if (/start time/i.test(o.message ?? "")) return { state: "needs-time", why: "Give the earlier stop a time, then recalculate, to look up transit." };
-    return { state: "error", why: `${MODE_WORD[o.mode]}: the lookup failed${o.message ? ` (${o.message})` : ""}. Use Recalculate to try again.` };
+    if ((S.prefs?.travel?.avoidModes ?? []).includes(o.mode)) return { state: "excluded", why: t("{mode} is excluded in your travel preferences.", { mode: t(MODE_WORD[o.mode]) }) };
+    if (o.status === "ok") return { state: "ok", why: t("{mode}, {duration}", { mode: t(MODE_WORD[o.mode]), duration: dur(Math.max(1, Math.ceil(o.durationSec / 60))) }) + (o.assumedDeparture ? t(", looked up for {time} because the earlier stop has no time", { time: o.assumedDeparture.slice(11) }) : "") };
+    if (o.status === "none") return { state: "none", why: o.mode === "TRANSIT" ? t("Google Maps returned no public transport route here. In some countries (Japan, for example) Google's routing service doesn't provide transit at all.") : t("Google Maps found no {mode} route here.", { mode: t(MODE_WORD[o.mode]).toLowerCase() }) };
+    if (/start time/i.test(o.message ?? "")) return { state: "needs-time", why: t("Give the earlier stop a time, then recalculate, to look up transit.") };
+    return { state: "error", why: t("{mode}: the lookup failed{detail}. Use Recalculate to try again.", { mode: t(MODE_WORD[o.mode]), detail: o.message ? ` (${tServer(o.message)})` : "" }) };
   }
 
   function modeChips(seg) {
     const owner = isOwner();
     return h(
       "div",
-      { class: "modes modes-compact", role: "group", "aria-label": "Transport mode" },
+      { class: "modes modes-compact", role: "group", "aria-label": t("Transport mode") },
       seg.options.map((o) => {
         const { state, why } = modeState(o);
         const on = seg.selectedMode === o.mode;
@@ -832,11 +833,11 @@ export async function openEditor(root, tripId, ctx) {
             class: `mode mode-${state}${on ? " on" : ""}`,
             "data-mode-state": state,
             "aria-pressed": String(on),
-            "aria-label": `${why}${state === "ok" && !owner ? " Only the trip's owner chooses how to travel." : ""}`,
-            title: `${why}${state === "ok" && !owner ? " Only the trip's owner chooses how to travel." : ""}`,
+            "aria-label": `${why}${state === "ok" && !owner ? t(" Only the trip's owner chooses how to travel.") : ""}`,
+            title: `${why}${state === "ok" && !owner ? t(" Only the trip's owner chooses how to travel.") : ""}`,
             "aria-disabled": String(!usable),
             onclick: () => {
-              if (!usable) return toast(why + (state === "ok" && !owner ? " Only the trip's owner chooses how to travel." : ""));
+              if (!usable) return toast(why + (state === "ok" && !owner ? t(" Only the trip's owner chooses how to travel.") : ""));
               if (!on) act(api(`${base}/segments/${seg.id}/mode`, { method: "POST", body: { mode: o.mode } })).catch(() => {});
             },
           },
@@ -859,13 +860,13 @@ export async function openEditor(root, tripId, ctx) {
       h(
         "button",
         { class: "linklike small", type: "button", "aria-expanded": String(open), onclick: () => { open ? S.openLegs.delete(key) : S.openLegs.add(key); renderTimeline(); } },
-        open ? "Hide details" : "Details",
+        open ? t("Hide details") : t("Details"),
       ),
       open &&
         h(
           "div",
           { class: "route-more" },
-          h("p", { class: "small muted" }, [o.distanceM ? `${(o.distanceM / 1000).toFixed(o.distanceM < 10_000 ? 1 : 0)} km` : null, o.mode === "TRANSIT" && transit.length ? `${transit.length - 1} transfer${transit.length === 2 ? "" : "s"}` : null].filter(Boolean).join(" · ")),
+          h("p", { class: "small muted" }, [o.distanceM ? `${(o.distanceM / 1000).toFixed(o.distanceM < 10_000 ? 1 : 0)} km` : null, o.mode === "TRANSIT" && transit.length ? tn(transit.length - 1, "{n} transfer", "{n} transfers") : null].filter(Boolean).join(" · ")),
           o.mode === "TRANSIT" && transit.length > 0 && h("p", { class: "lines" }, transit.map((s) => lineChip(s))),
           o.steps?.length > 0 &&
             h(
@@ -873,14 +874,14 @@ export async function openEditor(root, tripId, ctx) {
               { class: "steps" },
               o.steps.map((s) =>
                 s.kind === "walk"
-                  ? h("li", { class: "step-walk" }, icon("walk"), `Walk ${dur(Math.max(1, Math.round(s.durationSec / 60)))}${s.distanceM ? ` (${Math.round(s.distanceM)} m)` : ""}`)
+                  ? h("li", { class: "step-walk" }, icon("walk"), t("Walk {duration}", { duration: dur(Math.max(1, Math.round(s.durationSec / 60))) }) + `${s.distanceM ? ` (${Math.round(s.distanceM)} m)` : ""}`)
                   : h(
                       "li",
                       { class: "step-transit" },
                       lineChip(s),
-                      s.headsign && h("span", {}, ` toward ${s.headsign}`),
+                      s.headsign && h("span", {}, t(" toward {headsign}", { headsign: s.headsign })),
                       h("span", { class: "step-stops" }, ` ${s.from ?? "?"} ${s.localDeparture ?? ""} → ${s.to ?? "?"} ${s.localArrival ?? ""}`),
-                      s.stops !== null && h("span", { class: "muted" }, ` · ${s.stops} stop${s.stops === 1 ? "" : "s"}`),
+                      s.stops !== null && h("span", { class: "muted" }, tn(s.stops, " · {n} stop", " · {n} stops")),
                     ),
               ),
             ),
@@ -892,7 +893,7 @@ export async function openEditor(root, tripId, ctx) {
     h(
       "span",
       { class: "line-chip", style: s.color ? `--lc:${s.color};--lt:${s.textColor ?? "#fff"}` : "" },
-      [s.vehicle, s.line].filter(Boolean).join(" ") || "Transit",
+      [s.vehicle, s.line].filter(Boolean).join(" ") || t("Transit"),
     );
 
   function renderTabs() {
@@ -901,9 +902,9 @@ export async function openEditor(root, tripId, ctx) {
     workspace.classList.toggle("with-copilot", S.copilotOpen);
     mobileTabs.replaceChildren(
       ...[
-        ["map", "Map", "search"],
-        ["plan", "Plan", "edit"],
-        ["copilot", "Assistant", "spark"],
+        ["map", t("Map"), "search"],
+        ["plan", t("Plan"), "edit"],
+        ["copilot", t("Assistant"), "spark"],
       ].map(([k, label, ic]) =>
         h(
           "button",
@@ -955,7 +956,7 @@ export async function openEditor(root, tripId, ctx) {
     const temp = cand
       ? { lat: cand.place.lat, lng: cand.place.lng, label: cand.title, start: true }
       : proposal
-        ? { lat: proposal.candidate.lat, lng: proposal.candidate.lng, label: `Proposed: ${proposal.candidate.name}` }
+        ? { lat: proposal.candidate.lat, lng: proposal.candidate.lng, label: t("Proposed: {name}", { name: proposal.candidate.name }) }
         : clickedPlace
         ? { lat: clickedPlace.lat, lng: clickedPlace.lng, label: clickedPlace.name }
         : S.explore
@@ -970,7 +971,7 @@ export async function openEditor(root, tripId, ctx) {
     const q = searchInput.value.trim();
     if (q.length < 2) return;
     searchPanel.hidden = false;
-    searchPanel.replaceChildren(h("p", { class: "muted pad" }, "Searching…"));
+    searchPanel.replaceChildren(h("p", { class: "muted pad" }, t("Searching…")));
     try {
       const res = await api(`/api/places/search?q=${encodeURIComponent(q)}&tripId=${tripId}`);
       S.results = res.places;
@@ -1036,7 +1037,7 @@ export async function openEditor(root, tripId, ctx) {
   // A click on one of Google's place icons: open it. While choosing the
   // start, it becomes the candidate instead.
   function placeClicked(placeId, at) {
-    const p = { placeId, name: "Loading place…", lat: at.lat, lng: at.lng, source: "google", types: [], pending: true };
+    const p = { placeId, name: t("Loading place…"), lat: at.lat, lng: at.lng, source: "google", types: [], pending: true };
     if (S.starting) return considerStartPlace(p);
     setMySpot(at);
     pickPlace(p);
@@ -1153,7 +1154,7 @@ export async function openEditor(root, tripId, ctx) {
     if (!S.results.length && !S.place) {
       if (S.resultsSource) {
         searchPanel.hidden = false;
-        searchPanel.replaceChildren(panelHead("No places found"), h("p", { class: "muted pad" }, "Try a different name or a broader search."));
+        searchPanel.replaceChildren(panelHead(t("No places found")), h("p", { class: "muted pad" }, t("Try a different name or a broader search.")));
         S.resultsSource = null;
       }
       return;
@@ -1162,9 +1163,9 @@ export async function openEditor(root, tripId, ctx) {
     if (S.place) return searchPanel.replaceChildren(placeCard(S.place));
     fill(
       searchPanel,
-      panelHead(`${S.results.length} place${S.results.length === 1 ? "" : "s"}`),
+      panelHead(tn(S.results.length, "{n} place", "{n} places")),
       S.resultsSource === "demo" &&
-        h("p", { class: "demo-note" }, h("strong", {}, "Demo places."), " Google Places isn't configured on this server, so these are a few fixed Sydney landmarks with approximate locations, not search results."),
+        h("p", { class: "demo-note" }, h("strong", {}, t("Demo places.")), t(" Google Places isn't configured on this server, so these are a few fixed Sydney landmarks with approximate locations, not search results.")),
       h(
         "ul",
         { class: "results" },
@@ -1186,7 +1187,7 @@ export async function openEditor(root, tripId, ctx) {
   }
 
   const panelHead = (title) =>
-    h("div", { class: "panel-head" }, h("strong", {}, title), h("button", { class: "icon-btn", type: "button", "aria-label": "Close search results", onclick: closeSearch }, icon("close")));
+    h("div", { class: "panel-head" }, h("strong", {}, title), h("button", { class: "icon-btn", type: "button", "aria-label": t("Close search results"), onclick: closeSearch }, icon("close")));
 
   // The place card is for deciding whether a place is worth it: what Google
   // knows about it, and nothing that changes the plan. Adding opens the
@@ -1194,10 +1195,10 @@ export async function openEditor(root, tripId, ctx) {
   function placeCard(p) {
     const d = S.placeDetails;
     const visits = visitsOf(p.placeId);
-    const back = S.explore ? "← Nearby places" : S.results.length ? "← Results" : null;
+    const back = S.explore ? t("← Nearby places") : S.results.length ? t("← Results") : null;
     const credit = (ph) =>
       ph.attributions.length > 0 &&
-      h("figcaption", { class: "photo-credit" }, "Photo: ", ph.attributions.map((a, i) => [i > 0 && ", ", a.uri ? h("a", { href: a.uri, target: "_blank", rel: "noopener" }, a.displayName) : a.displayName]));
+      h("figcaption", { class: "photo-credit" }, t("Photo: "), ph.attributions.map((a, i) => [i > 0 && ", ", a.uri ? h("a", { href: a.uri, target: "_blank", rel: "noopener" }, a.displayName) : a.displayName]));
     const uris = d?.photoUris ?? [];
     const loaded = !d || d.error || d.none ? null : d;
     const about = loaded && p.source === "google"; // shown even when Google has little, saying so
@@ -1207,14 +1208,14 @@ export async function openEditor(root, tripId, ctx) {
       h(
         "div",
         { class: "panel-head" },
-        back ? h("button", { class: "linklike small", type: "button", onclick: () => { S.place = null; S.placeDetails = null; renderSearch(); renderMap(); } }, back) : h("span", { class: "muted small" }, "Place"),
-        h("button", { class: "icon-btn", type: "button", "aria-label": "Close", onclick: closeSearch }, icon("close")),
+        back ? h("button", { class: "linklike small", type: "button", onclick: () => { S.place = null; S.placeDetails = null; renderSearch(); renderMap(); } }, back) : h("span", { class: "muted small" }, t("Place")),
+        h("button", { class: "icon-btn", type: "button", "aria-label": t("Close"), onclick: closeSearch }, icon("close")),
       ),
       uris[0] &&
         h(
           "figure",
           { class: "place-photo" },
-          h("img", { src: uris[0], alt: `Photo of ${p.name}`, loading: "lazy", decoding: "async", onerror: (e) => e.currentTarget.closest("figure")?.remove() }),
+          h("img", { src: uris[0], alt: t("Photo of {name}", { name: p.name }), loading: "lazy", decoding: "async", onerror: (e) => e.currentTarget.closest("figure")?.remove() }),
           credit(d.photos[0]),
         ),
       uris.slice(1).some(Boolean) &&
@@ -1227,7 +1228,7 @@ export async function openEditor(root, tripId, ctx) {
               h(
                 "figure",
                 {},
-                h("img", { src: u, alt: `Another photo of ${p.name}`, loading: "lazy", decoding: "async", onerror: (e) => e.currentTarget.closest("figure")?.remove() }),
+                h("img", { src: u, alt: t("Another photo of {name}", { name: p.name }), loading: "lazy", decoding: "async", onerror: (e) => e.currentTarget.closest("figure")?.remove() }),
                 credit(d.photos[i + 1]),
               ),
           ),
@@ -1238,40 +1239,40 @@ export async function openEditor(root, tripId, ctx) {
         { class: "stop-meta" },
         p.category && h("span", { class: "tag" }, p.category),
         loaded?.price && h("span", { class: "tag" }, loaded.price),
-        p.source === "demo" && h("span", { class: "tag tag-demo" }, "Demo place"),
-        loaded?.openNow === true && h("span", { class: "tag tag-open" }, "Open now"),
-        loaded?.openNow === false && h("span", { class: "tag" }, "Closed now"),
+        p.source === "demo" && h("span", { class: "tag tag-demo" }, t("Demo place")),
+        loaded?.openNow === true && h("span", { class: "tag tag-open" }, t("Open now")),
+        loaded?.openNow === false && h("span", { class: "tag" }, t("Closed now")),
       ),
       loaded && typeof loaded.rating === "number" &&
-        h("p", { class: "rating" }, h("strong", {}, loaded.rating.toFixed(1)), " ★", loaded.ratingCount ? h("span", { class: "muted" }, ` (${loaded.ratingCount.toLocaleString("en-AU")} Google reviews)`) : null),
+        h("p", { class: "rating" }, h("strong", {}, loaded.rating.toFixed(1)), " ★", loaded.ratingCount ? h("span", { class: "muted" }, t(" ({n} Google reviews)", { n: loaded.ratingCount.toLocaleString(locale()) })) : null),
       p.address && h("p", { class: "muted" }, p.address),
       visits.length > 0 &&
         h(
           "p",
           { class: "already" },
           icon("check"),
-          "Already in your plan: ",
-          visits.map((v, i) => [i > 0 && ", ", `Day ${v.day}${v.a.role === "start" ? " (start)" : v.a.startMin !== null ? ` at ${hhmm(v.a.startMin)}` : ""}`]),
+          t("Already in your plan: "),
+          visits.map((v, i) => [i > 0 && ", ", t("Day {n}", { n: v.day }) + (v.a.role === "start" ? t(" (start)") : v.a.startMin !== null ? t(" at {time}", { time: hhmm(v.a.startMin) }) : "")]),
         ),
-      d === null && p.source === "google" && h("p", { class: "muted small", role: "status" }, "Loading details…"),
+      d === null && p.source === "google" && h("p", { class: "muted small", role: "status" }, t("Loading details…")),
       d?.error && h("p", { class: "form-error small" }, d.error),
-      p.source === "demo" && h("p", { class: "muted small" }, "A demo place: no Google details, photos or reviews."),
+      p.source === "demo" && h("p", { class: "muted small" }, t("A demo place: no Google details, photos or reviews.")),
 
       about &&
         h(
           "section",
           { class: "guide-section" },
-          h("h4", {}, "About this place"),
-          loaded.summary ? h("p", { class: "guide-summary" }, loaded.summary) : h("p", { class: "muted small" }, "Google has no description of this place."),
-          loaded.features?.length > 0 && h("ul", { class: "guide-features", "aria-label": "Reported by Google" }, loaded.features.map((f) => h("li", {}, f))),
+          h("h4", {}, t("About this place")),
+          loaded.summary ? h("p", { class: "guide-summary" }, loaded.summary) : h("p", { class: "muted small" }, t("Google has no description of this place.")),
+          loaded.features?.length > 0 && h("ul", { class: "guide-features", "aria-label": t("Reported by Google") }, loaded.features.map((f) => h("li", {}, tServer(f)))),
           loaded.openingHours &&
             h(
               "details",
               { class: "hours" },
-              h("summary", {}, "Opening hours"),
+              h("summary", {}, t("Opening hours")),
               h("ul", {}, loaded.openingHours.map((line) => h("li", {}, line))),
             ),
-          loaded.website && h("p", { class: "small" }, h("a", { href: loaded.website, target: "_blank", rel: "noopener" }, "Official website")),
+          loaded.website && h("p", { class: "small" }, h("a", { href: loaded.website, target: "_blank", rel: "noopener" }, t("Official website"))),
         ),
 
       loaded &&
@@ -1279,7 +1280,7 @@ export async function openEditor(root, tripId, ctx) {
         h(
           "section",
           { class: "guide-section" },
-          h("h4", {}, "What visitors say"),
+          h("h4", {}, t("What visitors say")),
           loaded.reviews?.length
             ? h(
                 "ul",
@@ -1287,7 +1288,7 @@ export async function openEditor(root, tripId, ctx) {
                 loaded.reviews.map((r) => {
                   const long = r.text.length > 260;
                   const body = h("p", { class: "review-text" }, long ? `${r.text.slice(0, 240).trimEnd()}…` : r.text);
-                  const more = long && h("button", { class: "linklike small", type: "button", onclick: (e) => { body.textContent = r.text; e.currentTarget.remove(); } }, "Read the whole review");
+                  const more = long && h("button", { class: "linklike small", type: "button", onclick: (e) => { body.textContent = r.text; e.currentTarget.remove(); } }, t("Read the whole review"));
                   return h(
                     "li",
                     { class: "review" },
@@ -1295,42 +1296,42 @@ export async function openEditor(root, tripId, ctx) {
                       "p",
                       { class: "review-head" },
                       r.authorUri ? h("a", { href: r.authorUri, target: "_blank", rel: "noopener" }, r.author) : h("strong", {}, r.author),
-                      typeof r.rating === "number" && h("span", { class: "review-stars", "aria-label": `${r.rating} out of 5` }, "★".repeat(Math.round(r.rating)) + "☆".repeat(5 - Math.round(r.rating))),
+                      typeof r.rating === "number" && h("span", { class: "review-stars", "aria-label": t("{n} out of 5", { n: r.rating }) }, "★".repeat(Math.round(r.rating)) + "☆".repeat(5 - Math.round(r.rating))),
                       r.when && h("span", { class: "muted" }, r.when),
                     ),
                     body,
                     more,
-                    r.uri && h("a", { class: "small", href: r.uri, target: "_blank", rel: "noopener" }, "View on Google Maps"),
+                    r.uri && h("a", { class: "small", href: r.uri, target: "_blank", rel: "noopener" }, t("View on Google Maps")),
                   );
                 }),
               )
-            : h("p", { class: "muted small" }, "No Google reviews for this place yet."),
-          loaded.reviews?.length > 0 && h("p", { class: "muted tiny" }, "Reviews from Google, unedited; long ones are shortened until opened."),
+            : h("p", { class: "muted small" }, t("No Google reviews for this place yet.")),
+          loaded.reviews?.length > 0 && h("p", { class: "muted tiny" }, t("Reviews from Google, unedited; long ones are shortened until opened.")),
         ),
 
       h(
         "div",
         { class: "place-actions" },
-        loaded?.googleMapsUri && h("a", { class: "btn btn-ghost btn-sm", href: loaded.googleMapsUri, target: "_blank", rel: "noopener" }, "View on Google Maps"),
+        loaded?.googleMapsUri && h("a", { class: "btn btn-ghost btn-sm", href: loaded.googleMapsUri, target: "_blank", rel: "noopener" }, t("View on Google Maps")),
         S.starting
           ? h(
               "button",
               { class: "btn btn-primary", type: "button", disabled: Boolean(p.pending), onclick: () => confirmStart({ title: p.name, place: { placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng } }) },
               icon("pin"),
-              "Set as starting point",
+              t("Set as starting point"),
             )
           : S.replacing
             ? h(
                 "button",
                 { class: "btn btn-primary", type: "button", disabled: Boolean(p.pending), onclick: () => confirmReplace({ placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng }, p.name) },
                 icon("pin"),
-                `Use for ${S.replacing.title}`,
+                t("Use for {title}", { title: S.replacing.title }),
               )
             : h(
               "button",
               { class: "btn btn-primary add-to-trip", type: "button", disabled: Boolean(p.pending), onclick: () => scheduleCard({ title: p.name, kind: guessKind(p.types), types: p.types, place: { placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng }, hours: S.placeDetails?.hours ?? suggestionFor(p.placeId)?.candidate.hours ?? null, preset: suggestionFor(p.placeId) }) },
               icon("plus"),
-              visits.length ? "Add another visit" : "Add to Itinerary",
+              visits.length ? t("Add another visit") : t("Add to Itinerary"),
             ),
       ),
       p.source === "google" && h("p", { class: "attrib", translate: "no" }, "Google Maps"),
@@ -1354,11 +1355,11 @@ export async function openEditor(root, tripId, ctx) {
       ? h(
           "div",
           { class: "field" },
-          h("span", {}, "Meal"),
+          h("span", {}, t("Meal")),
           h(
             "div",
-            { class: "meal-chips", role: "group", "aria-label": "Meal" },
-            [...Object.entries(MEAL_LABEL), [null, "Custom time"]].map(([k, label]) =>
+            { class: "meal-chips", role: "group", "aria-label": t("Meal") },
+            [...Object.entries(MEAL_LABEL).map(([k, v]) => [k, t(v)]), [null, t("Custom time")]].map(([k, label]) =>
               h("button", { type: "button", class: "cat-chip", dataset: { meal: k ?? "" }, "aria-pressed": "false", onclick: () => pickMeal(k) }, label),
             ),
           ),
@@ -1371,27 +1372,27 @@ export async function openEditor(root, tripId, ctx) {
     const form = h(
       "form",
       { method: "dialog", class: "stack" },
-      h("p", { class: "schedule-kicker" }, "Add to itinerary"),
+      h("p", { class: "schedule-kicker" }, t("Add to itinerary")),
       custom
-        ? h("label", { class: "field" }, h("span", {}, "Name"), h("input", { name: "title", required: true, maxlength: 120, value: title, placeholder: "e.g. Meeting point" }))
+        ? h("label", { class: "field" }, h("span", {}, t("Name")), h("input", { name: "title", required: true, maxlength: 120, value: title, placeholder: t("e.g. Meeting point") }))
         : h("h2", {}, title),
-      h("label", { class: "field" }, h("span", {}, "Day"), h("select", { name: "dayId" }, days.map((x, i) => h("option", { value: x.id, selected: x.id === current?.id }, `Day ${i + 1} · ${fmtDay(x.date)}`)))),
+      h("label", { class: "field" }, h("span", {}, t("Day")), h("select", { name: "dayId" }, days.map((x, i) => h("option", { value: x.id, selected: x.id === current?.id }, t("Day {n} · {date}", { n: i + 1, date: fmtDay(x.date) }))))),
       mealPick,
       h(
         "div",
         { class: "row-2" },
-        h("label", { class: "field" }, h("span", {}, "Arrival"), h("input", { name: "start", type: "time", step: 300, required: true })),
-        h("label", { class: "field" }, h("span", {}, "Visit length (min)"), h("input", { name: "duration", type: "number", min: 5, max: 1440, step: 5, required: true, value: KIND_DURATION[kind] ?? 60 })),
+        h("label", { class: "field" }, h("span", {}, t("Arrival")), h("input", { name: "start", type: "time", step: 300, required: true })),
+        h("label", { class: "field" }, h("span", {}, t("Visit length (min)")), h("input", { name: "duration", type: "number", min: 5, max: 1440, step: 5, required: true, value: KIND_DURATION[kind] ?? 60 })),
       ),
       hint,
       hoursNote,
-      h("label", { class: "field" }, h("span", {}, "Notes (optional)"), h("textarea", { name: "notes", rows: 2, maxlength: 2000, placeholder: "Book ahead, what to try, who's coming…" })),
+      h("label", { class: "field" }, h("span", {}, t("Notes (optional)")), h("textarea", { name: "notes", rows: 2, maxlength: 2000, placeholder: t("Book ahead, what to try, who's coming…") })),
       error,
       h(
         "div",
         { class: "dialog-actions" },
-        h("button", { class: "btn btn-ghost", type: "button", onclick: () => done() }, "Cancel"),
-        h("button", { class: "btn btn-primary", type: "submit" }, "Confirm & add"),
+        h("button", { class: "btn btn-ghost", type: "button", onclick: () => done() }, t("Cancel")),
+        h("button", { class: "btn btn-primary", type: "submit" }, t("Confirm & add")),
       ),
     );
     // a suggestion only: right after the day's last timed stop, without travel
@@ -1400,7 +1401,7 @@ export async function openEditor(root, tripId, ctx) {
       const d = days.find((x) => x.id === form.dayId.value);
       form.start.value = hhmm(suggestStart(d));
       const prev = prevOf(d);
-      hint.textContent = prev ? `Suggested: when ${prev.title} ends (${hhmm(prev.startMin + prev.durationMin)}). Travel time isn't included yet; it appears once the route is calculated.` : "Suggested: 09:00, as nothing on this day has a time yet.";
+      hint.textContent = prev ? t("Suggested: when {title} ends ({time}). Travel time isn't included yet; it appears once the route is calculated.", { title: prev.title, time: hhmm(prev.startMin + prev.durationMin) }) : t("Suggested: 09:00, as nothing on this day has a time yet.");
     };
     // A meal suggests its usual time from the trip's settings. If that overlaps
     // a stop already planned, the nearest free slot inside the meal's range is
@@ -1425,10 +1426,10 @@ export async function openEditor(root, tripId, ctx) {
       const span = `${hhmm(range.from)}–${hhmm(range.to)}`;
       hint.textContent =
         free === range.usual
-          ? `${MEAL_LABEL[k]} usually ${span} on this trip.`
+          ? t("{meal} usually {span} on this trip.", { meal: t(MEAL_LABEL[k]), span })
           : free !== undefined
-            ? `${hhmm(range.usual)} overlaps ${clash(range.usual).title}, so ${hhmm(at)} is suggested instead (${MEAL_LABEL[k].toLowerCase()} usually ${span}).`
-            : `${hhmm(at)} overlaps ${clash(at).title} and there's no free slot ${span}. Adjust the time, or keep both and sort it out on the timeline.`;
+            ? t("{time} overlaps {title}, so {at} is suggested instead ({meal} usually {span}).", { time: hhmm(range.usual), title: clash(range.usual).title, at: hhmm(at), meal: t(MEAL_LABEL[k]).toLowerCase(), span })
+            : t("{time} overlaps {title} and there's no free slot {span}. Adjust the time, or keep both and sort it out on the timeline.", { time: hhmm(at), title: clash(at).title, span });
     }
 
     form.dayId.addEventListener("change", () => (meal ? pickMeal(meal) : suggest()));
@@ -1443,7 +1444,7 @@ export async function openEditor(root, tripId, ctx) {
     if (preset) {
       if (preset.startMin !== null) form.start.value = hhmm(preset.startMin);
       if (preset.durationMin) form.duration.value = String(preset.durationMin);
-      hint.textContent = "Suggested by the planning assistant: fits the time around your other stops and the opening hours shown below. Change anything you like.";
+      hint.textContent = t("Suggested by the planning assistant: fits the time around your other stops and the opening hours shown below. Change anything you like.");
     }
     // Every change of time, length or day is checked against Google's opening
     // hours for that date. A warning, never a silent change: the time stays
@@ -1459,18 +1460,18 @@ export async function openEditor(root, tripId, ctx) {
       hoursNote.hidden = false;
       hoursNote.className = `schedule-hours ${fit.ok ? (day.basis === "dated" ? "is-ok" : "is-unsure") : "is-bad"}`;
       if (fit.ok) {
-        const closes = fit.closesAt !== null && fit.closesAt < 2 * 1440 ? ` (closes ${clock(fit.closesAt)})` : "";
-        fill(hoursNote, day.basis === "dated" ? `Open for the whole meal${closes}, with ${CLOSING_BUFFER_MIN} min to spare.` : `Fits its usual hours${closes}, but Google hasn't confirmed them for this date.${day.special ? " It's a special day here." : ""}`);
+        const closes = fit.closesAt !== null && fit.closesAt < 2 * 1440 ? t(" (closes {time})", { time: clock(fit.closesAt) }) : "";
+        fill(hoursNote, day.basis === "dated" ? t("Open for the whole meal{closes}, with {buffer} min to spare.", { closes, buffer: CLOSING_BUFFER_MIN }) : t("Fits its usual hours{closes}, but Google hasn't confirmed them for this date.", { closes }) + (day.special ? t(" It's a special day here.") : ""));
         return;
       }
       fill(
         hoursNote,
-        h("strong", {}, fit.reason === "too_late" ? "This meal may finish too late." : fit.reason === "kitchen" ? "The kitchen may be closed." : "It may be closed then."),
+        h("strong", {}, fit.reason === "too_late" ? t("This meal may finish too late.") : fit.reason === "kitchen" ? t("The kitchen may be closed.") : t("It may be closed then.")),
         " ",
-        fit.message,
+        tServer(fit.message),
         fit.latestStart !== null &&
-          h("button", { class: "linklike", type: "button", onclick: () => { form.start.value = hhmm(fit.latestStart); checkHours(); } }, ` Use ${hhmm(fit.latestStart)}`),
-        day.basis !== "dated" && h("span", { class: "muted" }, " (usual hours; not confirmed for this date)"),
+          h("button", { class: "linklike", type: "button", onclick: () => { form.start.value = hhmm(fit.latestStart); checkHours(); } }, t(" Use {time}", { time: hhmm(fit.latestStart) })),
+        day.basis !== "dated" && h("span", { class: "muted" }, t(" (usual hours; not confirmed for this date)")),
       );
     };
     for (const f of [form.start, form.duration, form.dayId]) f.addEventListener("input", checkHours);
@@ -1503,14 +1504,14 @@ export async function openEditor(root, tripId, ctx) {
           S.placeDetails = null;
         }
         render();
-        toast(`Added ${name} to Day ${dayIndex + 1}.`, isPhone() ? { action: { label: "View plan", run: () => setTab("plan") } } : {});
+        toast(t("Added {name} to Day {n}.", { name, n: dayIndex + 1 }), isPhone() ? { action: { label: t("View plan"), run: () => setTab("plan") } } : {});
       } catch (err) {
         error.textContent = err.message;
         error.hidden = false;
         btn.disabled = false;
       }
     });
-    const dialog = openDialog(h("dialog", { class: "dialog schedule-card", "aria-label": `Add ${title} to the itinerary` }, form));
+    const dialog = openDialog(h("dialog", { class: "dialog schedule-card", "aria-label": t("Add {title} to the itinerary", { title }) }, form));
     // gone at once, not on the later "close" event, so a closed card never lingers
     const done = () => {
       dialog.close();
@@ -1529,20 +1530,20 @@ export async function openEditor(root, tripId, ctx) {
       h(
         "div",
         { class: "panel-head" },
-        h("strong", {}, !ex.label ? "Around this spot" : /^near /i.test(ex.label) ? ex.label : `Around ${ex.label}`),
-        h("button", { class: "icon-btn", type: "button", "aria-label": "Close", onclick: closeSearch }, icon("close")),
+        h("strong", {}, !ex.label ? t("Around this spot") : /^near /i.test(ex.label) ? tServer(ex.label) : t("Around {place}", { place: ex.label })),
+        h("button", { class: "icon-btn", type: "button", "aria-label": t("Close"), onclick: closeSearch }, icon("close")),
       ),
       h(
         "div",
-        { class: "cat-chips xp-cats", role: "group", "aria-label": "Place type" },
-        NEARBY.map(([t, label]) => h("button", { type: "button", class: `cat-chip${ex.type === t ? " on" : ""}`, "aria-pressed": String(ex.type === t), onclick: () => loadNearby(t) }, label)),
+        { class: "cat-chips xp-cats", role: "group", "aria-label": t("Place type") },
+        NEARBY.map(([ty, label]) => h("button", { type: "button", class: `cat-chip${ex.type === ty ? " on" : ""}`, "aria-pressed": String(ex.type === ty), onclick: () => loadNearby(ty) }, t(label))),
       ),
       ex.loading
-        ? h("p", { class: "muted pad", role: "status" }, "Finding places nearby…")
+        ? h("p", { class: "muted pad", role: "status" }, t("Finding places nearby…"))
         : ex.error
           ? h("p", { class: "form-error pad" }, ex.error)
           : !ex.results.length
-            ? h("p", { class: "muted pad" }, ex.source === "demo" ? "Nearby places need Google Maps configured on the server." : "Nothing of this kind within 1.5 km. Try another category.")
+            ? h("p", { class: "muted pad" }, ex.source === "demo" ? t("Nearby places need Google Maps configured on the server.") : t("Nothing of this kind within 1.5 km. Try another category."))
             : h(
                 "ul",
                 { class: "results nearby" },
@@ -1561,10 +1562,10 @@ export async function openEditor(root, tripId, ctx) {
                         { class: "nearby-text" },
                         h("strong", {}, r.name),
                         h("span", { class: "muted" }, [r.category, typeof r.distanceKm === "number" ? km(r.distanceKm) : null].filter(Boolean).join(" · ")),
-                        typeof r.rating === "number" && h("span", { class: "nearby-rating" }, `${r.rating.toFixed(1)} ★`, r.ratingCount ? h("span", { class: "muted" }, ` (${r.ratingCount.toLocaleString("en-AU")})`) : null),
-                        r.thumb?.credit.length > 0 && h("small", { class: "photo-credit" }, `Photo: ${r.thumb.credit.join(", ")}`),
+                        typeof r.rating === "number" && h("span", { class: "nearby-rating" }, `${r.rating.toFixed(1)} ★`, r.ratingCount ? h("span", { class: "muted" }, ` (${r.ratingCount.toLocaleString(locale())})`) : null),
+                        r.thumb?.credit.length > 0 && h("small", { class: "photo-credit" }, t("Photo: {names}", { names: r.thumb.credit.join(", ") })),
                       ),
-                      visitsOf(r.placeId).length > 0 && h("span", { class: "tag tag-in" }, "In plan"),
+                      visitsOf(r.placeId).length > 0 && h("span", { class: "tag tag-in" }, t("In plan")),
                     ),
                   ),
                 ),
@@ -1581,8 +1582,8 @@ export async function openEditor(root, tripId, ctx) {
     return h(
       "div",
       { class: "add-form custom-spot" },
-      h("p", { class: "small" }, h("strong", {}, "Not a listed place?"), " Add this exact spot, like a viewpoint or a meeting point."),
-      h("p", { class: "muted small" }, ex.label ? `${/^near /i.test(ex.label) ? ex.label : `In ${ex.label}`} · ` : "", `${ex.lat.toFixed(5)}, ${ex.lng.toFixed(5)}`),
+      h("p", { class: "small" }, h("strong", {}, t("Not a listed place?")), t(" Add this exact spot, like a viewpoint or a meeting point.")),
+      h("p", { class: "muted small" }, ex.label ? `${/^near /i.test(ex.label) ? tServer(ex.label) : t("In {place}", { place: ex.label })} · ` : "", `${ex.lat.toFixed(5)}, ${ex.lng.toFixed(5)}`),
       h(
         "button",
         {
@@ -1596,7 +1597,7 @@ export async function openEditor(root, tripId, ctx) {
           },
         },
         icon(S.replacing ? "pin" : "plus"),
-        S.replacing ? `Use this spot for ${S.replacing.title}` : "Add this spot",
+        S.replacing ? t("Use this spot for {title}", { title: S.replacing.title }) : t("Add this spot"),
       ),
     );
   }
@@ -1623,12 +1624,12 @@ export async function openEditor(root, tripId, ctx) {
     return h(
       "div",
       { class: "start-panel" },
-      h("div", { class: "panel-head" }, h("strong", {}, `New place for ${S.replacing.title}`), h("button", { class: "icon-btn", type: "button", "aria-label": "Cancel", onclick: closeSearch }, icon("close"))),
+      h("div", { class: "panel-head" }, h("strong", {}, t("New place for {title}", { title: S.replacing.title })), h("button", { class: "icon-btn", type: "button", "aria-label": t("Cancel"), onclick: closeSearch }, icon("close"))),
       h(
         "div",
         { class: "start-body" },
-        h("p", {}, "Search above, click a place on the map, or click anywhere to use that exact spot."),
-        h("p", { class: "muted small" }, "Its time, length, notes and meal stay as they are."),
+        h("p", {}, t("Search above, click a place on the map, or click anywhere to use that exact spot.")),
+        h("p", { class: "muted small" }, t("Its time, length, notes and meal stay as they are.")),
       ),
     );
   }
@@ -1643,11 +1644,11 @@ export async function openEditor(root, tripId, ctx) {
       render();
       const a = snap.days.flatMap((d) => d.activities).find((x) => x.id === r.id);
       if (a?.place?.lat != null) map.focus(a.place);
-      toast(`${r.title} is now ${title}.`);
+      toast(t("{old} is now {place}.", { old: r.title, place: title }));
     } catch (err) {
       if (err.status === 409 && err.data?.current) {
         S.replacing = { ...r, version: err.data.current.version, title: err.data.current.title };
-        toast(`${err.message} Their version is on screen; choose again to replace it.`, { kind: "error" });
+        toast(t("{error} Their version is on screen; choose again to replace it.", { error: err.message }), { kind: "error" });
       } else toast(err.message, { kind: "error" });
       render();
     }
@@ -1681,8 +1682,8 @@ export async function openEditor(root, tripId, ctx) {
     const head = h(
       "div",
       { class: "panel-head" },
-      h("strong", {}, changing ? "Change the starting point" : "Where would you like to start?"),
-      h("button", { class: "icon-btn", type: "button", "aria-label": changing ? "Cancel" : "Skip for now", onclick: closeSearch }, icon("close")),
+      h("strong", {}, changing ? t("Change the starting point") : t("Where would you like to start?")),
+      h("button", { class: "icon-btn", type: "button", "aria-label": changing ? t("Cancel") : t("Skip for now"), onclick: closeSearch }, icon("close")),
     );
     if (st.step === "confirm" && st.candidate) {
       const c = st.candidate;
@@ -1694,16 +1695,16 @@ export async function openEditor(root, tripId, ctx) {
         h(
           "div",
           { class: "start-body" },
-          h("p", { class: "start-cand" }, h("span", { class: "start-badge" }, "Start"), h("strong", {}, c.title)),
-          c.pending && h("p", { class: "muted small", role: "status" }, "Finding the name of this spot…"),
+          h("p", { class: "start-cand" }, h("span", { class: "start-badge" }, t("Start")), h("strong", {}, c.title)),
+          c.pending && h("p", { class: "muted small", role: "status" }, t("Finding the name of this spot…")),
           st.message && h("p", { class: "leg-warn small", role: "alert" }, st.message),
-          away > 150 && h("p", { class: "leg-warn small" }, `This is about ${Math.round(away).toLocaleString("en-AU")} km from ${S.trip.destination}. Fine if the trip really starts here; otherwise choose a start in ${S.trip.destination}.`),
+          away > 150 && h("p", { class: "leg-warn small" }, t("This is about {km} km from {destination}. Fine if the trip really starts here; otherwise choose a start in {destination}.", { km: Math.round(away).toLocaleString(locale()), destination: S.trip.destination })),
           h(
             "div",
             { class: "row-actions" },
-            h("button", { class: "btn btn-primary btn-sm", type: "button", disabled: Boolean(c.pending || st.saving), onclick: () => confirmStart(c) }, st.saving ? "Saving…" : "Start here"),
-            google && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.starting = { step: "map" }; renderSearch(); renderMap(); } }, st.via === "map" ? "Choose again" : "Adjust on map"),
-            h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.starting = { step: "choose" }; renderSearch(); renderMap(); } }, "Other options"),
+            h("button", { class: "btn btn-primary btn-sm", type: "button", disabled: Boolean(c.pending || st.saving), onclick: () => confirmStart(c) }, st.saving ? t("Saving…") : t("Start here")),
+            google && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.starting = { step: "map" }; renderSearch(); renderMap(); } }, st.via === "map" ? t("Choose again") : t("Adjust on map")),
+            h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.starting = { step: "choose" }; renderSearch(); renderMap(); } }, t("Other options")),
           ),
         ),
       );
@@ -1716,8 +1717,8 @@ export async function openEditor(root, tripId, ctx) {
         h(
           "div",
           { class: "start-body" },
-          h("p", {}, h("strong", {}, "Click the map where the trip starts."), " Click a place's icon to start there, or anywhere else to use that exact spot."),
-          h("button", { class: "linklike small", type: "button", onclick: () => { S.starting = { step: "choose" }; renderSearch(); } }, "← Other options"),
+          h("p", {}, h("strong", {}, t("Click the map where the trip starts.")), t(" Click a place's icon to start there, or anywhere else to use that exact spot.")),
+          h("button", { class: "linklike small", type: "button", onclick: () => { S.starting = { step: "choose" }; renderSearch(); } }, t("← Other options")),
         ),
       );
     }
@@ -1732,24 +1733,24 @@ export async function openEditor(root, tripId, ctx) {
           "button",
           { class: "start-option", type: "button", disabled: Boolean(st.locating), onclick: startFromMyLocation },
           icon("locate"),
-          h("span", {}, h("strong", {}, st.locating ? "Finding your location…" : "Use my location"), h("small", {}, "Where you are right now")),
+          h("span", {}, h("strong", {}, st.locating ? t("Finding your location…") : t("Use my location")), h("small", {}, t("Where you are right now"))),
         ),
         h(
           "button",
           { class: "start-option", type: "button", disabled: !google, onclick: () => { S.starting = { step: "map" }; renderSearch(); } },
           icon("pin"),
-          h("span", {}, h("strong", {}, "Choose on map"), h("small", {}, google ? "Click the spot on the map" : "Needs the Google map; search instead")),
+          h("span", {}, h("strong", {}, t("Choose on map")), h("small", {}, google ? t("Click the spot on the map") : t("Needs the Google map; search instead"))),
         ),
         h(
           "button",
           { class: "start-option", type: "button", onclick: () => { S.starting = { step: "search" }; renderSearch(); searchInput.focus(); } },
           icon("search"),
-          h("span", {}, h("strong", {}, "Search a location"), h("small", {}, "A hotel, station, airport or address")),
+          h("span", {}, h("strong", {}, t("Search a location")), h("small", {}, t("A hotel, station, airport or address"))),
         ),
       ),
       st.message && h("p", { class: "form-error small start-body", role: "alert" }, st.message),
-      st.step === "search" && h("p", { class: "muted small start-body" }, "Type in the search box above, then pick a result."),
-      !changing && h("p", { class: "start-body" }, h("button", { class: "linklike small", type: "button", onclick: closeSearch }, "Skip for now")),
+      st.step === "search" && h("p", { class: "muted small start-body" }, t("Type in the search box above, then pick a result.")),
+      !changing && h("p", { class: "start-body" }, h("button", { class: "linklike small", type: "button", onclick: closeSearch }, t("Skip for now"))),
     );
   }
 
@@ -1766,7 +1767,7 @@ export async function openEditor(root, tripId, ctx) {
   }
 
   async function considerStartPlace(p) {
-    const c = { title: "Loading place…", pending: true, place: { placeId: p.placeId, source: "google", lat: p.lat, lng: p.lng } };
+    const c = { title: t("Loading place…"), pending: true, place: { placeId: p.placeId, source: "google", lat: p.lat, lng: p.lng } };
     S.starting = { step: "confirm", via: "map", candidate: c };
     renderSearch();
     renderMap();
@@ -1795,8 +1796,8 @@ export async function openEditor(root, tripId, ctx) {
     try {
       choice = JSON.parse(localStorage.getItem("wayline.geo") ?? "null");
     } catch {}
-    if (choice === "denied") return say("Location access is off for Wayline in this browser. Choose on the map or search for the start instead.");
-    if (!navigator.geolocation) return say("This browser can't share its location. Choose on the map or search for the start instead.");
+    if (choice === "denied") return say(t("Location access is off for Wayline in this browser. Choose on the map or search for the start instead."));
+    if (!navigator.geolocation) return say(t("This browser can't share its location. Choose on the map or search for the start instead."));
     S.starting = { step: "choose", locating: true };
     renderSearch();
     navigator.geolocation.getCurrentPosition(
@@ -1817,8 +1818,8 @@ export async function openEditor(root, tripId, ctx) {
           try {
             localStorage.setItem("wayline.geo", JSON.stringify("denied"));
           } catch {}
-          say("Location permission was denied. Choose on the map or search for the start instead.");
-        } else say(err.code === 3 ? "Finding your location took too long. Try again, or choose on the map or search." : "Your location couldn't be determined. Choose on the map or search instead.");
+          say(t("Location permission was denied. Choose on the map or search for the start instead."));
+        } else say(err.code === 3 ? t("Finding your location took too long. Try again, or choose on the map or search.") : t("Your location couldn't be determined. Choose on the map or search instead."));
       },
       { enableHighAccuracy: false, timeout: 10_000, maximumAge: 10 * 60_000 },
     );
@@ -1842,13 +1843,13 @@ export async function openEditor(root, tripId, ctx) {
       S.selectedId = res.activityId;
       render();
       if (Number.isFinite(c.place.lat)) map.focus(c.place);
-      toast(changed ? `Starting from ${c.title}.` : "Starting point set.");
+      toast(changed ? t("Starting from {title}.", { title: c.title }) : t("Starting point set."));
     } catch (err) {
       if (err.status === 409 && S.starting) {
         // their start is now on screen; pressing again replaces it on purpose
         const theirs = err.data?.current;
         S.startBase = theirs?.version ?? null;
-        S.starting = { ...S.starting, saving: false, message: theirs ? `A collaborator just set the start to ${theirs.title}. Press "Start here" again to replace it.` : "A collaborator just removed the start. Press \"Start here\" again to set yours." };
+        S.starting = { ...S.starting, saving: false, message: theirs ? t("A collaborator just set the start to {title}. Press \"Start here\" again to replace it.", { title: theirs.title }) : t("A collaborator just removed the start. Press \"Start here\" again to set yours.") };
       } else if (S.starting) S.starting = { ...S.starting, saving: false };
       renderSearch();
     }
@@ -1881,7 +1882,7 @@ export async function openEditor(root, tripId, ctx) {
     );
 
   async function removeActivity(a) {
-    if (!confirm(`Remove ${a.title} from the itinerary?`)) return;
+    if (!confirm(t("Remove {title} from the itinerary?", { title: a.title }))) return;
     await act(api(`${base}/activities/${a.id}`, { method: "DELETE" })).catch(() => {});
   }
 
@@ -1916,15 +1917,15 @@ export async function openEditor(root, tripId, ctx) {
     const first = timed[0];
     const last = timed.reduce((m, a) => (m && m.startMin + m.durationMin >= a.startMin + a.durationMin ? m : a), null);
     const { issues, gaps } = d.analysis;
-    const parts = [`${d.activities.length} stop${d.activities.length === 1 ? "" : "s"}`];
+    const parts = [tn(d.activities.length, "{n} stop", "{n} stops")];
     if (first && last) parts.push(`${hhmm(first.startMin)}–${hhmm(last.startMin + last.durationMin)}`);
     const conflicts = issues.filter((i) => i.severity === "conflict").length;
     const warnings = issues.length - conflicts;
-    parts.push(issues.length ? [conflicts && `${conflicts} conflict${conflicts === 1 ? "" : "s"}`, warnings && `${warnings} warning${warnings === 1 ? "" : "s"}`].filter(Boolean).join(", ") : "no timing issues");
+    parts.push(issues.length ? [conflicts && tn(conflicts, "{n} conflict", "{n} conflicts"), warnings && tn(warnings, "{n} warning", "{n} warnings")].filter(Boolean).join(", ") : t("no timing issues"));
     const unrouted = gaps.filter((g) => g.status === "not_calculated").length;
     const stale = gaps.filter((g) => g.status === "stale").length;
-    if (unrouted) parts.push(`${unrouted} route${unrouted === 1 ? "" : "s"} not calculated`);
-    if (stale) parts.push(`${stale} route${stale === 1 ? "" : "s"} out of date`);
+    if (unrouted) parts.push(tn(unrouted, "{n} route not calculated", "{n} routes not calculated"));
+    if (stale) parts.push(tn(stale, "{n} route out of date", "{n} routes out of date"));
     return parts.join(" · ");
   }
 
@@ -1946,8 +1947,8 @@ export async function openEditor(root, tripId, ctx) {
       h(
         "div",
         { class: "pa-head" },
-        h("h2", {}, "Planning assistant"),
-        h("button", { class: "icon-btn hide-phone", type: "button", "aria-label": "Close planning assistant", onclick: () => { S.copilotOpen = false; render(); } }, icon("close")),
+        h("h2", {}, t("Planning assistant")),
+        h("button", { class: "icon-btn hide-phone", type: "button", "aria-label": t("Close planning assistant"), onclick: () => { S.copilotOpen = false; render(); } }, icon("close")),
       ),
       view?.action ? actionView(d, view) : assistantHome(d, idx),
     );
@@ -1957,10 +1958,10 @@ export async function openEditor(root, tripId, ctx) {
     const r = d.review;
     const conflicts = d.analysis.issues.filter((x) => !S.dismissed.has(x.id) && !S.dismissed.has(`${x.id}@${S.trip.rev}`));
     const status = [];
-    if (!d.activities.some((a) => a.role !== "start")) status.push(statusLine("muted", "Add a few stops to plan around"));
+    if (!d.activities.some((a) => a.role !== "start")) status.push(statusLine("muted", t("Add a few stops to plan around")));
     else {
-      status.push(conflicts.length ? statusLine("bad", `${conflicts.length} timing conflict${conflicts.length === 1 ? "" : "s"}`) : statusLine("ok", "No timing conflicts"));
-      for (const n of r.notes) status.push(statusLine("warn", n.text, n.kind === "missing_meal" ? { label: "Find a place", onClick: () => runAction(d, "eat", { meal: n.id.split(":")[1] }) } : null));
+      status.push(conflicts.length ? statusLine("bad", tn(conflicts.length, "{n} timing conflict", "{n} timing conflicts")) : statusLine("ok", t("No timing conflicts")));
+      for (const n of r.notes) status.push(statusLine("warn", tServer(n.text), n.kind === "missing_meal" ? { label: t("Find a place"), onClick: () => runAction(d, "eat", { meal: n.id.split(":")[1] }) } : null));
     }
     const cfg = ctx.config;
     return h(
@@ -1969,35 +1970,35 @@ export async function openEditor(root, tripId, ctx) {
       prefsCard(),
       h(
         "section",
-        { class: "pa-status", "data-testid": "copilot-day", "aria-label": "This day at a glance" },
-        h("p", { class: "pa-day" }, `Day ${idx + 1} · ${S.trip.destination}`),
-        h("p", { class: "pa-span" }, `${r.stops} stop${r.stops === 1 ? "" : "s"}${r.span ? ` · ${hhmm(r.span.from)}–${hhmm(r.span.to)}` : ""}`),
+        { class: "pa-status", "data-testid": "copilot-day", "aria-label": t("This day at a glance") },
+        h("p", { class: "pa-day" }, t("Day {n} · {destination}", { n: idx + 1, destination: S.trip.destination })),
+        h("p", { class: "pa-span" }, tn(r.stops, "{n} stop", "{n} stops") + `${r.span ? ` · ${hhmm(r.span.from)}–${hhmm(r.span.to)}` : ""}`),
         h("ul", { class: "pa-lines" }, status),
         conflicts.length > 0 &&
           h(
             "details",
             { class: "pa-fixes" },
-            h("summary", {}, "See fixes"),
+            h("summary", {}, t("See fixes")),
             conflicts.map((x) =>
               h(
                 "div",
                 { class: `issue issue-${x.severity}` },
-                h("p", { class: "issue-msg" }, x.message),
-                h("div", { class: "proposals" }, d.analysis.proposals.filter((p) => p.issueId === x.id).map((p) => proposalCard(d, p, { basedOn: d.fingerprint })), h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.dismissed.add(x.id); renderCopilot(); } }, "Keep as planned")),
+                h("p", { class: "issue-msg" }, tServer(x.message)),
+                h("div", { class: "proposals" }, d.analysis.proposals.filter((p) => p.issueId === x.id).map((p) => proposalCard(d, p, { basedOn: d.fingerprint })), h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.dismissed.add(x.id); renderCopilot(); } }, t("Keep as planned"))),
               ),
             ),
           ),
       ),
       h(
         "div",
-        { class: "pa-actions", role: "group", "aria-label": "Planning actions" },
+        { class: "pa-actions", role: "group", "aria-label": t("Planning actions") },
         ACTIONS.map((a) => {
           const off = a.id === "optimize" ? !cfg.ai.configured : cfg.places !== "google";
           return h(
             "button",
-            { class: "pa-action", type: "button", "data-plan-action": a.id, disabled: off, title: off ? (a.id === "optimize" ? "AI isn't configured on this server" : "Needs Google Maps on the server") : "", onclick: () => runAction(d, a.id) },
+            { class: "pa-action", type: "button", "data-plan-action": a.id, disabled: off, title: off ? (a.id === "optimize" ? t("AI isn't configured on this server") : t("Needs Google Maps on the server")) : "", onclick: () => runAction(d, a.id) },
             h("span", { class: "pa-action-icon", "aria-hidden": "true" }, icon(a.icon)),
-            h("span", { class: "pa-action-text" }, h("strong", {}, a.title), h("small", {}, off ? "Not available on this server" : a.sub)),
+            h("span", { class: "pa-action-text" }, h("strong", {}, t(a.title)), h("small", {}, off ? t("Not available on this server") : t(a.sub))),
             icon("chevron"),
           );
         }),
@@ -2010,28 +2011,28 @@ export async function openEditor(root, tripId, ctx) {
   // set, a clear invitation instead.
   function prefsCard() {
     const p = S.prefs;
-    const t = p?.travel ?? {};
+    const tv = p?.travel ?? {};
     const f = p?.food ?? {};
     const chips = [
-      t.transport && t.transport !== "any" && PREF.transport[t.transport],
-      t.pace && PREF.paces[t.pace],
-      t.budget && t.budget !== "any" && `${PREF.prices[t.budget]} budget`,
-      t.maxWalkMin && `Walks under ${t.maxWalkMin} min`,
-      ...(t.avoidModes ?? []).map((m) => `No ${PREF.modes[m]?.toLowerCase()}`),
-      ...(t.interests ?? []).slice(0, 3).map((k) => PREF.interests[k]),
-      (t.interests ?? []).length > 3 && `+${t.interests.length - 3} interests`,
-      ...(f.diets ?? []).map((k) => PREF.diets[k]),
-      ...(f.cuisines ?? []).slice(0, 2).map((k) => PREF.cuisines[k]),
+      tv.transport && tv.transport !== "any" && pref("transport", tv.transport),
+      tv.pace && pref("paces", tv.pace),
+      tv.budget && tv.budget !== "any" && t("{price} budget", { price: pref("prices", tv.budget) }),
+      tv.maxWalkMin && t("Walks under {n} min", { n: tv.maxWalkMin }),
+      ...(tv.avoidModes ?? []).map((m) => t("No {mode}", { mode: pref("modes", m)?.toLowerCase() })),
+      ...(tv.interests ?? []).slice(0, 3).map((k) => pref("interests", k)),
+      (tv.interests ?? []).length > 3 && t("+{n} interests", { n: tv.interests.length - 3 }),
+      ...(f.diets ?? []).map((k) => pref("diets", k)),
+      ...(f.cuisines ?? []).slice(0, 2).map((k) => pref("cuisines", k)),
     ].filter(Boolean);
     // never saved: the defaults aren't choices anyone made, so invite instead
     const unset = !p?.saved;
     return h(
       "button",
       { class: `pa-prefs${unset ? " pa-prefs-unset" : ""}`, type: "button", "data-plan-action": "prefs", onclick: () => preferencesDialog({ first: unset, then: null }) },
-      h("span", { class: "pa-prefs-head" }, h("span", { class: "pa-prefs-kicker" }, "Planning for"), h("span", { class: "pa-prefs-edit" }, icon("edit"), unset ? "Set up" : "Change")),
+      h("span", { class: "pa-prefs-head" }, h("span", { class: "pa-prefs-kicker" }, t("Planning for")), h("span", { class: "pa-prefs-edit" }, icon("edit"), unset ? t("Set up") : t("Change"))),
       unset
-        ? h("span", { class: "pa-prefs-empty" }, h("strong", {}, "Tell the assistant how you travel"), h("small", {}, "Pace, getting around, budget, interests and food. Takes a minute; everything is optional."))
-        : h("span", { class: "pa-prefs-chips" }, chips.length ? chips.map((c) => h("span", { class: "pa-chip" }, c)) : h("span", { class: "pa-chip pa-chip-plain" }, "No particular preferences")),
+        ? h("span", { class: "pa-prefs-empty" }, h("strong", {}, t("Tell the assistant how you travel")), h("small", {}, t("Pace, getting around, budget, interests and food. Takes a minute; everything is optional.")))
+        : h("span", { class: "pa-prefs-chips" }, chips.length ? chips.map((c) => h("span", { class: "pa-chip" }, c)) : h("span", { class: "pa-chip pa-chip-plain" }, t("No particular preferences"))),
     );
   }
 
@@ -2068,10 +2069,10 @@ export async function openEditor(root, tripId, ctx) {
   const MEAL_WORD = { breakfast: "Breakfast", brunch: "Brunch", lunch: "Lunch", afternoon_tea: "Afternoon tea", dinner: "Dinner" };
 
   function actionView(d, v) {
-    const back = h("button", { class: "linklike pa-back", type: "button", "data-plan-action": "back", onclick: () => { S.plan = null; S.previewId = null; renderCopilot(); renderMap(); } }, icon("back"), "Back");
-    const head = [back, h("h3", { class: "pa-title" }, TITLES[v.action])];
-    if (v.busy) return h("div", { class: "pa-body" }, ...head, h("div", { class: "co-pending", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), h("span", {}, v.action === "optimize" ? "Looking at the whole day…" : "Searching Google Maps along your route…")));
-    if (v.error) return h("div", { class: "pa-body" }, ...head, h("p", { class: "co-err small", role: "alert" }, v.error), h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => runAction(d, v.action, v.meal ? { meal: v.meal } : {}) }, "Try again"));
+    const back = h("button", { class: "linklike pa-back", type: "button", "data-plan-action": "back", onclick: () => { S.plan = null; S.previewId = null; renderCopilot(); renderMap(); } }, icon("back"), t("Back"));
+    const head = [back, h("h3", { class: "pa-title" }, t(TITLES[v.action]))];
+    if (v.busy) return h("div", { class: "pa-body" }, ...head, h("div", { class: "co-pending", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), h("span", {}, v.action === "optimize" ? t("Looking at the whole day…") : t("Searching Google Maps along your route…"))));
+    if (v.error) return h("div", { class: "pa-body" }, ...head, h("p", { class: "co-err small", role: "alert" }, v.error), h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => runAction(d, v.action, v.meal ? { meal: v.meal } : {}) }, t("Try again")));
     const draft = v.draft;
     const stale = draft.basedOn && draft.basedOn !== d.fingerprint;
     const meals = v.action === "eat" ? draft.meals ?? [] : [];
@@ -2080,12 +2081,12 @@ export async function openEditor(root, tripId, ctx) {
       { class: "pa-body", "data-plan": stale ? "stale" : "preview" },
       ...head,
       meals.length > 1 &&
-        h("div", { class: "seg pa-meals", role: "group", "aria-label": "Meal" }, meals.map((m) => h("button", { type: "button", class: m.meal === v.meal ? "on" : "", "aria-pressed": String(m.meal === v.meal), onclick: () => runAction(d, "eat", { meal: m.meal }) }, MEAL_WORD[m.meal]))),
-      v.action === "eat" && v.meal && h("p", { class: "pa-sub" }, `${MEAL_WORD[v.meal]} along your route`),
-      draft.summary && h("p", { class: v.action === "optimize" ? "ai-text pa-summary" : "small muted" }, draft.summary),
-      stale && h("p", { class: "small leg-warn" }, "The day has changed since these suggestions were made.", " ", h("button", { class: "linklike", type: "button", onclick: () => runAction(d, v.action, v.meal ? { meal: v.meal } : {}) }, "Refresh")),
-      v.action === "optimize" ? optimizeList(d, draft, stale) : h("div", { class: "pa-cards" }, draft.changes.length ? draft.changes.map((c) => suggestionCard(d, draft, c, stale)) : h("p", { class: "small muted" }, "No suggestions for this part of the day.")),
-      draft.caveats?.length > 0 && h("details", { class: "pa-more small" }, h("summary", {}, "About these suggestions"), h("ul", {}, draft.caveats.map((x) => h("li", {}, x))), draft.preferences && h("ul", {}, draft.preferences.hard.map((x) => h("li", {}, x)))),
+        h("div", { class: "seg pa-meals", role: "group", "aria-label": t("Meal") }, meals.map((m) => h("button", { type: "button", class: m.meal === v.meal ? "on" : "", "aria-pressed": String(m.meal === v.meal), onclick: () => runAction(d, "eat", { meal: m.meal }) }, t(MEAL_WORD[m.meal])))),
+      v.action === "eat" && v.meal && h("p", { class: "pa-sub" }, t("{meal} along your route", { meal: t(MEAL_WORD[v.meal]) })),
+      draft.summary && h("p", { class: v.action === "optimize" ? "ai-text pa-summary" : "small muted" }, v.action === "optimize" ? draft.summary : tServer(draft.summary)),
+      stale && h("p", { class: "small leg-warn" }, t("The day has changed since these suggestions were made."), " ", h("button", { class: "linklike", type: "button", onclick: () => runAction(d, v.action, v.meal ? { meal: v.meal } : {}) }, t("Refresh"))),
+      v.action === "optimize" ? optimizeList(d, draft, stale) : h("div", { class: "pa-cards" }, draft.changes.length ? draft.changes.map((c) => suggestionCard(d, draft, c, stale)) : h("p", { class: "small muted" }, t("No suggestions for this part of the day."))),
+      draft.caveats?.length > 0 && h("details", { class: "pa-more small" }, h("summary", {}, t("About these suggestions")), h("ul", {}, draft.caveats.map((x) => h("li", {}, tServer(x)))), draft.preferences && h("ul", {}, draft.preferences.hard.map((x) => h("li", {}, tServer(x))))),
     );
   }
 
@@ -2096,8 +2097,8 @@ export async function openEditor(root, tripId, ctx) {
     const pick = draft.picks?.find((p) => p.changeId === c.id);
     const g = c.candidate;
     const previewing = S.previewId === c.id;
-    const facts = [g.category, g.rating != null ? `★ ${g.rating.toFixed(1)}${g.ratingCount != null ? ` (${g.ratingCount.toLocaleString()})` : ""}` : "No Google rating", g.priceLevel].filter(Boolean).join(" · ");
-    const extra = pick?.detourMin != null ? `about ${pick.detourMin} min extra walking (straight-line estimate)` : null;
+    const facts = [g.category, g.rating != null ? `★ ${g.rating.toFixed(1)}${g.ratingCount != null ? ` (${g.ratingCount.toLocaleString(locale())})` : ""}` : t("No Google rating"), g.priceLevel].filter(Boolean).join(" · ");
+    const extra = pick?.detourMin != null ? t("about {n} min extra walking (straight-line estimate)", { n: pick.detourMin }) : null;
     const open = S.place?.placeId === g.placeId;
     // the whole card opens the place in the editor's own place card, the same
     // one a click on the map opens (details, photos, Add to Itinerary)
@@ -2109,7 +2110,7 @@ export async function openEditor(root, tripId, ctx) {
         "data-change": c.id,
         role: "button",
         tabindex: 0,
-        "aria-label": `Show ${g.name} on the map`,
+        "aria-label": t("Show {name} on the map", { name: g.name }),
         "aria-current": open ? "true" : null,
         onclick: openPlace,
         onkeydown: (e) => {
@@ -2122,20 +2123,20 @@ export async function openEditor(root, tripId, ctx) {
       h("div", { class: "pa-card-top" }, h("h4", {}, g.name), (S.mealEdits[c.id]?.startMin ?? c.startMin) !== null && h("span", { class: "pa-time" }, hhmm(S.mealEdits[c.id]?.startMin ?? c.startMin))),
       h("p", { class: "pa-facts" }, facts),
       extra && h("p", { class: "pa-facts" }, extra),
-      pick?.labels?.length > 0 && h("p", { class: "pa-labels" }, pick.labels.map((l) => h("span", { class: "pa-label" }, l))),
-      c.hours && h("p", { class: `pa-hours pa-hours-${c.hours}`, "data-hours": c.hours }, c.hours === "confirmed" ? (c.hoursNote ?? "Open then") : c.hours === "unverified" ? "Hours not confirmed for this date" : "No opening hours from Google"),
-      c.warning && h("p", { class: "small leg-warn", "data-warning": "diet" }, c.warning),
+      pick?.labels?.length > 0 && h("p", { class: "pa-labels" }, pick.labels.map((l) => h("span", { class: "pa-label" }, tServer(l)))),
+      c.hours && h("p", { class: `pa-hours pa-hours-${c.hours}`, "data-hours": c.hours }, c.hours === "confirmed" ? (tServer(c.hoursNote) ?? t("Open then")) : c.hours === "unverified" ? t("Hours not confirmed for this date") : t("No opening hours from Google")),
+      c.warning && h("p", { class: "small leg-warn", "data-warning": "diet" }, tServer(c.warning)),
       S.hoursProblem?.changeId === c.id &&
         h(
           "div",
           { class: "pa-hours-problem", role: "alert", onclick: (e) => e.stopPropagation() },
-          h("p", { class: "small" }, h("strong", {}, "This doesn't fit its opening hours. "), S.hoursProblem.message),
+          h("p", { class: "small" }, h("strong", {}, t("This doesn't fit its opening hours. ")), tServer(S.hoursProblem.message)),
           h(
             "div",
             { class: "row-actions" },
-            S.hoursProblem.latestStart !== null && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.mealEdits[c.id] = { ...(S.mealEdits[c.id] ?? {}), startMin: S.hoursProblem.latestStart }; S.hoursProblem = null; renderCopilot(); } }, `Use ${hhmm(S.hoursProblem.latestStart)}`),
-            h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.hoursProblem = null; renderCopilot(); } }, "Another restaurant"),
-            h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => openSuggestedPlace(g) }, "Opening hours"),
+            S.hoursProblem.latestStart !== null && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.mealEdits[c.id] = { ...(S.mealEdits[c.id] ?? {}), startMin: S.hoursProblem.latestStart }; S.hoursProblem = null; renderCopilot(); } }, t("Use {time}", { time: hhmm(S.hoursProblem.latestStart) })),
+            h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.hoursProblem = null; renderCopilot(); } }, t("Another restaurant")),
+            h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => openSuggestedPlace(g) }, t("Opening hours")),
           ),
         ),
       !stale &&
@@ -2143,23 +2144,23 @@ export async function openEditor(root, tripId, ctx) {
           "div",
           // the card's own click opens the place; these buttons don't
           { class: "pa-card-actions", onclick: (e) => e.stopPropagation(), onkeydown: (e) => e.stopPropagation() },
-          h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.previewId = previewing ? null : c.id; renderCopilot(); renderMap(); renderTimeline(); map.focus({ lat: g.lat, lng: g.lng }); } }, previewing ? "Hide preview" : "Preview"),
+          h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.previewId = previewing ? null : c.id; renderCopilot(); renderMap(); renderTimeline(); map.focus({ lat: g.lat, lng: g.lng }); } }, previewing ? t("Hide preview") : t("Preview")),
           c.kind === "food" &&
             h(
               "label",
               { class: "pa-dur" },
-              h("span", { class: "sr-only" }, "Meal length"),
+              h("span", { class: "sr-only" }, t("Meal length")),
               h(
                 "select",
                 {
-                  "aria-label": "Meal length",
+                  "aria-label": t("Meal length"),
                   "data-meal-length": c.id,
                   onchange: (e) => { S.mealEdits[c.id] = { ...(S.mealEdits[c.id] ?? {}), durationMin: Number(e.target.value) }; S.hoursProblem = null; renderCopilot(); },
                 },
-                [30, 45, 60, 75, 90, 120].map((m) => h("option", { value: m, selected: (S.mealEdits[c.id]?.durationMin ?? c.durationMin) === m }, `${m} min`)),
+                [30, 45, 60, 75, 90, 120].map((m) => h("option", { value: m, selected: (S.mealEdits[c.id]?.durationMin ?? c.durationMin) === m }, t("{m} min", { m }))),
               ),
             ),
-          h("button", { class: "btn btn-primary btn-sm", type: "button", "data-plan-action": "apply-one", onclick: (e) => applyChanges(d, draft, [c.id], e.currentTarget) }, "Add"),
+          h("button", { class: "btn btn-primary btn-sm", type: "button", "data-plan-action": "apply-one", onclick: (e) => applyChanges(d, draft, [c.id], e.currentTarget) }, t("Add")),
         ),
     );
   }
@@ -2167,22 +2168,22 @@ export async function openEditor(root, tripId, ctx) {
   // Optimize: grouped by kind, each with its own Apply, plus "Apply all".
   function optimizeList(d, draft, stale) {
     const groups = [
-      ["Route", draft.changes.filter((c) => c.type === "move" || c.type === "mode")],
-      ["Meals", draft.changes.filter((c) => c.type === "add" && c.kind === "food")],
-      ["Nearby", draft.changes.filter((c) => c.type === "add" && c.kind !== "food")],
+      [t("Route"), draft.changes.filter((c) => c.type === "move" || c.type === "mode")],
+      [t("Meals"), draft.changes.filter((c) => c.type === "add" && c.kind === "food")],
+      [t("Nearby"), draft.changes.filter((c) => c.type === "add" && c.kind !== "food")],
     ].filter(([, list]) => list.length);
-    if (!groups.length) return h("p", { class: "small muted" }, "No changes suggested. The day already works well for your preferences.");
+    if (!groups.length) return h("p", { class: "small muted" }, t("No changes suggested. The day already works well for your preferences."));
     const line = (c) =>
       c.type === "move"
-        ? h("li", { class: "pa-change", "data-change": "move" }, h("span", { class: "grow" }, `Move ${c.title} to position ${c.toIndex + 1}`), !stale && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: (e) => applyChanges(d, draft, [c.id], e.currentTarget) }, "Apply"))
+        ? h("li", { class: "pa-change", "data-change": "move" }, h("span", { class: "grow" }, t("Move {title} to position {n}", { title: c.title, n: c.toIndex + 1 })), !stale && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: (e) => applyChanges(d, draft, [c.id], e.currentTarget) }, t("Apply")))
         : c.type === "mode"
-          ? h("li", { class: "pa-change", "data-change": "mode" }, h("span", { class: "grow" }, `${c.from}: ${PREF.modes[c.to]}`), !stale && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: (e) => applyChanges(d, draft, [c.id], e.currentTarget) }, "Apply"))
+          ? h("li", { class: "pa-change", "data-change": "mode" }, h("span", { class: "grow" }, `${c.from}: ${pref("modes", c.to)}`), !stale && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: (e) => applyChanges(d, draft, [c.id], e.currentTarget) }, t("Apply")))
           : suggestionCard(d, draft, c, stale);
     return h(
       "div",
       {},
       groups.map(([title, list]) => h("section", { class: "pa-group" }, h("h4", { class: "pa-group-title" }, title), h("ul", { class: "pa-change-list" }, list.map(line)))),
-      !stale && draft.changes.length > 1 && h("button", { class: "btn btn-primary btn-block", type: "button", "data-plan-action": "apply", onclick: (e) => applyChanges(d, draft, null, e.currentTarget) }, "Apply all"),
+      !stale && draft.changes.length > 1 && h("button", { class: "btn btn-primary btn-block", type: "button", "data-plan-action": "apply", onclick: (e) => applyChanges(d, draft, null, e.currentTarget) }, t("Apply all")),
     );
   }
 
@@ -2191,7 +2192,7 @@ export async function openEditor(root, tripId, ctx) {
     try {
       const edits = Object.fromEntries((ids ?? draft.changes.map((x) => x.id)).filter((id) => S.mealEdits[id]).map((id) => [id, S.mealEdits[id]]));
       applySnapshot(await api(`${base}/plan/apply`, { method: "POST", body: { draftId: draft.draftId, ...(ids ? { changeIds: ids } : {}), ...(Object.keys(edits).length ? { edits } : {}) } }));
-      toast(ids?.length === 1 ? "Added to the plan for everyone on the trip." : "Plan applied for everyone on the trip.");
+      toast(ids?.length === 1 ? t("Added to the plan for everyone on the trip.") : t("Plan applied for everyone on the trip."));
       S.plan = null;
       S.previewId = null;
       S.mealEdits = {};
@@ -2203,7 +2204,7 @@ export async function openEditor(root, tripId, ctx) {
         if (btn) btn.disabled = false;
         return void renderCopilot();
       }
-      S.plan = { ...S.plan, error: err.status === 409 ? "The day changed since these suggestions were made, so nothing was applied." : err.message };
+      S.plan = { ...S.plan, error: err.status === 409 ? t("The day changed since these suggestions were made, so nothing was applied.") : err.message };
     }
     renderCopilot();
     renderMap();
@@ -2212,7 +2213,7 @@ export async function openEditor(root, tripId, ctx) {
   // basedOn: the day fingerprint this preview was built from; the server
   // refuses (409) if the day has changed since.
   function proposalCard(d, p, { rationale = null, basedOn, staleNote = null, keyPrefix = "rule" } = {}) {
-    const nameOf = (id) => d.activities.find((a) => a.id === id)?.title ?? "Activity";
+    const nameOf = (id) => d.activities.find((a) => a.id === id)?.title ?? t("Activity");
     const seg = (id) => d.segments.find((s) => s.id === id);
     const key = `${keyPrefix}:${basedOn}:${p.id}`;
     const preview = p.changes.map((c) =>
@@ -2220,7 +2221,7 @@ export async function openEditor(root, tripId, ctx) {
         ? h(
             "li",
             {},
-            `${nameOf(c.activityId)}: ${c.field === "startMin" ? "start" : "duration"} `,
+            c.field === "startMin" ? t("{name}: start ", { name: nameOf(c.activityId) }) : t("{name}: duration ", { name: nameOf(c.activityId) }),
             h("s", {}, c.field === "startMin" ? hhmm(c.from) : dur(c.from)),
             " → ",
             h("b", {}, c.field === "startMin" ? hhmm(c.to) : dur(c.to)),
@@ -2229,9 +2230,9 @@ export async function openEditor(root, tripId, ctx) {
             "li",
             {},
             `${nameOf(seg(c.segmentId)?.fromId)} → ${nameOf(seg(c.segmentId)?.toId)}: `,
-            h("s", {}, MODE_LABEL[c.from] ?? "none"),
+            h("s", {}, MODE_LABEL[c.from] ? t(MODE_LABEL[c.from]) : t("none")),
             " → ",
-            h("b", {}, MODE_LABEL[c.to]),
+            h("b", {}, t(MODE_LABEL[c.to])),
           ),
     );
     const confirming = S.confirming === key;
@@ -2239,9 +2240,9 @@ export async function openEditor(root, tripId, ctx) {
       e.currentTarget.disabled = true;
       try {
         await act(api(`${base}/proposals/apply`, { method: "POST", body: { dayId: d.id, proposalId: p.id, basedOn } }), { quiet: true });
-        toast("Change applied.");
+        toast(t("Change applied."));
       } catch (err) {
-        toast(err.status === 409 ? "The plan changed since this was shown, so nothing was applied. Check the updated day." : err.message, { kind: "error" });
+        toast(err.status === 409 ? t("The plan changed since this was shown, so nothing was applied. Check the updated day.") : err.message, { kind: "error" });
       }
       S.confirming = null;
       renderCopilot();
@@ -2249,31 +2250,31 @@ export async function openEditor(root, tripId, ctx) {
     return h(
       "div",
       { class: `proposal${rationale ? " proposal-ai" : ""}`, "data-proposal": p.id },
-      rationale && h("p", { class: "ai-badge" }, icon("spark"), "Suggested by AI"),
-      h("p", { class: "proposal-label" }, p.label),
-      h("ul", { class: "change-preview", "aria-label": "Changes this will make" }, preview),
+      rationale && h("p", { class: "ai-badge" }, icon("spark"), t("Suggested by AI")),
+      h("p", { class: "proposal-label" }, tServer(p.label)),
+      h("ul", { class: "change-preview", "aria-label": t("Changes this will make") }, preview),
       rationale && h("p", { class: "ai-text" }, rationale),
       staleNote
         ? h("p", { class: "small leg-warn" }, staleNote)
         : confirming
           ? h(
               "div",
-              { class: "row-actions", role: "group", "aria-label": "Confirm change" },
-              h("span", { class: "small" }, "Apply this for everyone on the trip?"),
-              h("button", { class: "btn btn-primary btn-sm", type: "button", "data-confirm": "yes", onclick: apply }, "Confirm change"),
-              h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.confirming = null; renderCopilot(); } }, "Cancel"),
+              { class: "row-actions", role: "group", "aria-label": t("Confirm change") },
+              h("span", { class: "small" }, t("Apply this for everyone on the trip?")),
+              h("button", { class: "btn btn-primary btn-sm", type: "button", "data-confirm": "yes", onclick: apply }, t("Confirm change")),
+              h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.confirming = null; renderCopilot(); } }, t("Cancel")),
             )
           : isOwner()
-            ? h("button", { class: "btn btn-primary btn-sm", type: "button", "data-apply": p.id, onclick: () => { S.confirming = key; renderCopilot(); } }, "Apply this change…")
-            : h("p", { class: "small muted" }, "Only the trip's owner can apply changes."),
+            ? h("button", { class: "btn btn-primary btn-sm", type: "button", "data-apply": p.id, onclick: () => { S.confirming = key; renderCopilot(); } }, t("Apply this change…"))
+            : h("p", { class: "small muted" }, t("Only the trip's owner can apply changes.")),
     );
   }
 
   function aiSection(d) {
     const cfg = ctx.config.ai;
-    const head = h("h3", {}, "Ask about this day ", h("span", { class: "tag tag-ai" }, cfg.configured ? "AI" : "Unavailable"));
+    const head = h("h3", {}, t("Ask about this day "), h("span", { class: "tag tag-ai" }, cfg.configured ? "AI" : t("Unavailable")));
     if (!cfg.configured) {
-      return h("section", { class: "co-section" }, head, h("p", { class: "muted small" }, "AI answers aren't available on this server. The schedule check above works without it, and so does editing."));
+      return h("section", { class: "co-section" }, head, h("p", { class: "muted small" }, t("AI answers aren't available on this server. The schedule check above works without it, and so does editing.")));
     }
     const c = convo(d.id);
     const pending = S.aiPending?.dayId === d.id ? S.aiPending : null;
@@ -2283,8 +2284,8 @@ export async function openEditor(root, tripId, ctx) {
       name: "question",
       rows: 2,
       maxlength: 500,
-      placeholder: "Ask about this day, e.g. “Is this morning too rushed?”",
-      "aria-label": `Ask the copilot about Day ${S.trip.days.indexOf(d) + 1}`,
+      placeholder: t("Ask about this day, e.g. “Is this morning too rushed?”"),
+      "aria-label": t("Ask the copilot about Day {n}", { n: S.trip.days.indexOf(d) + 1 }),
       disabled: busy,
     });
     input.value = S.aiDraft;
@@ -2299,7 +2300,7 @@ export async function openEditor(root, tripId, ctx) {
       "form",
       { class: "co-ask" },
       input,
-      h("div", { class: "co-ask-row" }, h("span", { class: "tiny muted" }, "Only this day’s plan is sent to the AI. It can’t change anything."), h("button", { class: "btn btn-dark btn-sm", type: "submit", disabled: busy }, "Ask")),
+      h("div", { class: "co-ask-row" }, h("span", { class: "tiny muted" }, t("Only this day’s plan is sent to the AI. It can’t change anything.")), h("button", { class: "btn btn-dark btn-sm", type: "submit", disabled: busy }, t("Ask"))),
     );
     form.addEventListener("submit", (e) => {
       e.preventDefault();
@@ -2314,18 +2315,18 @@ export async function openEditor(root, tripId, ctx) {
       h(
         "div",
         { class: "row-actions" },
-        h("button", { class: "btn btn-dark btn-sm", type: "button", disabled: busy, "data-ai": "review", onclick: () => askAi(d, "") }, icon("spark"), "Review this day"),
-        c.turns.length > 0 && h("button", { class: "btn btn-ghost btn-sm", type: "button", disabled: busy, onclick: () => { c.turns = []; renderCopilot(); } }, "Clear conversation"),
+        h("button", { class: "btn btn-dark btn-sm", type: "button", disabled: busy, "data-ai": "review", onclick: () => askAi(d, "") }, icon("spark"), t("Review this day")),
+        c.turns.length > 0 && h("button", { class: "btn btn-ghost btn-sm", type: "button", disabled: busy, onclick: () => { c.turns = []; renderCopilot(); } }, t("Clear conversation")),
       ),
-      c.turns.length === 0 && !pending && h("div", { class: "co-examples" }, EXAMPLES.map((q) => h("button", { class: "chip chip-soft", type: "button", disabled: busy, onclick: () => askAi(d, q) }, q))),
+      c.turns.length === 0 && !pending && h("div", { class: "co-examples" }, EXAMPLES.map((q) => h("button", { class: "chip chip-soft", type: "button", disabled: busy, onclick: () => askAi(d, t(q)) }, t(q)))),
       h("ol", { class: "co-log", "aria-live": "polite" }, c.turns.map((t) => turnView(d, t, c))),
       pending &&
         h(
           "div",
           { class: "co-pending", role: "status" },
           h("span", { class: "spinner", "aria-hidden": "true" }),
-          h("span", {}, pending.question ? "Thinking about your question…" : "Reviewing this day…"),
-          h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-ai": "cancel", onclick: () => pending.controller.abort() }, "Cancel"),
+          h("span", {}, pending.question ? t("Thinking about your question…") : t("Reviewing this day…")),
+          h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-ai": "cancel", onclick: () => pending.controller.abort() }, t("Cancel")),
         ),
       form,
     );
@@ -2341,6 +2342,8 @@ export async function openEditor(root, tripId, ctx) {
     interests: { nature: "Nature", museums: "Museums", history: "Historical sites", architecture: "Architecture", shopping: "Shopping", photography: "Photography", local_food: "Local food", entertainment: "Entertainment", outdoors: "Outdoor activities" },
     modes: { WALK: "Walking", TRANSIT: "Public transport", DRIVE: "Driving" },
   };
+  // a PREF label in the reader's language (the table stays English)
+  const pref = (table, k) => (PREF[table][k] ? t(PREF[table][k]) : PREF[table][k]);
 
   // Short on purpose: sensible defaults, everything optional. Food stays
   // private to this person; the trip's shared choices apply to everyone on it.
@@ -2355,9 +2358,9 @@ export async function openEditor(root, tripId, ctx) {
     const travel = { ...mine.preferences.travel, ...trip.trip };
     // every choice is a visible pill: chips pick several, a segmented row picks one
     const chip = (name, value, label, checked) => h("label", { class: "pref-chip" }, h("input", { type: "checkbox", name, value, checked }), h("span", {}, label));
-    const checks = (name, options, chosen) => h("div", { class: "pref-chips", role: "group" }, Object.entries(options).map(([k, label]) => chip(name, k, label, chosen.includes(k))));
+    const checks = (name, options, chosen) => h("div", { class: "pref-chips", role: "group" }, Object.entries(options).map(([k, label]) => chip(name, k, t(label), chosen.includes(k))));
     const seg = (name, options, value) =>
-      h("div", { class: "pref-seg", role: "radiogroup" }, (Array.isArray(options) ? options : Object.entries(options)).map(([k, label]) => h("label", { class: "seg-opt" }, h("input", { type: "radio", name, value: k, checked: k === value }), h("span", {}, label))));
+      h("div", { class: "pref-seg", role: "radiogroup" }, (Array.isArray(options) ? options : Object.entries(options).map(([k, v]) => [k, t(v)])).map(([k, label]) => h("label", { class: "seg-opt" }, h("input", { type: "radio", name, value: k, checked: k === value }), h("span", {}, label))));
     const row = (label, ...control) => h("div", { class: "pref-row" }, h("p", { class: "pref-label" }, label), ...control);
     const section = (cls, ic, title, badge, ...rows) =>
       h("section", { class: `pref-sec ${cls}` }, h("header", { class: "pref-sec-head" }, icon(ic), h("h3", {}, title), h("span", { class: "pref-badge" }, badge)), ...rows);
@@ -2368,9 +2371,9 @@ export async function openEditor(root, tripId, ctx) {
       h(
         "header",
         { class: "pref-head" },
-        h("p", { class: "pref-kicker" }, icon("spark"), "Planning assistant"),
-        h("h2", {}, "Travel preferences"),
-        h("p", { class: "small muted" }, first ? "A few choices so the AI plans for you. Everything is optional; you can change it later." : "What the AI plans with. Everything is optional."),
+        h("p", { class: "pref-kicker" }, icon("spark"), t("Planning assistant")),
+        h("h2", {}, t("Travel preferences")),
+        h("p", { class: "small muted" }, first ? t("A few choices so the AI plans for you. Everything is optional; you can change it later.") : t("What the AI plans with. Everything is optional.")),
       ),
       h(
         "div",
@@ -2378,29 +2381,29 @@ export async function openEditor(root, tripId, ctx) {
         section(
           "pref-sec-trip",
           "share",
-          "This trip",
-          "Shared with everyone on it",
-          row("Getting around", seg("transport", PREF.transport, travel.transport)),
-          row("Pace", seg("pace", PREF.paces, travel.pace)),
-          row("Budget", seg("budget", PREF.prices, travel.budget)),
-          row("Longest walk", seg("maxWalkMin", [["", "No limit"], ["10", "10 min"], ["20", "20 min"], ["30", "30 min"], ["45", "45 min"]], String(travel.maxWalkMin ?? ""))),
-          row("Never use", h("div", { class: "pref-chips" }, Object.entries(PREF.modes).map(([k, label]) => chip("avoidModes", k, label, travel.avoidModes.includes(k))), chip("fewerTransfers", "on", "Fewer transfers", travel.fewerTransfers))),
-          row("Interests", checks("interests", PREF.interests, travel.interests)),
+          t("This trip"),
+          t("Shared with everyone on it"),
+          row(t("Getting around"), seg("transport", PREF.transport, travel.transport)),
+          row(t("Pace"), seg("pace", PREF.paces, travel.pace)),
+          row(t("Budget"), seg("budget", PREF.prices, travel.budget)),
+          row(t("Longest walk"), seg("maxWalkMin", [["", t("No limit")], ...[10, 20, 30, 45].map((m) => [String(m), t("{m} min", { m })])], String(travel.maxWalkMin ?? ""))),
+          row(t("Never use"), h("div", { class: "pref-chips" }, Object.entries(PREF.modes).map(([k, label]) => chip("avoidModes", k, t(label), travel.avoidModes.includes(k))), chip("fewerTransfers", "on", t("Fewer transfers"), travel.fewerTransfers))),
+          row(t("Interests"), checks("interests", PREF.interests, travel.interests)),
         ),
         section(
           "pref-sec-food",
           "food",
-          "Food",
-          "Only you",
-          row("Cuisines", checks("cuisines", PREF.cuisines, food.cuisines)),
-          row("Dietary needs", checks("diets", PREF.diets, food.diets)),
-          row("Restaurant price", seg("price", PREF.prices, food.price)),
-          h("label", { class: "pref-row" }, h("span", { class: "pref-label" }, "Allergies"), h("input", { name: "allergies", maxlength: 200, value: food.allergies, placeholder: "e.g. peanuts" })),
-          h("p", { class: "tiny muted" }, "Google can't confirm allergens or whether a restaurant is halal, kosher or vegan. Suggestions will say to check with the restaurant. Your allergies aren't sent to the AI or shown to others; only that you have some."),
+          t("Food"),
+          t("Only you"),
+          row(t("Cuisines"), checks("cuisines", PREF.cuisines, food.cuisines)),
+          row(t("Dietary needs"), checks("diets", PREF.diets, food.diets)),
+          row(t("Restaurant price"), seg("price", PREF.prices, food.price)),
+          h("label", { class: "pref-row" }, h("span", { class: "pref-label" }, t("Allergies")), h("input", { name: "allergies", maxlength: 200, value: food.allergies, placeholder: t("e.g. peanuts") })),
+          h("p", { class: "tiny muted" }, t("Google can't confirm allergens or whether a restaurant is halal, kosher or vegan. Suggestions will say to check with the restaurant. Your allergies aren't sent to the AI or shown to others; only that you have some.")),
         ),
         error,
       ),
-      h("footer", { class: "dialog-actions pref-foot" }, h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, "Cancel"), h("button", { class: "btn btn-primary", type: "submit", "data-pref": "save" }, then ? "Save and plan" : "Save")),
+      h("footer", { class: "dialog-actions pref-foot" }, h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, t("Cancel")), h("button", { class: "btn btn-primary", type: "submit", "data-pref": "save" }, then ? t("Save and plan") : t("Save"))),
     );
     const dialog = openDialog(h("dialog", { class: "dialog dialog-prefs" }, form));
     const all = (name) => [...form.querySelectorAll(`input[name=${name}]:checked`)].map((x) => x.value);
@@ -2412,7 +2415,7 @@ export async function openEditor(root, tripId, ctx) {
         await api("/api/me/preferences", { method: "PUT", body: { food: { cuisines: all("cuisines"), diets: all("diets"), price: form.price.value, allergies: form.allergies.value }, travel: mine.preferences.saved ? mine.preferences.travel : shared } });
         await api(`${base}/preferences`, { method: "PUT", body: { travel: shared } });
         dialog.close();
-        toast("Preferences saved.");
+        toast(t("Preferences saved."));
         S.prefs = { ...mine.preferences, saved: true, food: { ...mine.preferences.food, cuisines: all("cuisines"), diets: all("diets"), price: form.price.value }, travel: { ...mine.preferences.travel, ...shared } };
         renderTimeline();
         renderCopilot();
@@ -2424,9 +2427,9 @@ export async function openEditor(root, tripId, ctx) {
     });
   }
 
-  function turnView(d, t, c) {
-    const q = h("p", { class: "co-q" }, t.question || "Review this day");
-    if (t.error) {
+  function turnView(d, turn, c) {
+    const q = h("p", { class: "co-q" }, turn.question || t("Review this day"));
+    if (turn.error) {
       return h(
         "li",
         { class: "co-turn" },
@@ -2434,12 +2437,12 @@ export async function openEditor(root, tripId, ctx) {
         h(
           "div",
           { class: "co-err", role: "alert" },
-          h("p", { class: "form-error small" }, t.error),
-          t.retry && h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-ai": "retry", disabled: Boolean(S.aiPending), onclick: () => { c.turns.splice(c.turns.indexOf(t), 1); askAi(d, t.question); } }, "Try again"),
+          h("p", { class: "form-error small" }, turn.error),
+          turn.retry && h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-ai": "retry", disabled: Boolean(S.aiPending), onclick: () => { c.turns.splice(c.turns.indexOf(turn), 1); askAi(d, turn.question); } }, t("Try again")),
         ),
       );
     }
-    const r = t.res;
+    const r = turn.res;
     const isStale = r.fingerprint !== d.fingerprint;
     const byId = (id) => d.activities.find((a) => a.id === id);
     const issueById = (id) => d.analysis.issues.find((i) => i.id === id);
@@ -2451,13 +2454,13 @@ export async function openEditor(root, tripId, ctx) {
       h(
         "div",
         { class: "ai-card" },
-        isStale && h("p", { class: "small leg-warn", role: "status" }, "The plan has changed since this answer. It may be out of date; ask again for a fresh one."),
-        h("p", { class: "ai-label tiny" }, icon("spark"), "AI interpretation"),
+        isStale && h("p", { class: "small leg-warn", role: "status" }, t("The plan has changed since this answer. It may be out of date; ask again for a fresh one.")),
+        h("p", { class: "ai-label tiny" }, icon("spark"), t("AI interpretation")),
         h("p", { class: "ai-summary", lang: r.lang === "zh" ? "zh" : "en" }, r.answer.summary),
         r.answer.activities.length > 0 &&
           h(
             "ul",
-            { class: "co-refs", "aria-label": "Stops this answer refers to" },
+            { class: "co-refs", "aria-label": t("Stops this answer refers to") },
             r.answer.activities.map((a) => {
               const act = byId(a.activityId);
               return h(
@@ -2465,22 +2468,22 @@ export async function openEditor(root, tripId, ctx) {
                 {},
                 act
                   ? h("button", { class: "linklike small", type: "button", onclick: () => { select(act.id, { scroll: true }); if (isPhone()) setTab("plan"); } }, act.title, act.startMin !== null ? ` (${hhmm(act.startMin)})` : "")
-                  : h("span", { class: "small muted" }, "A stop that's no longer in the plan"),
+                  : h("span", { class: "small muted" }, t("A stop that's no longer in the plan")),
                 h("span", { class: "small" }, ` ${a.note}`),
               );
             }),
           ),
         r.answer.issues.map((i) => {
           const issue = issueById(i.issueId);
-          return h("div", { class: "co-issue" }, issue && h("p", { class: "small issue-msg" }, issue.message), h("p", { class: "ai-text" }, i.explanation));
+          return h("div", { class: "co-issue" }, issue && h("p", { class: "small issue-msg" }, tServer(issue.message)), h("p", { class: "ai-text" }, i.explanation));
         }),
         r.answer.recommendations.map((rec) => {
           const p = proposalById(rec.proposalId);
-          if (!p) return h("p", { class: "small muted" }, "A suggested fix no longer applies to the current plan.");
-          return proposalCard(d, p, { rationale: rec.rationale, basedOn: r.fingerprint, keyPrefix: "ai", staleNote: isStale ? "Ask again before applying: the plan changed after this suggestion." : null });
+          if (!p) return h("p", { class: "small muted" }, t("A suggested fix no longer applies to the current plan."));
+          return proposalCard(d, p, { rationale: rec.rationale, basedOn: r.fingerprint, keyPrefix: "ai", staleNote: isStale ? t("Ask again before applying: the plan changed after this suggestion.") : null });
         }),
         r.answer.caveats.length > 0 && h("ul", { class: "small muted" }, r.answer.caveats.map((x) => h("li", {}, x))),
-        h("p", { class: "tiny muted" }, `Schedule facts: ${t.facts}. Interpretation by ${r.model}${r.cached ? " (same plan and question as before, so not asked again)" : ""}. AI can be wrong; check before applying.`),
+        h("p", { class: "tiny muted" }, t("Schedule facts: {facts}. Interpretation by {model}{cached}. AI can be wrong; check before applying.", { facts: turn.facts, model: r.model, cached: r.cached ? t(" (same plan and question as before, so not asked again)") : "" })),
       ),
     );
   }
@@ -2504,12 +2507,12 @@ export async function openEditor(root, tripId, ctx) {
       });
       const data = await res.json().catch(() => ({}));
       if (res.status === 401) return ctx.signOut();
-      if (!res.ok) c.turns.push({ question, error: data.error ?? "The copilot couldn't answer just now.", retry: data.retry !== false });
+      if (!res.ok) c.turns.push({ question, error: tServer(data.error) ?? t("The copilot couldn't answer just now."), retry: data.retry !== false });
       else c.turns.push({ question, res: data, facts });
     } catch {
       if (controller.signal.aborted) {
         if (question) S.aiDraft = question; // give the question back to edit
-      } else c.turns.push({ question, error: "You seem to be offline. Try again when you're connected.", retry: true });
+      } else c.turns.push({ question, error: t("You seem to be offline. Try again when you're connected."), retry: true });
     }
     if (c.turns.length > 12) c.turns.splice(0, c.turns.length - 12);
     S.aiPending = null;
@@ -2532,22 +2535,22 @@ export async function openEditor(root, tripId, ctx) {
     const mealField = h(
       "label",
       { class: "field" },
-      h("span", {}, "Meal"),
-      h("select", { name: "meal" }, h("option", { value: "" }, "Not a meal"), Object.entries(MEAL_LABEL).map(([k, v]) => h("option", { value: k, selected: k === activity?.meal }, v))),
+      h("span", {}, t("Meal")),
+      h("select", { name: "meal" }, h("option", { value: "" }, t("Not a meal")), Object.entries(MEAL_LABEL).map(([k, v]) => h("option", { value: k, selected: k === activity?.meal }, t(v)))),
     );
     const form = h(
       "form",
       { method: "dialog", class: "stack" },
-      h("h2", {}, isNew ? "Add an activity" : "Edit activity"),
+      h("h2", {}, isNew ? t("Add an activity") : t("Edit activity")),
       note && h("p", { class: "muted small" }, note),
       banner,
-      activity?.place && h("p", { class: "muted small" }, activity.place.source === "demo" ? "Demo place" : "Linked to a Google Maps place"),
-      h("label", { class: "field" }, h("span", {}, "Title"), h("input", { name: "title", required: true, maxlength: 120, value: activity?.title ?? "", placeholder: "Picnic in the park" })),
+      activity?.place && h("p", { class: "muted small" }, activity.place.source === "demo" ? t("Demo place") : t("Linked to a Google Maps place")),
+      h("label", { class: "field" }, h("span", {}, t("Title")), h("input", { name: "title", required: true, maxlength: 120, value: activity?.title ?? "", placeholder: t("Picnic in the park") })),
       h(
         "div",
         { class: "row-2" },
-        h("label", { class: "field" }, h("span", {}, "Type"), h("select", { name: "kind" }, Object.entries(KIND_LABEL).map(([k, v]) => h("option", { value: k, selected: k === (activity?.kind ?? "custom") }, v)))),
-        h("label", { class: "field" }, h("span", {}, "Day"), h("select", { name: "dayId" }, S.trip.days.map((x, i) => h("option", { value: x.id, selected: x.id === d?.id }, `Day ${i + 1} · ${fmtDay(x.date)}`)))),
+        h("label", { class: "field" }, h("span", {}, t("Type")), h("select", { name: "kind" }, Object.entries(KIND_LABEL).map(([k, v]) => h("option", { value: k, selected: k === (activity?.kind ?? "custom") }, v)))),
+        h("label", { class: "field" }, h("span", {}, t("Day")), h("select", { name: "dayId" }, S.trip.days.map((x, i) => h("option", { value: x.id, selected: x.id === d?.id }, t("Day {n} · {date}", { n: i + 1, date: fmtDay(x.date) }))))),
       ),
       h(
         "div",
@@ -2555,32 +2558,32 @@ export async function openEditor(root, tripId, ctx) {
         h(
           "div",
           { class: "field" },
-          h("label", { class: "check" }, timed, h("span", {}, "Set a start time")),
-          h("input", { name: "start", type: "time", step: 300, "aria-label": "Start time", value: hhmm(activity?.startMin ?? suggestStart(d)) }),
+          h("label", { class: "check" }, timed, h("span", {}, t("Set a start time"))),
+          h("input", { name: "start", type: "time", step: 300, "aria-label": t("Start time"), value: hhmm(activity?.startMin ?? suggestStart(d)) }),
         ),
         h(
           "label",
           { class: "field" },
-          h("span", {}, "Duration (minutes)"),
+          h("span", {}, t("Duration (minutes)")),
           h(
             "span",
             { class: "stepper" },
-            h("button", { type: "button", class: "icon-btn", "aria-label": "15 minutes shorter", onclick: () => bump(-15) }, "−"),
+            h("button", { type: "button", class: "icon-btn", "aria-label": t("15 minutes shorter"), onclick: () => bump(-15) }, "−"),
             h("input", { name: "duration", type: "number", min: 5, max: 1440, step: 5, required: true, value: activity?.durationMin ?? 60 }),
-            h("button", { type: "button", class: "icon-btn", "aria-label": "15 minutes longer", onclick: () => bump(15) }, "+"),
+            h("button", { type: "button", class: "icon-btn", "aria-label": t("15 minutes longer"), onclick: () => bump(15) }, "+"),
           ),
         ),
       ),
       mealField,
-      h("label", { class: "field" }, h("span", {}, "Notes"), h("textarea", { name: "notes", rows: 3, maxlength: 2000, placeholder: "Booking reference, what to bring, who's paying…" }, activity?.notes ?? "")),
+      h("label", { class: "field" }, h("span", {}, t("Notes")), h("textarea", { name: "notes", rows: 3, maxlength: 2000, placeholder: t("Booking reference, what to bring, who's paying…") }, activity?.notes ?? "")),
       error,
       h(
         "div",
         { class: "dialog-actions" },
-        !isNew && h("button", { class: "btn btn-ghost btn-danger-text", type: "button", onclick: async () => { dialog.close(); await removeActivity(current() ?? activity); } }, "Remove"),
+        !isNew && h("button", { class: "btn btn-ghost btn-danger-text", type: "button", onclick: async () => { dialog.close(); await removeActivity(current() ?? activity); } }, t("Remove")),
         h("span", { class: "spacer" }),
-        h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, "Cancel"),
-        h("button", { class: "btn btn-primary", type: "submit" }, isNew ? "Add" : "Save"),
+        h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, t("Cancel")),
+        h("button", { class: "btn btn-primary", type: "submit" }, isNew ? t("Add") : t("Save")),
       ),
     );
     const syncTimed = () => (form.start.disabled = !timed.checked);
@@ -2610,12 +2613,12 @@ export async function openEditor(root, tripId, ctx) {
     const showConflict = (theirs, message) => {
       banner.hidden = false;
       banner.replaceChildren(
-        h("p", {}, message ?? `${memberName(theirs.updatedBy)} changed this activity while you were editing.`),
+        h("p", {}, message ?? t("{who} changed this activity while you were editing.", { who: memberName(theirs.updatedBy) })),
         h(
           "div",
           { class: "banner-actions" },
-          h("button", { class: "btn btn-sm btn-outline", type: "button", onclick: () => { fill(theirs); baseVersion = theirs.version; banner.hidden = true; } }, "Load their version"),
-          h("button", { class: "btn btn-sm btn-ghost", type: "button", onclick: () => { baseVersion = theirs.version; banner.hidden = true; form.requestSubmit(); } }, "Save mine over theirs"),
+          h("button", { class: "btn btn-sm btn-outline", type: "button", onclick: () => { fill(theirs); baseVersion = theirs.version; banner.hidden = true; } }, t("Load their version")),
+          h("button", { class: "btn btn-sm btn-ghost", type: "button", onclick: () => { baseVersion = theirs.version; banner.hidden = true; form.requestSubmit(); } }, t("Save mine over theirs")),
         ),
       );
     };
@@ -2632,10 +2635,10 @@ export async function openEditor(root, tripId, ctx) {
         const now = current();
         if (!now) {
           banner.hidden = false;
-          banner.replaceChildren(h("p", {}, "Someone removed this activity while you were editing it."));
+          banner.replaceChildren(h("p", {}, t("Someone removed this activity while you were editing it.")));
           form.querySelector("[type=submit]").disabled = true;
         } else if (now.version !== baseVersion && now.updatedBy !== me.id) {
-          showConflict(now, `${memberName(now.updatedBy)} just changed this activity.`);
+          showConflict(now, t("{who} just changed this activity.", { who: memberName(now.updatedBy) }));
         }
       },
     };
@@ -2676,31 +2679,31 @@ export async function openEditor(root, tripId, ctx) {
   }
 
   function settingsDialog() {
-    const t = S.trip;
+    const tr = S.trip;
     const error = h("p", { class: "form-error", role: "alert", hidden: true });
     const form = h(
       "form",
       { method: "dialog", class: "stack" },
-      h("h2", {}, "Trip settings"),
-      h("label", { class: "field" }, h("span", {}, "Trip name"), h("input", { name: "title", required: true, maxlength: 80, value: t.title })),
-      h("label", { class: "field" }, h("span", {}, "Destination"), h("input", { name: "destination", required: true, maxlength: 120, value: t.destination })),
+      h("h2", {}, t("Trip settings")),
+      h("label", { class: "field" }, h("span", {}, t("Trip name")), h("input", { name: "title", required: true, maxlength: 80, value: tr.title })),
+      h("label", { class: "field" }, h("span", {}, t("Destination")), h("input", { name: "destination", required: true, maxlength: 120, value: tr.destination })),
       h(
         "div",
         { class: "row-2" },
-        h("label", { class: "field" }, h("span", {}, "From"), h("input", { name: "startDate", type: "date", required: true, value: t.startDate })),
-        h("label", { class: "field" }, h("span", {}, "To"), h("input", { name: "endDate", type: "date", required: true, value: t.endDate })),
+        h("label", { class: "field" }, h("span", {}, t("From")), h("input", { name: "startDate", type: "date", required: true, value: tr.startDate })),
+        h("label", { class: "field" }, h("span", {}, t("To")), h("input", { name: "endDate", type: "date", required: true, value: tr.endDate })),
       ),
-      h("p", { class: "small muted" }, `Time zone: ${t.timezone}`),
+      h("p", { class: "small muted" }, t("Time zone: {tz}", { tz: tr.timezone })),
       // usual meal times for this trip: suggestions when adding somewhere to eat
       h(
         "details",
         { class: "meal-times" },
-        h("summary", {}, "Meal times"),
-        h("p", { class: "small muted" }, "Used to suggest a time when someone adds a place to eat. Times stay editable when adding."),
+        h("summary", {}, t("Meal times")),
+        h("p", { class: "small muted" }, t("Used to suggest a time when someone adds a place to eat. Times stay editable when adding.")),
         h(
           "table",
           { class: "meal-table" },
-          h("thead", {}, h("tr", {}, h("th", {}, ""), h("th", {}, "From"), h("th", {}, "Usual"), h("th", {}, "To"))),
+          h("thead", {}, h("tr", {}, h("th", {}, ""), h("th", {}, t("From")), h("th", {}, t("Usual")), h("th", {}, t("To")))),
           h(
             "tbody",
             {},
@@ -2708,8 +2711,8 @@ export async function openEditor(root, tripId, ctx) {
               h(
                 "tr",
                 {},
-                h("th", { scope: "row" }, label),
-                ...["from", "usual", "to"].map((f) => h("td", {}, h("input", { type: "time", step: 300, name: `meal-${k}-${f}`, required: true, "aria-label": `${label} ${f}`, value: hhmm(t.mealTimes[k][f]) }))),
+                h("th", { scope: "row" }, t(label)),
+                ...["from", "usual", "to"].map((f) => h("td", {}, h("input", { type: "time", step: 300, name: `meal-${k}-${f}`, required: true, "aria-label": `${t(label)} ${{ from: t("from"), usual: t("usual"), to: t("to") }[f]}`, value: hhmm(tr.mealTimes[k][f]) }))),
               ),
             ),
           ),
@@ -2725,17 +2728,17 @@ export async function openEditor(root, tripId, ctx) {
             class: "btn btn-ghost btn-danger-text",
             type: "button",
             onclick: async () => {
-              if (!confirm(`Delete "${t.title}" for everyone? This can't be undone.`)) return;
+              if (!confirm(t("Delete \"{title}\" for everyone? This can't be undone.", { title: tr.title }))) return;
               await api(base, { method: "DELETE" }).catch((err) => toast(err.message, { kind: "error" }));
               dialog.close();
               ctx.navigate("/", { replace: true });
             },
           },
-          "Delete trip",
+          t("Delete trip"),
         ),
         h("span", { class: "spacer" }),
-        h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, "Cancel"),
-        h("button", { class: "btn btn-primary", type: "submit" }, "Save"),
+        h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, t("Cancel")),
+        h("button", { class: "btn btn-primary", type: "submit" }, t("Save")),
       ),
     );
     const dialog = openDialog(h("dialog", { class: "dialog" }, form));

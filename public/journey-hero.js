@@ -16,6 +16,7 @@
 // where the scene is still until someone picks another.
 import { band, BAND_W, CREDITS, createPlayback, exploreFor, fitWindow, PHONE_VIEW, placePhoto, SCENES, sceneStart, TIMING } from "/journey.js";
 import { h } from "/ui.js";
+import { t } from "/i18n.js";
 
 const IMG = "/img/train";
 
@@ -92,33 +93,33 @@ export function journeyHero({ start, onSearch }) {
   const tunnel = h("div", { class: "jh-tunnel", "aria-hidden": "true" }, h("div", { class: "jh-band" }, h("div", { class: "jh-band-in" }, h("div", { class: "jh-lamps" }))));
   // the glass: a hairline edge and a barely-there sheen
   const glass = h("div", { class: "jh-glass", "aria-hidden": "true" });
-  const picture = h("div", { class: "jh-picture", role: "img", "aria-label": SCENES[0].alt }, ...sceneEls.map((e) => e.el), tunnel, glass);
+  const picture = h("div", { class: "jh-picture", role: "img", "aria-label": t(SCENES[0].alt) }, ...sceneEls.map((e) => e.el), tunnel, glass);
 
   // --- the interface: Wayline's own type and buttons over the view
   const place = h("p", { class: "jh-place" });
   const sub = h("p", { class: "jh-sub" });
   const count = h("span", { class: "jh-count", "aria-hidden": "true" });
   // the quieter action: a text link naming the destination on view
-  const exploreName = h("span", {}, SCENES[0].name);
-  const explore = h("a", { class: "jh-explore", href: SCENES[0].explore ?? "/#explore-map" }, h("span", {}, "Explore ", exploreName), h("span", { class: "jh-explore-arrow", "aria-hidden": "true" }, "\u2192"));
+  const exploreName = h("span", {}, t(SCENES[0].name));
+  const explore = h("a", { class: "jh-explore", href: SCENES[0].explore ?? "/#explore-map" }, h("span", {}, t("Explore "), exploreName), h("span", { class: "jh-explore-arrow", "aria-hidden": "true" }, "\u2192"));
   explore.addEventListener("click", (e) => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     const go = exploreFor(SCENES[shown]);
     if (go.href) return; // an ordinary in-app link (data-link)
     e.preventDefault();
-    onSearch(go.search);
+    onSearch({ ...go.search, label: t(go.search.label) });
   });
   const stops = SCENES.map((s, i) =>
-    h("button", { type: "button", class: "jh-stop", onclick: () => pick(i) }, h("span", { class: "jh-stop-n", "aria-hidden": "true" }, String(i + 1).padStart(2, "0")), h("span", {}, s.name)),
+    h("button", { type: "button", class: "jh-stop", onclick: () => pick(i) }, h("span", { class: "jh-stop-n", "aria-hidden": "true" }, String(i + 1).padStart(2, "0")), h("span", {}, t(s.name))),
   );
   const live = h("p", { class: "sr-only", "aria-live": "polite" });
   const pause = h("button", { type: "button", class: "jh-pause", onclick: () => {
     paused = !paused;
-    pause.textContent = paused ? "Play scenery" : "Pause scenery";
+    pause.textContent = paused ? t("Play scenery") : t("Pause scenery");
     pause.setAttribute("aria-pressed", String(paused));
     if (paused) halt();
     else kick();
-  }, "aria-pressed": "false" }, "Pause scenery");
+  }, "aria-pressed": "false" }, t("Pause scenery"));
   // the line: the five destinations as stations on one route, drawn up to
   // the one on view (an SVG path, its stations ordinary buttons over it)
   const svg = (tag, attrs) => {
@@ -155,19 +156,19 @@ export function journeyHero({ start, onSearch }) {
       h(
         "div",
         { class: "jh-copy" },
-        h("p", { class: "hx-kicker" }, h("span", { class: "hx-kicker-rule", "aria-hidden": "true" }), "For all the places we\u2019ll go."),
+        h("p", { class: "hx-kicker" }, h("span", { class: "hx-kicker-rule", "aria-hidden": "true" }), t("For all the places we\u2019ll go.")),
         // one phrase in three voices: the headline, an aside, and "us." signed
         h("h1", { class: "jh-title hx-poem" },
-          h("span", { class: "hx-poem-the" }, "The journey"), " ",
-          h("span", { class: "hx-poem-sign" }, h("span", { class: "hx-poem-by" }, "written by"), " ", h("span", { class: "hx-poem-us" }, "us."))),
-        h("p", { class: "jh-lede hx-verse" }, "It starts with a little ", h("em", {}, "“what if”"), ".", h("br"), "Somewhere along the way, ", h("span", { class: "hx-verse-end" }, "it becomes our story.")),
-        h("div", { class: "jh-actions" }, h("button", { type: "button", class: "btn btn-primary btn-lg jh-start", onclick: start }, "Start Planning"), explore),
+          h("span", { class: "hx-poem-the" }, t("The journey")), " ",
+          h("span", { class: "hx-poem-sign" }, h("span", { class: "hx-poem-by" }, t("written by")), " ", h("span", { class: "hx-poem-us" }, t("us.")))),
+        h("p", { class: "jh-lede hx-verse" }, t("It starts with a little "), h("em", {}, t("“what if”")), t("."), h("br"), t("Somewhere along the way, "), h("span", { class: "hx-verse-end" }, t("it becomes our story."))),
+        h("div", { class: "jh-actions" }, h("button", { type: "button", class: "btn btn-primary btn-lg jh-start", onclick: start }, t("Start Planning")), explore),
       ),
       h(
         "div",
         { class: "jh-bar" },
-        h("div", { class: "jh-dest" }, h("p", { class: "jh-kicker" }, count, " · Now passing"), h("div", { class: "jh-place-row" }, place, sub)),
-        lineBox = h("div", { class: "jh-line" }, map, head, h("nav", { class: "jh-stops", "aria-label": "Choose a destination" }, stops)),
+        h("div", { class: "jh-dest" }, h("p", { class: "jh-kicker" }, count, t(" · Now passing")), h("div", { class: "jh-place-row" }, place, sub)),
+        lineBox = h("div", { class: "jh-line" }, map, head, h("nav", { class: "jh-stops", "aria-label": t("Choose a destination") }, stops)),
       ),
     ),
     el,
@@ -286,15 +287,15 @@ export function journeyHero({ start, onSearch }) {
   function label(i) {
     shown = i;
     const s = SCENES[i];
-    place.textContent = s.name.toUpperCase();
-    sub.textContent = s.subtitle;
+    place.textContent = t(s.name).toUpperCase();
+    sub.textContent = t(s.subtitle);
     count.textContent = `${String(i + 1).padStart(2, "0")} / ${String(SCENES.length).padStart(2, "0")}`;
-    picture.setAttribute("aria-label", s.alt);
+    picture.setAttribute("aria-label", t(s.alt));
     stops.forEach((b, k) => {
       if (k === i) b.setAttribute("aria-current", "true");
       else b.removeAttribute("aria-current");
     });
-    exploreName.textContent = s.name;
+    exploreName.textContent = t(s.name);
     const go = exploreFor(s);
     explore.href = go.href ?? "/#explore-map";
     // an in-app link goes through the router; a map search is handled here
@@ -309,11 +310,11 @@ export function journeyHero({ start, onSearch }) {
     const ready = await want(i, true);
     if (destroyed || version !== pickVersion) return;
     if (!ready) {
-      live.textContent = `The photo of ${SCENES[i].name} is unavailable. Please choose another destination.`;
+      live.textContent = t("The photo of {place} is unavailable. Please choose another destination.", { place: t(SCENES[i].name) });
       return;
     }
     playback.select(i, { instant: still() || paused });
-    live.textContent = `${SCENES[i].name}, ${SCENES[i].subtitle}`;
+    live.textContent = `${t(SCENES[i].name)}, ${t(SCENES[i].subtitle)}`;
     draw();
     kick();
   }

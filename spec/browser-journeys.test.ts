@@ -184,10 +184,11 @@ describe.skipIf(!chromePath)("journeys: save, publish, share and the profile", (
     const inv = await inPage(friend, "POST", `/api/trips/${theirs.id}/invitations`, { userId: me.id });
     await inPage(page, "POST", `/api/invitations/${inv.invitation?.id ?? inv.id}/accept`, {});
 
-    // the header's avatar and name lead to the profile
+    // the header's avatar and name open the account menu, which leads to the profile
     await page.goto(new URL("/", baseUrl).href);
     await page.waitFor(`document.querySelector('.topbar .me-link')`);
     await page.eval(`document.querySelector('.topbar .me-link').click()`);
+    await page.eval(`document.querySelector('.me-menu a[href="/profile"]').click()`);
     await page.waitFor(`location.pathname === '/profile' && document.querySelector('.pf-name')`);
     expect(await page.eval<string>(`document.querySelector('.pf-name').textContent`)).toBe(name);
     expect(await page.eval<string>(`document.querySelector('.pf-handle').textContent`)).toContain(`@${name}`);

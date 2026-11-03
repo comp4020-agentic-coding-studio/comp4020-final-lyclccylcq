@@ -10,6 +10,7 @@ import { openDb } from "./db.ts";
 import { HttpError } from "./errors.ts";
 import { createDiscovery } from "./discovery.ts";
 import { computeRouteOptions, DEMO_PLACES, googleConfigured, mapsKeyWarnings, placeDetails, searchPlaces } from "./google.ts";
+import { parseLang, withLang } from "./lang.ts";
 import { createPlanner } from "./planner.ts";
 import { createPlanning } from "./planning.ts";
 import { createPreferences } from "./preferences.ts";
@@ -121,7 +122,7 @@ const json = (res: ServerResponse, status: number, data: unknown, headers: Recor
 // Files only by a plain name (no slashes, no dots up front), under one of a
 // few known folders at most, so nothing outside them can be asked for.
 function serveFile(res: ServerResponse, dir: string, name: string, range?: string): boolean {
-  if (!/^((img\/covers|img\/train|video)\/)?[\w-][\w.-]*$/.test(name)) return false;
+  if (!/^((img\/covers|img\/train|video|i18n)\/)?[\w-][\w.-]*$/.test(name)) return false;
   const path = join(dir, name);
   if (!existsSync(path)) return false;
   // media doesn't change in place (a new file gets a new name), so browsers may keep it
@@ -264,6 +265,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
 
   const maybeUser: User | null = auth.userForToken(readCookie(req.headers.cookie, COOKIE));
   setUser(maybeUser);
+  // the person's language: their account's choice, or a visitor's (sent by
+  // the page as x-wayline-lang); Google and curated content follow it
+  const lang = maybeUser?.lang ?? parseLang(req.headers["x-wayline-lang"]);
+  return withLang(lang, () => signedInApi(req, res, url, method, path, maybeUser));
+}
+
+async function signedInApi(req: IncomingMessage, res: ServerResponse, url: URL, method: string, path: string, maybeUser: User | null): Promise<void> {
   const found = await discovery(req, url, maybeUser, () => body(req));
   if (found) {
     // a fork or a copy answers with the new trip: name it in the log line
@@ -635,7 +643,7 @@ async function locateDestination(snap: TripSnapshot): Promise<void> {
     if (googleConfigured()) {
       const { places } = await searchPlaces(snap.destination, null);
       if (places[0]) trips.setCenter(snap.id, places[0]);
-    } else if (/sydney/i.test(snap.destination)) {
+    } else if (/sydney|悉尼/i.test(snap.destination)) {
       const lat = DEMO_PLACES.reduce((s, p) => s + p.lat, 0) / DEMO_PLACES.length;
       const lng = DEMO_PLACES.reduce((s, p) => s + p.lng, 0) / DEMO_PLACES.length;
       trips.setCenter(snap.id, { placeId: "demo:sydney", lat, lng });

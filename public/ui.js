@@ -1,3 +1,7 @@
+import { getLang, locale, t, tServer } from "/i18n.js";
+
+const getLangHeader = () => getLang();
+
 // Small shared helpers. h() builds DOM nodes; text always goes in as text
 // nodes, never as HTML, so user-written titles and notes can't inject markup.
 
@@ -66,7 +70,7 @@ export const icon = (name) => svg(ICONS[name]);
 
 export class ApiError extends Error {
   constructor(status, data) {
-    super(data?.error ?? `Request failed (${status})`);
+    super(tServer(data?.error) ?? t("Request failed ({status})", { status }));
     this.status = status;
     this.data = data ?? {};
   }
@@ -106,11 +110,12 @@ async function request(path, method, body) {
     res = await fetch(path, {
       method,
       credentials: "same-origin",
-      headers: body === undefined ? {} : { "content-type": "application/json" },
+      // a visitor's language, for Google's answers (signed in, the account's wins)
+      headers: { "x-wayline-lang": getLangHeader(), ...(body === undefined ? {} : { "content-type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw new ApiError(0, { error: "You seem to be offline. Your change wasn't saved." });
+    throw new ApiError(0, { error: t("You seem to be offline. Your change wasn't saved.") });
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, data);
@@ -133,12 +138,18 @@ export const uid = () =>
 const utcDate = (iso) => new Date(`${iso}T00:00:00Z`);
 
 export function fmtDay(iso, opts = { weekday: "short", day: "numeric", month: "short" }) {
-  return new Intl.DateTimeFormat("en-AU", { ...opts, timeZone: "UTC" }).format(utcDate(iso));
+  return new Intl.DateTimeFormat(locale(), { ...opts, timeZone: "UTC" }).format(utcDate(iso));
 }
 
 export function fmtRange(start, end) {
   const a = utcDate(start);
   const b = utcDate(end);
+  if (getLang() === "zh") {
+    const f = (d, year) => new Intl.DateTimeFormat("zh-CN", { ...(year ? { year: "numeric" } : {}), month: "long", day: "numeric", timeZone: "UTC" }).format(d);
+    const sameYear = a.getUTCFullYear() === b.getUTCFullYear();
+    if (start === end) return f(a, true);
+    return sameYear ? `${f(a)}–${f(b)}` : `${f(a, true)}–${f(b, true)}`;
+  }
   const month = (d) => new Intl.DateTimeFormat("en-AU", { month: "long", timeZone: "UTC" }).format(d);
   const sameYear = a.getUTCFullYear() === b.getUTCFullYear();
   if (start === end) return `${a.getUTCDate()} ${month(a)} ${a.getUTCFullYear()}`;
@@ -149,13 +160,13 @@ export function fmtRange(start, end) {
 
 export function relTime(ms) {
   const s = Math.round((Date.now() - ms) / 1000);
-  if (s < 45) return "just now";
+  if (s < 45) return t("just now");
   const m = Math.round(s / 60);
-  if (m < 60) return `${m} min ago`;
+  if (m < 60) return t("{n} min ago", { n: m });
   const hr = Math.round(m / 60);
-  if (hr < 24) return `${hr} h ago`;
+  if (hr < 24) return t("{n} h ago", { n: hr });
   const d = Math.round(hr / 24);
-  return d < 30 ? `${d} day${d === 1 ? "" : "s"} ago` : new Date(ms).toLocaleDateString("en-AU");
+  return d < 30 ? t(d === 1 ? "{n} day ago" : "{n} days ago", { n: d }) : new Date(ms).toLocaleDateString(locale());
 }
 
 export const hhmm = (min) => {
@@ -169,7 +180,7 @@ export const parseTime = (s) => {
 export const dur = (min) => {
   const hr = Math.floor(min / 60);
   const m = min % 60;
-  return hr && m ? `${hr}h ${m}m` : hr ? `${hr}h` : `${m} min`;
+  return hr && m ? t("{h}h {m}m", { h: hr, m }) : hr ? t("{h}h", { h: hr }) : t("{m} min", { m });
 };
 
 export const initials = (name) =>
@@ -195,24 +206,27 @@ export function openDialog(dialog) {
   return dialog;
 }
 
-export const KIND_LABEL = {
+// labels follow the chosen language: read at render time, not import time
+const labels = (en) => new Proxy(en, { get: (o, k) => (typeof o[k] === "string" ? t(o[k]) : o[k]), ownKeys: (o) => Reflect.ownKeys(o), getOwnPropertyDescriptor: (o, k) => ({ ...Reflect.getOwnPropertyDescriptor(o, k), value: typeof o[k] === "string" ? t(o[k]) : o[k] }) });
+
+export const KIND_LABEL = labels({
   attraction: "Attraction",
   food: "Food",
   shopping: "Shopping",
   accommodation: "Stay",
   custom: "Custom",
-};
+});
 export const KIND_DURATION = { attraction: 120, food: 60, shopping: 60, accommodation: 30, custom: 60 };
 
 // an itinerary's categories, on the homepage and its preview
-export const CATEGORY_LABEL = {
+export const CATEGORY_LABEL = labels({
   "half-day": "Half-day",
   "one-day": "One-day",
   weekend: "Weekend",
   "food-culture": "Food & Culture",
   "nature-outdoors": "Nature & Outdoors",
   "city-highlights": "City Highlights",
-};
+});
 
 export function guessKind(types = []) {
   const t = new Set(types);
