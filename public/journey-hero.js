@@ -134,20 +134,6 @@ export function journeyHero({ start, onSearch }) {
   // the head of the line: a dot travelling with it (its own element, so it
   // stays round however the line's box is stretched)
   const head = h("span", { class: "jh-head", "aria-hidden": "true" });
-  // two pencilled routes from different places, coming in from the window's
-  // side, meeting, and going on as one red line that comes down to the
-  // primary button
-  const routes = svg("svg", { class: "hx-routes", viewBox: "0 0 300 76", "aria-hidden": "true" });
-  routes.append(
-    svg("path", { class: "hx-route", d: "M292,10 C258,4 236,22 204,22 S158,26 140,34" }),
-    svg("path", { class: "hx-route", d: "M262,58 C236,64 214,46 190,46 S158,40 140,34" }),
-    svg("path", { class: "hx-route hx-route-one", d: "M140,34 C112,40 88,36 78,50 S72,66 72,70" }),
-    svg("circle", { class: "hx-route-from", cx: 292, cy: 10, r: 2.4 }),
-    svg("circle", { class: "hx-route-from", cx: 262, cy: 58, r: 2.4 }),
-    svg("circle", { class: "hx-route-meet", cx: 140, cy: 34, r: 4.6 }),
-    svg("circle", { class: "hx-route-meet-dot", cx: 140, cy: 34, r: 1.7 }),
-    svg("path", { class: "hx-route-tip", d: "M68,67 L72,73 L76,67" }),
-  );
   let lineBox = null;
   // the line's size in px, so the dot moves by transform (sub-pixel, no
   // layout) rather than by percentages snapped to whole pixels
@@ -175,7 +161,6 @@ export function journeyHero({ start, onSearch }) {
           h("span", { class: "hx-poem-the" }, "The journey"), " ",
           h("span", { class: "hx-poem-sign" }, h("span", { class: "hx-poem-by" }, "written by"), " ", h("span", { class: "hx-poem-us" }, "us."))),
         h("p", { class: "jh-lede hx-verse" }, "It starts with a little ", h("em", {}, "“what if”"), ".", h("br"), "Somewhere along the way, ", h("span", { class: "hx-verse-end" }, "it becomes our story.")),
-        routes,
         h("div", { class: "jh-actions" }, h("button", { type: "button", class: "btn btn-primary btn-lg jh-start", onclick: start }, "Start Planning"), explore),
       ),
       h(
