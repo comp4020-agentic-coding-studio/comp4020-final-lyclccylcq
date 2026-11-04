@@ -103,9 +103,9 @@ export async function openEditor(root, tripId, ctx) {
   const searchForm = h("form", { class: "search", role: "search" }, icon("search"), searchInput, h("button", { class: "btn btn-primary btn-sm", type: "submit" }, t("Search")));
   const searchPanel = h("div", { class: "search-panel", hidden: true });
   const mapHost = h("div", { class: "map-host" });
-  const dayTabs = h("nav", { class: "day-tabs", role: "tablist", "aria-label": t("Trip days") });
+  const dayTabs = h("nav", { class: "day-tabs", role: "tablist", "aria-label": t("Trip days"), "data-region": "day-tabs" });
   const dayHead = h("div", { class: "day-head" });
-  const timeline = h("ol", { class: "timeline", "aria-label": t("Itinerary for the selected day") });
+  const timeline = h("ol", { class: "timeline", "aria-label": t("Itinerary for the selected day"), "data-region": "timeline" });
   // under the timeline: the day in four numbers, and who put what on it
   const daySummary = h("aside", { class: "day-summary", "aria-label": t("This day at a glance") });
   const planFoot = h(
@@ -118,8 +118,8 @@ export async function openEditor(root, tripId, ctx) {
   // the day as a line across the top: its stations left to right by time,
   // the legs between them coloured by how you go. An overview and a way to
   // pick a stop; the timeline beside the map stays where editing happens.
-  const lineDays = h("div", { class: "line-days" });
-  const lineTrack = h("ol", { class: "line-track", "aria-label": t("The selected day as a line") });
+  const lineDays = h("div", { class: "line-days", "data-region": "line-days" });
+  const lineTrack = h("ol", { class: "line-track", "aria-label": t("The selected day as a line"), "data-region": "line-track" });
   const lineBand = h("section", { class: "line-band", "aria-label": t("Day overview") }, lineDays, lineTrack);
   const workspace = h(
     "main",
@@ -207,7 +207,7 @@ export async function openEditor(root, tripId, ctx) {
     if (said.length) {
       toast(said.length > 2 ? t("{first} and {n} more changes", { first: said[0], n: said.length - 1 }) : said.join(" · "));
       clearTimeout(S.glowTimer);
-      S.glowTimer = setTimeout(() => { S.glow.clear(); renderTimeline(); renderLine(); }, 4100);
+      S.glowTimer = setTimeout(() => { S.glow.clear(); keepFocus(() => { renderTimeline(); renderLine(); }); }, 4100);
     }
   }
   const glowOf = (a) => {
@@ -291,6 +291,12 @@ export async function openEditor(root, tripId, ctx) {
   function postView(v) {
     fetch(`${base}/view`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ session, ...v }) }).catch(() => {});
   }
+  // this sign-in ended (signed out in another tab): stop at once, don't reconnect
+  events.addEventListener("signed-out", () => {
+    events.close();
+    voice.destroy();
+    (ctx.signedOutElsewhere ?? ctx.signOut)();
+  });
   events.addEventListener("revoked", (e) => {
     const { reason } = JSON.parse(e.data);
     events.close();
@@ -315,6 +321,58 @@ export async function openEditor(root, tripId, ctx) {
   // --- rendering ---
 
   function render() {
+    keepFocus(renderAll);
+  }
+
+  // A render replaces the bar, days, line, timeline and panels. Whatever had
+  // the keyboard focus in them gets it back afterwards, found by what it is
+  // (a day, a stop and which of its controls) rather than by node, with a
+  // field's text and cursor as they were: a collaborator's change mustn't
+  // send someone typing or tabbing back to the top of the page. If the thing
+  // itself is gone (that stop was removed), focus goes to its list instead.
+  const FOCUSABLE = "a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])";
+  function focusKey(el) {
+    if (!el || el === document.body || !editorEl.contains(el)) return null;
+    if (el.dataset.focus) return { key: `f:${el.dataset.focus}` };
+    const row = el.closest("[data-id]");
+    const scope = row ?? el.closest("[data-region]");
+    if (!scope) return null;
+    const n = [...scope.querySelectorAll(FOCUSABLE)].indexOf(el);
+    return n < 0 ? null : { key: row ? `row:${row.dataset.id}:${n}` : `region:${scope.dataset.region}:${n}`, region: (row?.closest("[data-region]") ?? scope).dataset.region };
+  }
+  function findKey(k) {
+    if (k.key.startsWith("f:")) return editorEl.querySelector(`[data-focus="${CSS.escape(k.key.slice(2))}"]`);
+    const [kind, id, n] = k.key.split(":");
+    const scope = editorEl.querySelector(kind === "row" ? `[data-id="${CSS.escape(id)}"]` : `[data-region="${CSS.escape(id)}"]`);
+    return scope?.querySelectorAll(FOCUSABLE)[Number(n)] ?? null;
+  }
+  function keepFocus(fn) {
+    const el = document.activeElement;
+    const k = focusKey(el);
+    const field = el && "selectionStart" in el && typeof el.value === "string" ? { value: el.value, start: el.selectionStart, end: el.selectionEnd } : null;
+    const scrolls = [...editorEl.querySelectorAll("[data-region]")].map((r) => [r.dataset.region, r.scrollTop, r.scrollLeft]);
+    fn();
+    if (!k || (el.isConnected && document.activeElement === el)) return;
+    for (const [name, top, left] of scrolls) {
+      const r = editorEl.querySelector(`[data-region="${name}"]`);
+      if (r) Object.assign(r, { scrollTop: top, scrollLeft: left });
+    }
+    const next = findKey(k);
+    if (next) {
+      next.focus({ preventScroll: true });
+      if (field && "selectionStart" in next && next.value !== field.value) next.value = field.value;
+      if (field && "setSelectionRange" in next) try { next.setSelectionRange(field.start, field.end); } catch {}
+      return;
+    }
+    // it's gone: its list keeps the place
+    const region = k.region && editorEl.querySelector(`[data-region="${k.region}"]`);
+    if (region) {
+      if (!region.hasAttribute("tabindex")) region.setAttribute("tabindex", "-1");
+      region.focus({ preventScroll: true });
+    }
+  }
+
+  function renderAll() {
     // colour by person only when more than one person is on the trip
     editorEl.classList.toggle("is-shared", S.trip.members.length > 1);
     renderBar();
@@ -409,7 +467,7 @@ export async function openEditor(root, tripId, ctx) {
       ...S.trip.days.map((d, i) =>
         h(
           "button",
-          { type: "button", class: `line-day${d.id === S.dayId ? " on" : ""}`, "aria-pressed": String(d.id === S.dayId), onclick: () => setDay(d.id) },
+          { type: "button", class: `line-day${d.id === S.dayId ? " on" : ""}`, "aria-pressed": String(d.id === S.dayId), "data-focus": `line-day:${d.id}`, onclick: () => setDay(d.id) },
           h("b", {}, String(i + 1).padStart(2, "0")),
           h("span", {}, fmtDay(d.date)),
         ),
@@ -453,7 +511,7 @@ export async function openEditor(root, tripId, ctx) {
             { class: `line-stop${a.id === S.selectedId ? " on" : ""}${glowOf(a) ? " line-stop-glow" : ""}`, style: `left:${x}%;--who:${colourOf(a.createdBy ?? me.id)}` },
             h(
               "button",
-              { type: "button", "aria-label": `${a.title}${a.startMin !== null ? `, ${hhmm(a.startMin)}` : ""}`, onclick: () => select(a.id, { scroll: true, focusMap: !isPhone() }) },
+              { type: "button", "aria-label": `${a.title}${a.startMin !== null ? `, ${hhmm(a.startMin)}` : ""}`, "data-focus": `line-stop:${a.id}`, onclick: () => select(a.id, { scroll: true, focusMap: !isPhone() }) },
               h("span", { class: "line-dot" }, isStart ? "S" : String(i + 1 - first)),
               h("span", { class: "line-time" }, a.startMin !== null ? hhmm(a.startMin) : "—"),
               h("span", { class: "line-name" }, a.title),
@@ -509,6 +567,7 @@ export async function openEditor(root, tripId, ctx) {
             role: "tab",
             class: `day-tab${d.id === S.dayId ? " on" : ""}`,
             "aria-selected": String(d.id === S.dayId),
+            "data-focus": `day-tab:${d.id}`,
             onclick: () => setDay(d.id),
           },
           h("span", { class: "day-tab-n" }, t("Day {n}", { n: i + 1 })),
@@ -966,14 +1025,21 @@ export async function openEditor(root, tripId, ctx) {
     S.keepView = false;
   }
 
+  // Only the latest search may fill the panel: each one takes a number,
+  // and an answer (or error) for an older number is dropped. Closing the
+  // search, or leaving it for another panel, makes any pending one old.
+  let searchSeq = 0;
   searchForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const q = searchInput.value.trim();
     if (q.length < 2) return;
+    const mine = ++searchSeq;
     searchPanel.hidden = false;
-    searchPanel.replaceChildren(h("p", { class: "muted pad" }, t("Searching…")));
+    // closable while it waits; closing makes this search old
+    searchPanel.replaceChildren(panelHead(t("Searching…")), h("p", { class: "muted pad", role: "status" }, t("Searching…")));
     try {
       const res = await api(`/api/places/search?q=${encodeURIComponent(q)}&tripId=${tripId}`);
+      if (mine !== searchSeq) return;
       S.results = res.places;
       S.resultsSource = res.source;
       S.place = null;
@@ -983,12 +1049,14 @@ export async function openEditor(root, tripId, ctx) {
       renderSearch();
       renderMap();
     } catch (err) {
+      if (mine !== searchSeq) return;
       searchPanel.replaceChildren(h("p", { class: "form-error pad" }, err.message));
     }
   });
 
   function closeSearch() {
     S.results = [];
+    searchSeq++;
     S.place = null;
     S.placeDetails = null;
     S.explore = null;
@@ -1064,6 +1132,7 @@ export async function openEditor(root, tripId, ctx) {
     S.place = null;
     S.placeDetails = null;
     S.results = [];
+    searchSeq++;
     S.explore = { lat: at.lat, lng: at.lng, label: null, type: "tourist_attraction", results: [], source: null, loading: false, error: null, cache: new Map() };
     const mine = S.explore;
     renderSearch();
@@ -1127,6 +1196,7 @@ export async function openEditor(root, tripId, ctx) {
     if (isPhone()) setTab("map");
     S.explore = null;
     S.results = [];
+    searchSeq++;
     if (S.previewId) {
       // the preview's marker and the place's marker share one slot on the map
       S.previewId = null;
@@ -1614,6 +1684,7 @@ export async function openEditor(root, tripId, ctx) {
     S.placeDetails = null;
     S.explore = null;
     S.results = [];
+    searchSeq++;
     if (isPhone()) setTab("map");
     renderSearch();
     renderMap();
@@ -1669,6 +1740,7 @@ export async function openEditor(root, tripId, ctx) {
     S.placeDetails = null;
     S.explore = null;
     S.results = [];
+    searchSeq++;
     if (isPhone()) setTab("map");
     renderSearch();
     renderMap();
@@ -1835,6 +1907,7 @@ export async function openEditor(root, tripId, ctx) {
       S.place = null;
       S.placeDetails = null;
       S.results = [];
+      searchSeq++;
       S.explore = null;
       searchPanel.hidden = true;
       S.hint = true;
@@ -2742,16 +2815,39 @@ export async function openEditor(root, tripId, ctx) {
       ),
     );
     const dialog = openDialog(h("dialog", { class: "dialog" }, form));
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
+    // New dates that would leave the starting point off the first day ask
+    // first: move the same start to the new first day, or keep the dates.
+    // Nothing is saved until the person chooses.
+    const confirmBox = h("div", { class: "start-move", role: "group", "aria-live": "polite", hidden: true });
+    error.after(confirmBox);
+    const save = async (moveStart = false) => {
+      error.hidden = true;
       try {
         const mealTimes = Object.fromEntries(Object.keys(MEAL_LABEL).map((k) => [k, Object.fromEntries(["from", "usual", "to"].map((f) => [f, parseTime(form[`meal-${k}-${f}`].value)]))]));
-        await act(api(base, { method: "PATCH", body: { ...Object.fromEntries(["title", "destination", "startDate", "endDate"].map((k) => [k, form[k].value])), mealTimes } }), { quiet: true });
+        await act(api(base, { method: "PATCH", body: { ...Object.fromEntries(["title", "destination", "startDate", "endDate"].map((k) => [k, form[k].value])), mealTimes, ...(moveStart ? { moveStart: true } : {}) } }), { quiet: true });
         dialog.close();
       } catch (err) {
+        if (err.status === 409 && err.data?.code === "start_moves") {
+          const startTitle = startOf()?.title ?? t("The starting point");
+          const keep = h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-start-move": "cancel", onclick: () => { confirmBox.hidden = true; confirmBox.replaceChildren(); form.startDate.focus(); } }, t("Keep the dates as they were"));
+          fill(
+            confirmBox,
+            h("p", {}, t("{title} is the starting point, on {from}. With these dates the first day is {to}.", { title: startTitle, from: fmtDay(err.data.from), to: fmtDay(err.data.to) })),
+            h("div", { class: "dialog-actions" }, keep, h("button", { class: "btn btn-primary btn-sm", type: "button", "data-start-move": "confirm", onclick: () => save(true) }, t("Move the start to {to} and save", { to: fmtDay(err.data.to) }))),
+          );
+          confirmBox.hidden = false;
+          confirmBox.querySelector('[data-start-move="confirm"]').focus();
+          return;
+        }
         error.textContent = err.message;
         error.hidden = false;
       }
+    };
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      confirmBox.hidden = true;
+      confirmBox.replaceChildren();
+      save();
     });
   }
 

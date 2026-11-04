@@ -65,7 +65,7 @@ async function route({ keepScroll = false } = {}) {
   if (trip) {
     app.replaceChildren(h("div", { class: "boot", role: "status" }, t("Opening trip…")));
     try {
-      cleanup = await openEditor(app, trip[1], { me: state.me, config: state.config, navigate, signOut });
+      cleanup = await openEditor(app, trip[1], { me: state.me, config: state.config, navigate, signOut, signedOutElsewhere });
     } catch (err) {
       renderMissing(err instanceof ApiError && err.status === 404 ? t("This trip doesn't exist, or you don't have access to it.") : err.message);
     }
@@ -113,14 +113,15 @@ function topbar(active = "") {
   }
   return h(
     "header",
-    { class: "topbar" },
-    h("a", { class: "brand", href: "/", "data-link": true }, h("span", { class: "brand-mark", "aria-hidden": "true" }), "Wayline"),
+    { class: `topbar${state.me ? "" : " topbar-out"}` },
+    h("a", { class: "brand", href: "/", "data-link": true, "aria-label": "Wayline" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", { class: "brand-word" }, "Wayline")),
     h(
       "nav",
       { class: "topbar-nav", "aria-label": t("Main") },
       h("a", { href: "/#explore-map", "data-link": true, class: active === "home" ? "on" : "" }, t("Explore")),
       tripsLink,
-      h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: createTrip }, icon("plus"), h("span", { class: "hide-xs" }, t("Create Trip"))),
+      // on phones only the + shows, so it carries its name itself
+      h("button", { class: "btn btn-primary btn-sm", type: "button", "aria-label": t("Create Trip"), title: t("Create Trip"), "data-create": "trip", onclick: () => createTrip() }, icon("plus"), h("span", { class: "hide-xs", "aria-hidden": "true" }, t("Create Trip"))),
       state.me
         ? meMenu(active)
         : h("span", { class: "me" }, langSwitch(), h("a", { class: "btn btn-ghost btn-sm", href: `/login?next=${encodeURIComponent(location.pathname)}`, "data-link": true }, t("Sign in"))),
@@ -345,6 +346,16 @@ async function signOut() {
   await api("/api/auth/logout", { method: "POST", body: {} }).catch(() => {});
   state.me = null;
   navigate("/", { replace: true });
+}
+
+// This session was signed out somewhere else (another tab): the server has
+// closed its streams and refuses its requests; the page follows, without
+// asking the server again.
+function signedOutElsewhere() {
+  if (!state.me) return;
+  state.me = null;
+  toast(t("You signed out in another tab."));
+  navigate(`/login?next=${encodeURIComponent(location.pathname)}`, { replace: true });
 }
 
 // --- sign in -----------------------------------------------------------------
@@ -622,6 +633,10 @@ async function renderDashboard() {
     return refreshing;
   };
   const events = new EventSource("/api/me/events");
+  events.addEventListener("signed-out", () => {
+    events.close();
+    signedOutElsewhere();
+  });
   events.addEventListener("invitations", () => {
     refresh();
     onTrips(); // an approval adds a trip to "Shared with you"
@@ -642,7 +657,7 @@ async function renderDashboard() {
           { class: "empty" },
           h("h3", {}, t("No trips yet")),
           h("p", {}, t("Create a trip, pick your dates, then start adding the places you want to see.")),
-          h("button", { class: "btn btn-primary", type: "button", onclick: newTripDialog }, t("Plan your first trip")),
+          h("button", { class: "btn btn-primary", type: "button", "data-create": "first", onclick: () => newTripDialog() }, t("Plan your first trip")),
         ),
       ),
       section(t("Shared with you"), data.shared, h("p", { class: "muted" }, t("When someone invites you to their trip and you accept, it shows up here."))),
@@ -654,7 +669,7 @@ async function renderDashboard() {
       "div",
       { class: "dash-hero" },
       h("div", {}, h("p", { class: "eyebrow" }, t("Your trips")), h("h1", {}, t("Where to next?"))),
-      h("button", { class: "btn btn-primary", type: "button", onclick: newTripDialog }, icon("plus"), t("New trip")),
+      h("button", { class: "btn btn-primary", type: "button", "data-create": "new", onclick: () => newTripDialog() }, icon("plus"), t("New trip")),
     ),
     requestsBox,
     invitesBox,
@@ -668,7 +683,10 @@ async function renderDashboard() {
 
 const hue = (s) => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
 
+// destination: a place name to start from, or nothing. Only a string is
+// taken: a click event passed by mistake must never become the destination.
 function newTripDialog(destination = "") {
+  if (typeof destination !== "string") destination = "";
   const today = new Date();
   const iso = (d) => d.toISOString().slice(0, 10);
   const start = new Date(today.getTime() + 14 * 86_400_000);

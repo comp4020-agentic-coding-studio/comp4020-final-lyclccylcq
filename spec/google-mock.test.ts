@@ -12,6 +12,13 @@ import { anon, newTrip, signUp, startApp } from "./helpers.ts";
 
 type Seen = { method: string; path: string; headers: IncomingMessage["headers"]; body: any };
 const seen: Seen[] = [];
+// Routes to a "ChIJ_slow_" place wait for held.release()
+const gate = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => (resolve = r));
+  return { promise, resolve };
+};
+let held = gate();
 const KEY = "mock-server-key-never-in-responses";
 let mock: ReturnType<typeof createServer>;
 let app: Awaited<ReturnType<typeof startApp>>;
@@ -105,6 +112,8 @@ beforeAll(async () => {
       });
     }
     if (url.pathname === "/directions/v2:computeRoutes") {
+      // a slow answer, held until the test releases it (a plan can change meanwhile)
+      if (String(body.destination?.placeId ?? "").startsWith("ChIJ_slow_")) await held.promise;
       if (body.travelMode === "DRIVE") return send({}); // no route
       return send({ routes: [{ duration: "754s", distanceMeters: 980, polyline: { encodedPolyline: "_p~iF~ps|U_ulLnnqC_mqNvxq`@" } }] });
     }
@@ -338,6 +347,55 @@ describe("Google service layer (mocked Google)", () => {
     expect((await anon(base).send("POST", `/api/exports/${made.data.token}`, {})).status).toBeGreaterThanOrEqual(400);
     await c.send("DELETE", `/api/trips/${trip.id}/export-link`, {});
     expect((await anon(base).get(`/api/exports/${made.data.token}`)).status).toBe(404);
+  });
+
+  it("drops a route answer for a stop that changed while Google was answering, and still shares one lookup", async () => {
+    const c = await signUp(base);
+    const trip = await newTrip(c, { destination: "Paris", timezone: "Europe/Paris" });
+    const day = trip.days[0].id;
+    const add = (title: string, startMin: number, placeId: string) =>
+      c.send("POST", `/api/trips/${trip.id}/activities`, { clientId: crypto.randomUUID(), dayId: day, title, kind: "attraction", startMin, durationMin: 60, place: { placeId, source: "google", lat: 48.86, lng: 2.33 } });
+    const a = (await add("Louvre", 540, "ChIJ_louvre_id")).data.activityId;
+    const b = (await add("Slow stop", 660, "ChIJ_slow_first")).data.activityId;
+    const routeCalls = () => seen.filter((x) => x.path === "/directions/v2:computeRoutes").length;
+
+    // two requests for the same leg while Google is slow: one lookup
+    held = gate();
+    let before = routeCalls();
+    const first = c.send("POST", `/api/trips/${trip.id}/routes`, { fromId: a, toId: b });
+    const twin = c.send("POST", `/api/trips/${trip.id}/routes`, { fromId: a, toId: b });
+    await new Promise((r) => setTimeout(r, 150));
+    // meanwhile the far end is pointed at another place
+    const current = (await c.get(`/api/trips/${trip.id}`)).data.days[0].activities.find((x: any) => x.id === b);
+    const moved = await c.send("PUT", `/api/trips/${trip.id}/activities/${b}/place`, { place: { placeId: "ChIJ_orsay_id", source: "google", lat: 48.86, lng: 2.326 }, title: "Orsay", baseVersion: current.version });
+    expect(moved.status).toBe(200);
+    held.resolve();
+    const [r1, r2] = await Promise.all([first, twin]);
+    expect(routeCalls() - before).toBe(3); // three modes, once
+    expect(r1.status).toBe(409);
+    expect(r2.status).toBe(409);
+    expect(r1.data.code).toBe("route_changed");
+    // the old answer wasn't saved: the leg still has no route
+    const after = (await c.get(`/api/trips/${trip.id}`)).data.days[0];
+    expect(after.segments).toHaveLength(0);
+
+    // a route for the current place is looked up and saved as current
+    const now = await c.send("POST", `/api/trips/${trip.id}/routes`, { fromId: a, toId: b });
+    expect(now.status).toBe(200);
+    expect(now.data.days[0].segments).toHaveLength(1);
+    expect(now.data.days[0].segments[0].stale).toBe(false);
+
+    // a time change while Google answers: the stored route can't be for the new time
+    const slow = (await add("Slow again", 840, "ChIJ_slow_second")).data.activityId;
+    held = gate();
+    const pending = c.send("POST", `/api/trips/${trip.id}/routes`, { fromId: b, toId: slow });
+    await new Promise((r) => setTimeout(r, 150));
+    const bNow = (await c.get(`/api/trips/${trip.id}`)).data.days[0].activities.find((x: any) => x.id === b);
+    await c.send("PATCH", `/api/trips/${trip.id}/activities/${b}`, { durationMin: 90, baseVersion: bNow.version });
+    held.resolve();
+    expect((await pending).status).toBe(409);
+    const leg = (await c.get(`/api/trips/${trip.id}`)).data.days[0].segments.find((s: any) => s.fromId === b && s.toId === slow);
+    expect(leg).toBeUndefined();
   });
 
   it("never puts the server key in a response", async () => {

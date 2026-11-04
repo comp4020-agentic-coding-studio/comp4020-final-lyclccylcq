@@ -1,5 +1,5 @@
 import { describe, expect, inject, it } from "vitest";
-import { addActivity, newTrip, share, signUp, watchEvents } from "./helpers.ts";
+import { addActivity, logIn, newTrip, share, signUp, uniqueName, watchEvents } from "./helpers.ts";
 
 // "A change one person makes appears in every other open session within
 // about a second": checked over the same event stream the editor uses.
@@ -70,5 +70,46 @@ describe("live updates", () => {
     await new Promise((r) => setTimeout(r, 200));
     expect(JSON.stringify(stream.events)).not.toContain("Secret plan");
     stream.close();
+  });
+
+  it("ends every stream of a signed-out session at once, and only that session's", async () => {
+    const name = uniqueName("so");
+    const owner = await signUp(baseUrl, name);
+    const other = await logIn(baseUrl, name); // the same person in another browser: a separate session
+    const guest = await signUp(baseUrl);
+    const trip = await newTrip(owner);
+    await share(owner, guest, trip.id);
+    // two tabs of one session on the trip, plus that session's own stream
+    const tabA = watchEvents(baseUrl, owner, trip.id, "tab-aaaaaaaa");
+    const tabB = watchEvents(baseUrl, owner, trip.id, "tab-bbbbbbbb");
+    const mine = watchEvents(baseUrl, owner, null);
+    const elsewhere = watchEvents(baseUrl, other, trip.id, "tab-cccccccc");
+    for (const s of [tabA, tabB, mine, elsewhere]) expect(await s.ready).toBe(200);
+    await tabB.next((e) => e.event === "snapshot");
+
+    // tab A signs out: the session's streams are told and closed
+    expect((await owner.send("POST", "/api/auth/logout", {})).status).toBe(200);
+    await Promise.all([tabA.ended, tabB.ended, mine.ended]);
+    expect(tabB.events.some((e) => e.event === "signed-out")).toBe(true);
+    expect(mine.events.some((e) => e.event === "signed-out")).toBe(true);
+    const seen = tabB.events.length;
+
+    // a collaborator's later note reaches the other session, never the signed-out one
+    const { data } = await addActivity(guest, trip, { title: "Private note stop" });
+    await guest.send("PATCH", `/api/trips/${trip.id}/activities/${data.activityId}`, { baseVersion: 1, notes: "door code 4411" });
+    await elsewhere.next((e) => e.event === "snapshot" && e.data.days[0].activities.some((a: any) => a.notes === "door code 4411"));
+    expect(tabB.events.length).toBe(seen);
+    expect(JSON.stringify(tabB.events)).not.toContain("door code 4411");
+
+    // the old session gets 401 everywhere, a new stream included
+    expect((await owner.get(`/api/trips/${trip.id}`)).status).toBe(401);
+    const again = watchEvents(baseUrl, owner, trip.id, "tab-dddddddd");
+    await expect(again.ready).rejects.toThrow(/401/);
+    // the other session is still signed in and still live
+    expect((await other.get(`/api/trips/${trip.id}`)).status).toBe(200);
+    // and the guest saw the owner's signed-out tabs leave, but the other one stay
+    const presence = (await watchEvents(baseUrl, guest, trip.id).next((e) => e.event === "presence")).data;
+    expect(presence.map((p: any) => p.id)).toContain(owner.userId);
+    for (const s of [tabA, tabB, mine, elsewhere, again]) s.close();
   });
 });

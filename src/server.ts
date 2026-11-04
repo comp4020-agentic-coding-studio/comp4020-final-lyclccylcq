@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join } from "node:path";
 import { aiProvider } from "./ai.ts";
 import { AiLimitError, createAiUsage, limitsFromEnv, pricesFromEnv } from "./aiusage.ts";
-import { clearCookie, COOKIE, createAuth, readCookie, sessionCookie, type User } from "./auth.ts";
+import { clearCookie, COOKIE, createAuth, readCookie, sessionCookie, sha256, type User } from "./auth.ts";
 import { createCalls, iceConfigured, iceServersFor } from "./calls.ts";
 import { cleanHistory, createCopilot, describeAiError, detectLang, LIMITS } from "./copilot.ts";
 import { openDb } from "./db.ts";
@@ -204,6 +204,11 @@ function checkWriteOrigin(req: IncomingMessage): void {
 
 const isSecure = (req: IncomingMessage): boolean => req.headers["x-forwarded-proto"] === "https";
 
+// Which signed-in session a request is on, as the realtime hub keys it: a
+// hash of the cookie's hash, so the hub never holds anything that could be
+// used to look a session up or sign in with.
+const authSession = (token: string | undefined): string => (token ? sha256(`stream:${sha256(token)}`).slice(0, 32) : "none");
+
 // One route lookup per pair and departure at a time, however many clicks.
 const inflight = new Map<string, Promise<TripSnapshot>>();
 
@@ -235,11 +240,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL): Promise
     return json(res, 200, auth.availability({ username: url.searchParams.get("username") ?? undefined, displayName: url.searchParams.get("displayName") ?? undefined }));
   }
   if (method === "POST" && path === "/api/auth/logout") {
-    const leaving = auth.userForToken(readCookie(req.headers.cookie, COOKIE));
+    const token = readCookie(req.headers.cookie, COOKIE);
+    const leaving = auth.userForToken(token);
     setUser(leaving);
-    if (leaving) calls.endFor(leaving.id, "signed-out");
-    if (leaving) hub.closeUser(leaving.id);
-    auth.logout(readCookie(req.headers.cookie, COOKIE));
+    // the session ends first, so no request on it succeeds from here; then
+    // every stream opened with it closes, and its call ends
+    auth.logout(token);
+    if (leaving) {
+      hub.closeSession(leaving.id, authSession(token));
+      calls.endFor(leaving.id, "signed-out"); // as before: signing out ends the person's call
+    }
     return json(res, 200, { ok: true }, { "set-cookie": clearCookie(isSecure(req)) });
   }
 
@@ -318,7 +328,7 @@ async function signedInApi(req: IncomingMessage, res: ServerResponse, url: URL, 
   }
 
   // invitations addressed to me (by username, from a trip's owner)
-  if (method === "GET" && path === "/api/me/events") return hub.joinUser(user.id, res, { pending: trips.pendingFor(user.id).length, requests: trips.requestsToMe(user.id).length }, user.username);
+  if (method === "GET" && path === "/api/me/events") return hub.joinUser(user.id, res, { pending: trips.pendingFor(user.id).length, requests: trips.requestsToMe(user.id).length }, user.username, authSession(readCookie(req.headers.cookie, COOKIE)));
   if (method === "GET" && path === "/api/invitations") {
     return json(res, 200, { invitations: trips.pendingFor(user.id), requests: trips.requestsToMe(user.id), myRequests: trips.myJoinRequests(user.id) });
   }
@@ -371,7 +381,7 @@ async function signedInApi(req: IncomingMessage, res: ServerResponse, url: URL, 
   if (method === "GET" && rest === "/events") {
     const snap = trips.view(user.id, tripId);
     const session = url.searchParams.get("session");
-    return hub.join(tripId, user, res, snap, session && /^[A-Za-z0-9-]{8,64}$/.test(session) ? session : null);
+    return hub.join(tripId, user, res, snap, session && /^[A-Za-z0-9-]{8,64}$/.test(session) ? session : null, authSession(readCookie(req.headers.cookie, COOKIE)));
   }
 
   // Where this tab's map is looking, for the other people on the trip. Not

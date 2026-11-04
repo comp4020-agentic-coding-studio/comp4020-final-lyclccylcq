@@ -40,6 +40,13 @@ export type Page = {
   offline(on: boolean): Promise<void>;
   // CSS media features, e.g. { "prefers-reduced-motion": "reduce" }
   emulateMedia(features: Record<string, string>): Promise<void>;
+  // a real key press through the browser's input pipeline (Tab moves focus,
+  // Enter activates), not a synthetic event: "Tab", "Enter", "Shift+Tab"
+  key(name: string): Promise<void>;
+  // text typed into whatever has focus, as a real input
+  type(text: string): Promise<void>;
+  // script run in every document this page loads, before the page's own
+  initScript(source: string): Promise<void>;
 };
 
 // A mono 16-bit WAV of a sine tone, for Chrome's fake microphone: each
@@ -164,6 +171,21 @@ export async function launch(opts: { media?: { wav: string } | "deny" } = {}) {
         );
         if (!at) throw new Error(`nothing to tap at ${selector}`);
         for (const type of ["mousePressed", "mouseReleased"]) await s("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+      },
+      async key(name) {
+        const shift = name.startsWith("Shift+");
+        const key = shift ? name.slice(6) : name;
+        const codes: Record<string, [string, number, string?]> = { Tab: ["Tab", 9], Enter: ["Enter", 13, "\r"], Escape: ["Escape", 27], Space: [" ", 32, " "], ArrowDown: ["ArrowDown", 40], ArrowUp: ["ArrowUp", 38] };
+        const [k, code, text] = codes[key] ?? [key, 0, key];
+        const common = { key: k, code: key === "Space" ? "Space" : k, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, modifiers: shift ? 8 : 0 };
+        await s("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", ...common, ...(text ? { text } : {}) });
+        await s("Input.dispatchKeyEvent", { type: "keyUp", ...common });
+      },
+      async type(text) {
+        await s("Input.insertText", { text });
+      },
+      async initScript(source) {
+        await s("Page.addScriptToEvaluateOnNewDocument", { source });
       },
       async tapAt(x, y) {
         for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await s("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });

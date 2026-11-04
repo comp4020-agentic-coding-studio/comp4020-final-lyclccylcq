@@ -25,6 +25,40 @@ describe("the starting point", () => {
     expect(r.data.trip.days[0].activities[1].role).toBe(null);
   });
 
+  it("stays on the first day when the dates move: only with consent, the same stop, nothing else rebuilt", async () => {
+    const c = await signUp(baseUrl);
+    const trip = await newTrip(c); // 1–3 December
+    await setStart(c, trip, "Central Station", custom(-33.8832, 151.2069));
+    const opera = (await addActivity(c, trip, { title: "Opera House" })).data.activityId;
+    const day2 = (await c.send("POST", `/api/trips/${trip.id}/activities`, { clientId: crypto.randomUUID(), dayId: trip.days[1].id, title: "Bondi", kind: "attraction", startMin: 600, durationMin: 60 })).data.activityId;
+    const before = (await c.get(`/api/trips/${trip.id}`)).data;
+    const startId = before.days[0].activities[0].id;
+
+    // starting a day earlier: refused until the person chooses, and nothing changes
+    const ask = await c.send("PATCH", `/api/trips/${trip.id}`, { startDate: "2026-11-30", endDate: "2026-12-03" });
+    expect(ask.status).toBe(409);
+    expect(ask.data).toMatchObject({ code: "start_moves", from: "2026-12-01", to: "2026-11-30" });
+    const same = (await c.get(`/api/trips/${trip.id}`)).data;
+    expect(same.rev).toBe(before.rev);
+    expect([same.startDate, same.days.length]).toEqual(["2026-12-01", 3]);
+
+    // moving it: the first day starts with the same stop; the rest stay where they were
+    const moved = await c.send("PATCH", `/api/trips/${trip.id}`, { startDate: "2026-11-30", endDate: "2026-12-03", moveStart: true });
+    expect(moved.status).toBe(200);
+    const t2 = moved.data;
+    expect(t2.days.map((d: any) => d.date)).toEqual(["2026-11-30", "2026-12-01", "2026-12-02", "2026-12-03"]);
+    expect(t2.days[0].activities.map((a: any) => [a.id, a.role])).toEqual([[startId, "start"]]);
+    expect(t2.days[1].activities.map((a: any) => a.id)).toEqual([opera]);
+    expect(t2.days[2].activities.map((a: any) => a.id)).toEqual([day2]);
+    expect(t2.days[1].id).toBe(before.days[0].id); // the old first day is kept, not rebuilt
+
+    // a later start date than the start's day works the same way
+    const later = await c.send("PATCH", `/api/trips/${trip.id}`, { startDate: "2026-12-02", endDate: "2026-12-03", moveStart: true });
+    expect(later.status).toBe(409); // 1 December still has the Opera House
+    expect(later.data.code).not.toBe("start_moves");
+    expect((await c.get(`/api/trips/${trip.id}`)).data.days[0].activities[0].id).toBe(startId); // all or nothing
+  });
+
   it("changes in place, keeping the other stops and their order", async () => {
     const c = await signUp(baseUrl);
     const trip = await newTrip(c);

@@ -14,7 +14,11 @@ import type { ServerResponse } from "node:http";
 // It's the map view only (never the device's location), lives in memory with
 // the stream, and is never written to the database or counted as a revision.
 export type MapView = { lat: number; lng: number; zoom: number; heading: number; at: number };
-type Conn = { id: string; userId: string; username: string | null; displayName: string; session: string | null; view: MapView | null; res: ServerResponse; opened: number };
+// auth: the signed-in session (a server-side id for the cookie, never the
+// cookie itself) the stream was opened with; session: the tab's own id for
+// map views and calls, chosen by the page. Signing out ends the streams of
+// that auth session only.
+type Conn = { id: string; userId: string; username: string | null; displayName: string; session: string | null; auth: string | null; view: MapView | null; res: ServerResponse; opened: number };
 type LogFn = (event: string, fields: Record<string, unknown>) => void;
 type Logger = { info: LogFn; warn: LogFn; afterEvent?: (fn: () => void) => void };
 const quiet: Logger = { info: () => {}, warn: () => {} };
@@ -35,6 +39,7 @@ export type HubHooks = {
 export function createHub(hooks: HubHooks = {}) {
   const rooms = new Map<string, Set<Conn>>();
   const users = new Map<string, Set<ServerResponse>>(); // userId -> their own streams
+  const authOf = new Map<ServerResponse, string | null>(); // a personal stream's auth session
   const log = hooks.log ?? quiet;
   let seq = 0;
   const connId = () => `sse_${Date.now().toString(36)}${(seq++).toString(36)}`;
@@ -52,6 +57,19 @@ export function createHub(hooks: HubHooks = {}) {
     if (!userIn(tripId, c.userId)) {
       log.info("COLLAB_COLLABORATOR_LEFT", { ...who(c), tripId, action: "leave_session", status: "success", message: "User's last open tab on this trip closed", online: presence(tripId).length });
     }
+  }
+
+  // A tab's trip stream is gone: out of the room at once (so nothing more
+  // is sent to it), its map view withdrawn, the others told who's here.
+  // Safe to call twice: the second finds it already gone.
+  function drop(tripId: string, conn: Conn, reason: string): void {
+    const room = rooms.get(tripId);
+    if (!room?.delete(conn)) return; // already removed (publish(), a sign-out)
+    if (conn.view) toOthers(tripId, conn, "view-gone", { session: conn.session });
+    if (room.size === 0) rooms.delete(tripId);
+    else announcePresence(tripId);
+    left(tripId, conn, reason);
+    hooks.onLeave?.(tripId, conn.userId, conn.session);
   }
 
   function presence(tripId: string): { id: string; displayName: string }[] {
@@ -87,7 +105,7 @@ export function createHub(hooks: HubHooks = {}) {
   heartbeat.unref();
 
   return {
-    join(tripId: string, user: { id: string; displayName: string; username?: string }, res: ServerResponse, initial: unknown, session: string | null = null): void {
+    join(tripId: string, user: { id: string; displayName: string; username?: string }, res: ServerResponse, initial: unknown, session: string | null = null, auth: string | null = null): void {
       res.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",
         "cache-control": "no-cache, no-transform",
@@ -95,7 +113,7 @@ export function createHub(hooks: HubHooks = {}) {
         "x-accel-buffering": "no",
       });
       res.write("retry: 2000\n\n");
-      const conn: Conn = { id: connId(), userId: user.id, username: user.username ?? null, displayName: user.displayName, session, view: null, res, opened: Date.now() };
+      const conn: Conn = { id: connId(), userId: user.id, username: user.username ?? null, displayName: user.displayName, session, auth, view: null, res, opened: Date.now() };
       const firstTab = !userIn(tripId, user.id);
       if (!rooms.has(tripId)) rooms.set(tripId, new Set());
       rooms.get(tripId)?.add(conn);
@@ -108,15 +126,7 @@ export function createHub(hooks: HubHooks = {}) {
       for (const o of rooms.get(tripId) ?? []) if (o !== conn && o.view && Date.now() - o.view.at < VIEW_TTL_MS) write(conn, "view", viewEvent(o));
       announcePresence(tripId);
       hooks.onJoin?.(tripId, user.id, session);
-      res.on("close", () => {
-        const room = rooms.get(tripId);
-        if (!room?.delete(conn)) return; // already removed by publish()
-        if (conn.view) toOthers(tripId, conn, "view-gone", { session: conn.session });
-        if (room.size === 0) rooms.delete(tripId);
-        else announcePresence(tripId);
-        left(tripId, conn, "closed");
-        hooks.onLeave?.(tripId, conn.userId, conn.session);
-      });
+      res.on("close", () => drop(tripId, conn, "closed"));
     },
 
     // Sends the new snapshot to everyone still allowed to see the trip; a
@@ -194,19 +204,21 @@ export function createHub(hooks: HubHooks = {}) {
     // nobody sees a trip before they've joined it.
     // Every signed-in page holds one, so the first one opening and the last
     // one closing are when a person comes online and goes away.
-    joinUser(userId: string, res: ServerResponse, initial: unknown, username: string | null = null): void {
+    joinUser(userId: string, res: ServerResponse, initial: unknown, username: string | null = null, auth: string | null = null): void {
       res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", connection: "keep-alive", "x-accel-buffering": "no" });
       res.write("retry: 4000\n\n");
       const first = !users.get(userId)?.size;
       if (!users.has(userId)) users.set(userId, new Set());
       users.get(userId)?.add(res);
+      authOf.set(res, auth);
       const opened = Date.now();
       if (first) log.info("USER_CONNECTED", { userId, username, action: "connect", status: "success", message: "User came online (first open page)" });
       res.write(`event: invitations\ndata: ${JSON.stringify(initial)}\n\n`);
       res.on("close", () => {
         const set = users.get(userId);
         set?.delete(res);
-        if (set?.size === 0) {
+        authOf.delete(res);
+        if (!set?.size) {
           users.delete(userId);
           log.info("USER_DISCONNECTED", { userId, username, action: "disconnect", status: "success", message: "User's last open page closed", durationMs: Date.now() - opened });
         }
@@ -219,10 +231,29 @@ export function createHub(hooks: HubHooks = {}) {
       return set?.size ?? 0;
     },
 
-    // signing out closes that person's own streams
-    closeUser(userId: string): void {
-      for (const res of users.get(userId) ?? []) res.end();
-      users.delete(userId);
+    // Signing out: every stream opened with that auth session ends at once,
+    // the person's own and every trip's, before anything else can be sent
+    // on them. Each is told why first ("signed-out"), so the page stops
+    // instead of reconnecting. The person's other sessions (another browser
+    // still signed in) keep theirs.
+    closeSession(userId: string, auth: string): void {
+      const mine = users.get(userId);
+      for (const res of [...(mine ?? [])]) {
+        if (authOf.get(res) !== auth) continue;
+        mine?.delete(res); // at once: nothing more reaches it
+        authOf.delete(res);
+        res.write(`event: signed-out\ndata: {}\n\n`);
+        res.end();
+      }
+      if (mine?.size === 0) users.delete(userId);
+      for (const [tripId, room] of rooms) {
+        for (const c of [...room]) {
+          if (c.userId !== userId || c.auth !== auth) continue;
+          write(c, "signed-out", {});
+          drop(tripId, c, "signed-out");
+          c.res.end();
+        }
+      }
     },
 
     closeAll(): void {

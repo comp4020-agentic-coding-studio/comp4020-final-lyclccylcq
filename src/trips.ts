@@ -313,6 +313,19 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     return prev.startMin === null ? `${date}|untimed|${tz}` : `${date}T${hhmm(prev.startMin + prev.durationMin)}|${tz}`;
   }
 
+  // Everything a route's answer depends on: the departure (the day's date,
+  // the earlier stop's end time, the trip's time zone) and both ends' places
+  // (a Google place by id, a pinned spot by its coordinates). Stored with the
+  // route (depart_key) and compared when it's saved and shown: a route
+  // computed for other inputs is never the current one. Keys written before
+  // the places were part of it (no "@") can't be checked, so they read as
+  // stale and are looked up again on request.
+  const placeKey = (p: Activity["place"]): string =>
+    !p ? "none" : p.source === "custom" ? `custom:${p.lat},${p.lng}` : `${p.source}:${p.placeId}`;
+  function routeKey(date: string, from: Activity, to: Activity, tz: string): string {
+    return `${departKey(date, from, tz)}@${placeKey(from.place)}>${placeKey(to.place)}`;
+  }
+
   function dayActivities(dayId: string): Activity[] {
     return q("select * from activities where day_id = ? order by position, id").all(dayId).map(toActivity);
   }
@@ -428,7 +441,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
           selectedMode: (r.selected_mode as Mode | null) ?? null,
           computedAt: Number(r.computed_at),
           departKey: String(r.depart_key),
-          stale: String(r.depart_key) !== departKey(date, activities[i], tz),
+          stale: String(r.depart_key) !== routeKey(date, activities[i], activities[i + 1], tz),
         });
       }
       const plain: DayActivity[] = activities.map((a) => ({
@@ -617,9 +630,34 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       const destination = input.destination === undefined ? String(cur.destination) : text(input.destination, "Destination", 120);
       const { startDate, endDate } = dateRange(input.startDate ?? cur.start_date, input.endDate ?? cur.end_date);
       const mealTimes = input.mealTimes === undefined ? undefined : input.mealTimes === null ? null : mealTimesInput(input.mealTimes);
+      // The starting point belongs on the first day. New dates that would
+      // leave it on another day need the person's say-so (moveStart: true):
+      // otherwise a 409 says where it is and where it would go, and nothing
+      // changes. Moving it keeps the same stop (same id, same place), puts it
+      // first on the new first day, and drops only the routes that touched it.
       return mutate(tripId, userId, () => {
+        // read inside the transaction, so the check and the move see the same start
+        const start = q("select a.id, a.day_id, d.date from activities a join trip_days d on d.id = a.day_id where a.trip_id = ? and a.role = 'start'").get(tripId);
+        const startMoves = Boolean(start) && String(start?.date) !== startDate;
+        if (startMoves && input.moveStart !== true) {
+          throw new HttpError(409, "The starting point is on another day. Move it to the new first day, or keep the dates as they are.", { code: "start_moves", from: String(start?.date), to: startDate });
+        }
         if (mealTimes !== undefined) q("update trips set meal_times = ? where id = ?").run(mealTimes === null ? null : JSON.stringify(mealTimes), tripId);
         const wanted = new Set(datesBetween(startDate, endDate));
+        if (startMoves && start) {
+          let first = q("select id from trip_days where trip_id = ? and date = ?").get(tripId, startDate);
+          if (!first) {
+            const id = randomUUID();
+            q("insert into trip_days (id, trip_id, date) values (?, ?, ?)").run(id, tripId, startDate);
+            first = { id };
+          }
+          const sid = String(start.id);
+          q("delete from transport_segments where from_activity_id = ? or to_activity_id = ?").run(sid, sid);
+          q("update activities set position = position + 1 where day_id = ?").run(String(first.id));
+          q("update activities set day_id = ?, position = 0, version = version + 1, updated_by = ?, updated_at = ? where id = ?").run(String(first.id), userId, now(), sid);
+          renumber(String(start.day_id));
+          renumber(String(first.id));
+        }
         for (const d of q("select id, date from trip_days where trip_id = ?").all(tripId)) {
           if (wanted.has(String(d.date))) {
             wanted.delete(String(d.date));
@@ -1202,7 +1240,7 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
         to,
         date: day.date,
         timezone: tz,
-        departKey: departKey(day.date, from, tz),
+        departKey: routeKey(day.date, from, to, tz),
         departMin: from.startMin === null ? null : from.startMin + from.durationMin,
         existing: existing && isFresh(existing.computed_at, now())
           ? { departKey: String(existing.depart_key), selectedMode: (existing.selected_mode as Mode | null) ?? null }
@@ -1215,12 +1253,18 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
       const usable = (m: Mode | null) => m !== null && options.some((o) => o.mode === m && o.status === "ok");
       const selected = usable(keepMode) ? keepMode : defaultMode(options);
       return mutate(tripId, userId, () => {
-        // the pair is re-checked inside the transaction: the plan may have
-        // changed while Google was answering
+        // the pair and everything the answer depended on (places, date,
+        // times, time zone) are re-checked inside the transaction: the plan
+        // may have changed while Google was answering, and an answer for an
+        // old version is dropped, not saved as current
         const from = getActivity(tripId, fromId);
         const to = getActivity(tripId, toId);
         if (to.dayId !== from.dayId || to.position !== from.position + 1) {
-          throw new HttpError(409, "The plan changed while the route was being calculated. Try again.");
+          throw new HttpError(409, "The plan changed while the route was being calculated. Try again.", { code: "route_changed" });
+        }
+        const tz = String((q("select timezone from trips where id = ?").get(tripId) as Row).timezone);
+        if (routeKey(getDay(tripId, from.dayId).date, from, to, tz) !== key) {
+          throw new HttpError(409, "The plan changed while the route was being calculated. Try again.", { code: "route_changed" });
         }
         q("delete from transport_segments where from_activity_id = ? and to_activity_id = ?").run(fromId, toId);
         q(

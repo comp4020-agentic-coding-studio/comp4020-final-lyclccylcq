@@ -102,6 +102,9 @@ export function watchEvents(baseUrl: string, c: Client, tripId: string | null, s
   const ac = new AbortController();
   const events: { event: string; data: any; at: number }[] = [];
   const waiters: { test: (e: { event: string; data: any }) => boolean; resolve: (e: any) => void }[] = [];
+  // resolves when the server ends the stream (not when the test aborts it)
+  let markEnded!: () => void;
+  const ended = new Promise<void>((r) => (markEnded = r));
   const path = tripId === null ? "/api/me/events" : `/api/trips/${tripId}/events${session ? `?session=${session}` : ""}`;
   const ready = (async () => {
     const res = await fetch(new URL(path, baseUrl), { headers: { cookie: c.cookie }, signal: ac.signal });
@@ -113,7 +116,10 @@ export function watchEvents(baseUrl: string, c: Client, tripId: string | null, s
       try {
         for (;;) {
           const { value, done } = await reader.read();
-          if (done) break;
+          if (done) {
+            markEnded();
+            break;
+          }
           buf += dec.decode(value, { stream: true });
           let i: number;
           while ((i = buf.indexOf("\n\n")) !== -1) {
@@ -136,6 +142,7 @@ export function watchEvents(baseUrl: string, c: Client, tripId: string | null, s
   return {
     ready,
     events,
+    ended,
     next(test: (e: { event: string; data: any }) => boolean, timeoutMs = 3000): Promise<{ event: string; data: any; at: number }> {
       const hit = events.find(test);
       if (hit) return Promise.resolve(hit);

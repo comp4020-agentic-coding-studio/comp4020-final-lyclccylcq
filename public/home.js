@@ -718,7 +718,7 @@ export function renderHome(app, ctx) {
             ? all.map((it) =>
   tripCard(it, { cls: "trip-card mini-trip" }),
               )
-            : [h("div", { class: "empty-inline" }, h("p", {}, t("No trips yet. Preview an itinerary above and copy it into a trip, or start from scratch.")), h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: ctx.createTrip }, t("Create a trip")))]),
+            : [h("div", { class: "empty-inline" }, h("p", {}, t("No trips yet. Preview an itinerary above and copy it into a trip, or start from scratch.")), h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => ctx.createTrip() }, t("Create a trip")))]),
         );
       })
       .catch((err) => tripsBox.replaceChildren(h("p", { class: "form-error" }, err.message)));

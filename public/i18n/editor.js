@@ -410,4 +410,8 @@ export const ZH = {
   "← Nearby places": "← 附近地点",
   "← Other options": "← 其他方式",
   "← Results": "← 结果",
+  "The starting point": "出发点",
+  "Keep the dates as they were": "保留原来的日期",
+  "{title} is the starting point, on {from}. With these dates the first day is {to}.": "出发点「{title}」在 {from}。按新的日期，第一天是 {to}。",
+  "Move the start to {to} and save": "把出发点移到 {to} 并保存",
 };

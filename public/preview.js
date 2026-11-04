@@ -27,7 +27,8 @@ export async function renderPreview(app, id, ctx) {
 
   // a trip a traveller published (pub-…) rather than one of Wayline's own
   const shared = it.source === "user";
-  const S = { day: 1, selected: null, mode: "WALK", routes: new Map(), loading: false };
+  // loading: the modes with a lookup in flight (each answer belongs to the mode it was asked for)
+  const S = { day: 1, selected: null, mode: "WALK", routes: new Map(), loading: new Set() };
   const days = [...new Set(it.stops.map((s) => s.day))];
   const dayStops = () => it.stops.filter((s) => s.day === S.day);
   const verified = it.stops.filter((s) => s.placeId).length;
@@ -95,7 +96,7 @@ export async function renderPreview(app, id, ctx) {
     );
   }
 
-  const legKey = (a, b) => `${a.id}>${b.id}|${S.mode}`;
+  const legKey = (a, b, mode = S.mode) => `${a.id}>${b.id}|${mode}`;
 
   function renderRouteBar() {
     const stops = dayStops();
@@ -112,28 +113,33 @@ export async function renderPreview(app, id, ctx) {
           h("button", { type: "button", class: `mode${S.mode === m ? " on" : ""}`, "aria-pressed": String(S.mode === m), onclick: () => { S.mode = m; render(); } }, icon(m === "WALK" ? "walk" : m === "TRANSIT" ? "transit" : "drive"), h("span", {}, t(label))),
         ),
       ),
-      h("button", { class: "btn btn-outline btn-sm", type: "button", disabled: S.loading, onclick: loadRoutes }, S.loading ? t("Calculating…") : t("Get travel times")),
+      h("button", { class: "btn btn-outline btn-sm", type: "button", disabled: S.loading.has(S.mode), "data-routes": "load", onclick: loadRoutes }, S.loading.has(S.mode) ? t("Calculating…") : t("Get travel times")),
       S.mode === "TRANSIT" && h("p", { class: "muted small" }, t("Public transport is looked up for departures from now, since this itinerary has no date yet.")),
     );
   }
 
+  // The mode, day and stops are fixed when the lookup starts: switching mode
+  // while it runs is allowed, and each answer (or error) is filed under the
+  // mode and leg it was asked for, never the one showing when it arrives.
   async function loadRoutes() {
+    const mode = S.mode;
     const stops = dayStops();
-    S.loading = true;
+    const legs = stops.slice(0, -1).map((a, i) => [a, stops[i + 1]]);
+    if (S.loading.has(mode)) return;
+    S.loading.add(mode);
     renderRouteBar();
     const wp = (s) => (s.placeId ? { placeId: s.placeId } : { lat: s.lat, lng: s.lng });
     await Promise.all(
-      stops.slice(0, -1).map(async (a, i) => {
-        const b = stops[i + 1];
+      legs.map(async ([a, b]) => {
+        const key = legKey(a, b, mode);
         try {
-          const r = await api("/api/routes", { method: "POST", body: { origin: wp(a), destination: wp(b), mode: S.mode } });
-          S.routes.set(legKey(a, b), r);
+          S.routes.set(key, await api("/api/routes", { method: "POST", body: { origin: wp(a), destination: wp(b), mode } }));
         } catch (err) {
-          S.routes.set(legKey(a, b), { status: "error", message: err.message });
+          S.routes.set(key, { status: "error", message: err.message });
         }
       }),
     );
-    S.loading = false;
+    S.loading.delete(mode);
     render();
   }
 

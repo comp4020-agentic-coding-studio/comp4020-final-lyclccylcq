@@ -242,4 +242,5 @@ export const ZH = {
   "Travelled with": "一起旅行过的人",
   "People you've travelled with ({n})": "一起旅行过的人（{n}）",
   "Someone else? Search by nickname.": "没找到？在上面按昵称搜索。",
+  "You signed out in another tab.": "你已在另一个标签页退出登录。",
 };
