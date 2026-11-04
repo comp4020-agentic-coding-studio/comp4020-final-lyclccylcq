@@ -385,8 +385,21 @@ describe("inviting an existing account by nickname", () => {
     await owner.send("POST", `/api/trips/${trip.id}/invitations`, { userId: friend.userId });
     expect((await owner.get(`/api/trips/${trip.id}/companions`)).data.people[0].status).toBe("invited");
 
-    // only the owner can ask; outsiders get the trip's 404
-    expect((await friend.get(`/api/trips/${trip.id}/companions`)).status).toBe(404);
+    // once they're on this trip they leave the list
+    const inv = (await friend.get("/api/invitations")).data.invitations[0];
+    await friend.send("POST", `/api/invitations/${inv.id}/accept`, {});
+    expect((await owner.get(`/api/trips/${trip.id}/companions`)).data.people).toEqual([]);
+
+    // the people shared most trips with come first, ahead of a newer one-off
+    const often = await signUp(baseUrl);
+    for (let i = 0; i < 2; i++) await share(owner, often, (await newTrip(owner)).id);
+    const once = await signUp(baseUrl);
+    await share(owner, once, (await newTrip(owner)).id);
+    const next = await newTrip(owner);
+    expect((await owner.get(`/api/trips/${next.id}/companions`)).data.people.map((p: any) => p.id)).toEqual([often.userId, friend.userId, once.userId]);
+
+    // only the owner can ask: a collaborator gets 403, outsiders the trip's 404
+    expect((await friend.get(`/api/trips/${trip.id}/companions`)).status).toBe(403);
     expect((await stranger.get(`/api/trips/${trip.id}/companions`)).status).toBe(404);
     const collab = await newTrip(friend);
     await share(friend, owner, collab.id);

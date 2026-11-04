@@ -70,9 +70,11 @@ none can stay permanent; owners make a new, expiring link when they need one.
 
 ## People you've travelled with
 
-- In the share dialog, the owner sees up to 8 people who are members of
-  their *other* trips (`GET /api/trips/:id/companions`, `manage_invites`:
-  owner only; collaborators get 403, outsiders the trip's 404).
+- In the share dialog, the owner can open a menu of up to 8 people who are
+  members of their *other* trips and not of this one, the ones they've
+  shared most trips with first (`GET /api/trips/:id/companions`,
+  `manage_invites`: owner only; collaborators get 403, outsiders the trip's
+  404).
 - It reveals only display names and usernames the owner can already see on
   those trips, and nothing is stored: it's computed from `trip_members`.
 - Listing invites nobody. "Invite" sends the same `trip_invitations` row as

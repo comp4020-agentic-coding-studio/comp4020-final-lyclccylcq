@@ -1,5 +1,5 @@
 import { locale, t } from "/i18n.js";
-import { api, avatar, h, openDialog, toast } from "/ui.js";
+import { api, avatar, h, icon, openDialog, toast } from "/ui.js";
 
 // The trip's sharing dialogs, opened from the editor's trip bar: the people
 // on the trip and how the owner invites more (a link that needs approval, or
@@ -235,14 +235,48 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
       else inviteBtn.disabled = false;
     }
   });
-  // people you've travelled with on your other trips: one click invites
-  const companions = h("ul", { class: "companions", "aria-label": t("People you've travelled with") });
-  const companionsBox = h("div", { class: "companions-box", hidden: true }, h("h4", { class: "small" }, t("People you've travelled with")), companions);
+  // people you've travelled with on your other trips, in a menu beside the
+  // search: one click invites, and the dialog stays short
+  const companions = h("ul", { class: "companions", id: "share-companions", role: "list", "aria-label": t("People you've travelled with") });
+  const companionsCount = h("span", { class: "companions-count" });
+  const companionsBtn = h(
+    "button",
+    { class: "btn btn-ghost btn-sm companions-toggle", type: "button", "aria-haspopup": "true", "aria-expanded": "false", "aria-controls": "share-companions", "data-share": "companions" },
+    icon("share"),
+    h("span", { class: "companions-label" }, t("Travelled with")),
+    companionsCount,
+    h("span", { class: "companions-caret", "aria-hidden": "true" }, icon("chevron")),
+  );
+  const companionsPop = h("div", { class: "companions-pop", hidden: true }, companions);
+  const companionsBox = h("div", { class: "companions-box", hidden: true }, companionsBtn, companionsPop);
+  const closeCompanions = () => {
+    companionsPop.hidden = true;
+    companionsBtn.setAttribute("aria-expanded", "false");
+  };
+  companionsBtn.addEventListener("click", () => {
+    const open = companionsPop.hidden;
+    companionsPop.hidden = !open;
+    companionsBtn.setAttribute("aria-expanded", String(open));
+    if (open) companions.querySelector("button")?.focus();
+  });
+  // Escape closes the menu first, not the whole dialog; a click elsewhere closes it
+  companionsBox.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !companionsPop.hidden) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeCompanions();
+      companionsBtn.focus();
+    }
+  });
+  const outsideCompanions = (e) => !companionsBox.contains(e.target) && closeCompanions();
   const loadCompanions = async () => {
     try {
       const { people } = await api(`${base}/companions`);
       if (!dialog.open) return;
       companionsBox.hidden = people.length === 0;
+      const open = people.filter((p) => p.status === "available").length;
+      companionsCount.textContent = String(open || people.length);
+      companionsBtn.setAttribute("aria-label", t("People you've travelled with ({n})", { n: people.length }));
       companions.replaceChildren(
         ...people.map((p) =>
           h(
@@ -271,9 +305,10 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
                   },
                   t("Invite"),
                 )
-              : h("span", { class: `chip ${p.status === "invited" ? "chip-soft" : ""}` }, t(STATUS[p.status])),
+              : h("span", { class: "chip chip-soft" }, t(STATUS[p.status])),
           ),
         ),
+        h("li", { class: "companions-more small muted" }, t("Someone else? Search by nickname.")),
       );
     } catch {
       // a convenience: searching by nickname still works
@@ -283,8 +318,8 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
     "section",
     { class: "share-method", "aria-labelledby": "share-by-name" },
     h("h3", { id: "share-by-name" }, t("Invite by nickname")),
-    companionsBox,
     h("div", { class: "invitee-search" }, nameInput, inviteBtn),
+    companionsBox,
     searchNote,
     results,
     sent,
@@ -299,7 +334,11 @@ export function shareDialog({ S, me, base, act, events, navigate, isOwner: owner
   );
   if (isOwner) {
     loadSent();
-    queueMicrotask(loadCompanions); // once the dialog is open
+    queueMicrotask(() => {
+      // once the dialog is open
+      loadCompanions();
+      dialog.addEventListener("click", outsideCompanions);
+    });
   }
   // someone accepted while this was open: their status and the member list
   // follow, a tick later so the editor has applied the snapshot first

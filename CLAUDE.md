@@ -432,10 +432,12 @@ contradict the README, stop and ask. Don't quietly change the product.
   adds the member and consumes the invitation in one `mutate()`. Accepted,
   declined and cancelled invitations never let anyone in again. Link and
   named invitations are independent: neither revokes the other.
-- The share dialog also lists "People you've travelled with" (November 2026,
-  `GET /companions`, owner-only): current members of the owner's other
-  trips, most recent first, at most 8, with the same status as a search
-  result. One click on Invite sends the same invitation as the search.
+- The share dialog also offers "Travelled with" (November 2026, `GET
+  /companions`, owner-only): a menu under the nickname search, closed until
+  opened, listing members of the owner's other trips who aren't on this one,
+  most shared trips first, then most recent, at most 8. One click on Invite
+  sends the same invitation as the search; Escape closes the menu, not the
+  dialog.
   There are no friend requests, friend lists or social graph (README: no
   social features); the list is derived from trip membership and stored
   nowhere.

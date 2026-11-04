@@ -882,29 +882,31 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
     },
 
     // People the owner has travelled with: members of their other trips
-    // (trips they're on now), most recent shared trip first. Only names
-    // they can already see on those trips; nothing new is revealed and
-    // nothing is stored. Each carries the same status as a search result.
+    // (trips they're on now) who aren't on this one yet, the ones they've
+    // shared most trips with first, then the most recent. Only names they
+    // can already see on those trips; nothing new is revealed and nothing
+    // is stored. Each carries the same status as a search result.
     pastCompanions(userId: string, tripId: string) {
       require(tripId, userId, "manage_invites");
       const rows = q(
-        `select u.id, u.username, u.display_name, max(max(mine.joined_at, theirs.joined_at)) as together,
-                (select role from trip_members m where m.trip_id = ? and m.user_id = u.id) as role,
+        `select u.id, u.username, u.display_name,
+                count(distinct mine.trip_id) as trips, max(max(mine.joined_at, theirs.joined_at)) as together,
                 (select 1 from trip_invitations i where i.trip_id = ? and i.invitee_id = u.id and i.status = 'pending') as pending
            from trip_members mine
            join trip_members theirs on theirs.trip_id = mine.trip_id and theirs.user_id <> mine.user_id
            join users u on u.id = theirs.user_id
           where mine.user_id = ? and mine.trip_id <> ?
+            and not exists (select 1 from trip_members here where here.trip_id = ? and here.user_id = u.id)
           group by u.id
-          order by together desc, lower(u.display_name), u.id
+          order by trips desc, together desc, lower(u.display_name), u.id
           limit 8`,
-      ).all(tripId, tripId, userId, tripId);
+      ).all(tripId, userId, tripId, tripId);
       return {
         people: rows.map((r) => ({
           id: String(r.id),
           username: String(r.username),
           displayName: String(r.display_name),
-          status: r.role ? "member" : r.pending ? "invited" : "available",
+          status: r.pending ? "invited" : "available",
         })),
       };
     },

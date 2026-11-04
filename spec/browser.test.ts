@@ -825,7 +825,15 @@ describe.skipIf(!chromePath)("nickname search responses", () => {
     await owner.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
     await owner.waitFor(`document.querySelector('.conn-live')`, 8000);
     await owner.eval(`[...document.querySelectorAll('.trip-bar button')].find(b => b.textContent.includes('Share')).click()`);
-    await owner.waitFor(`document.querySelector('dialog[open] [data-companion="${friendId}"] [data-share="invite-companion"]')`, 8000);
+    // a menu beside the search: closed until asked, so the dialog stays short
+    await owner.waitFor(`document.querySelector('dialog[open] [data-share="companions"]') && !document.querySelector('dialog[open] .companions-box').hidden`, 8000);
+    expect(await owner.eval(`document.querySelector('dialog[open] .companions-pop').hidden`)).toBe(true);
+    await owner.eval(`document.querySelector('dialog[open] [data-share="companions"]').click()`);
+    expect(await owner.eval(`document.querySelector('dialog[open] [data-share="companions"]').getAttribute('aria-expanded')`)).toBe("true");
+    // Escape closes the menu, not the dialog
+    await owner.eval(`document.querySelector('dialog[open] .companions-pop button').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`);
+    expect(await owner.eval(`Boolean(document.querySelector('dialog[open]')) && document.querySelector('dialog[open] .companions-pop').hidden`)).toBe(true);
+    await owner.eval(`document.querySelector('dialog[open] [data-share="companions"]').click()`);
     expect(await owner.eval<string>(`document.querySelector('dialog[open] .invitee-input').value`)).toBe("");
     await owner.eval(`document.querySelector('dialog[open] [data-companion="${friendId}"] [data-share="invite-companion"]').click()`);
     // the row now says Invited, and the invitation reaches them

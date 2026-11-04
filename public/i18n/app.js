@@ -239,4 +239,7 @@ export const ZH = {
   "Wayline is in English or Chinese. Before you sign in, your choice is kept in this browser only. Signed in, it's saved with your account so it follows you to other devices. Google Maps is asked for place names and directions in that language.":
     "Wayline 提供英文和中文两种语言。登录前，你的选择只保存在这个浏览器里；登录后会保存到你的账户，换设备也会沿用。Google Maps 会按这种语言返回地名和路线说明。",
   "People you've travelled with": "一起旅行过的人",
+  "Travelled with": "一起旅行过的人",
+  "People you've travelled with ({n})": "一起旅行过的人（{n}）",
+  "Someone else? Search by nickname.": "没找到？在上面按昵称搜索。",
 };
