@@ -115,4 +115,41 @@ describe("the itinerary", () => {
     // the same proposal can't be applied twice
     expect((await c.send("POST", `/api/trips/${trip.id}/proposals/apply`, { dayId: day.id, proposalId: delay.id })).status).toBe(409);
   });
+
+  // Several fixes chosen together and confirmed once (November 2026): one
+  // per problem, all in one change or none, only against the day they were
+  // shown for, and only by the owner.
+  it("applies several chosen fixes at once, all or nothing", async () => {
+    const c = await signUp(baseUrl);
+    const trip = await newTrip(c);
+    for (const [title, startMin, durationMin] of [["Zoo", 540, 180], ["Lunch", 705, 60], ["Museum", 760, 90], ["Dinner", 840, 60]] as const) {
+      await addActivity(c, trip, { title, startMin, durationMin });
+    }
+    const day = (await c.get(`/api/trips/${trip.id}`)).data.days[0];
+    expect(day.analysis.issues).toHaveLength(3);
+    const shorten = day.analysis.proposals.filter((p: any) => p.kind === "shorten_prev");
+    expect(shorten).toHaveLength(3);
+    const url = `/api/trips/${trip.id}/proposals/apply-many`;
+    // refused, writing nothing: no list, two for one problem, two touching one stop, a stale day
+    expect((await c.send("POST", url, { dayId: day.id, basedOn: day.fingerprint, proposalIds: [] })).status).toBe(400);
+    const zooFixes = day.analysis.proposals.filter((p: any) => p.issueId === shorten[0].issueId);
+    expect((await c.send("POST", url, { dayId: day.id, basedOn: day.fingerprint, proposalIds: [zooFixes[0].id, zooFixes[1].id] })).status).toBe(400);
+    const push = day.analysis.proposals.find((p: any) => p.kind === "push_rest" && p.issueId === shorten[0].issueId);
+    const delayMuseum = day.analysis.proposals.find((p: any) => p.kind === "delay_next" && p.issueId === shorten[1].issueId);
+    expect((await c.send("POST", url, { dayId: day.id, basedOn: day.fingerprint, proposalIds: [push.id, delayMuseum.id] })).status).toBe(409);
+    expect((await c.send("POST", url, { dayId: day.id, basedOn: "an-old-fingerprint", proposalIds: shorten.map((p: any) => p.id) })).status).toBe(409);
+    const unchanged = (await c.get(`/api/trips/${trip.id}`)).data.days[0];
+    expect(unchanged.fingerprint).toBe(day.fingerprint);
+    // a collaborator can't apply fixes
+    const guest = await signUp(baseUrl);
+    await share(c, guest, trip.id);
+    const fresh = (await c.get(`/api/trips/${trip.id}`)).data.days[0];
+    expect((await guest.send("POST", url, { dayId: fresh.id, basedOn: fresh.fingerprint, proposalIds: shorten.map((p: any) => p.id) })).status).toBe(403);
+    // the owner: all three in one change, and the day has no conflicts left
+    const applied = await c.send("POST", url, { dayId: fresh.id, basedOn: fresh.fingerprint, proposalIds: shorten.map((p: any) => p.id) });
+    expect(applied.status).toBe(200);
+    const after = applied.data.days[0];
+    expect(after.analysis.issues).toEqual([]);
+    expect(after.activities.map((a: any) => [a.title, a.durationMin])).toEqual([["Zoo", 165], ["Lunch", 55], ["Museum", 80], ["Dinner", 60]]);
+  });
 });

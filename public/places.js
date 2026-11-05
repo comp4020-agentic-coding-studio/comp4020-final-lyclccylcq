@@ -1,5 +1,5 @@
 import { locale, t } from "/i18n.js";
-import { api, fill, fmtDay, guessKind, h, hhmm, icon, KIND_DURATION, KIND_LABEL, openDialog, parseTime, toast, uid } from "/ui.js";
+import { api, dur, fill, fmtDay, guessKind, h, hhmm, icon, KIND_DURATION, KIND_LABEL, openDialog, parseTime, toast, travelFrom, uid } from "/ui.js";
 
 // The place inspector. Details (hours, address, photo) are fetched from
 // Google only when someone opens it, never for every result on screen.
@@ -86,6 +86,8 @@ export function placeDialog(place, ctx = null) {
   return dialog;
 }
 
+const BY_MODE = { WALK: "on foot", TRANSIT: "by public transport", DRIVE: "by car" };
+
 // Adds a place to one of the user's trips as a new activity. Only the place
 // id, the user's chosen title and a temporary copy of the coordinates are
 // stored; details stay with Google.
@@ -130,11 +132,33 @@ export async function addToTripDialog(place, ctx) {
       error.hidden = false;
     }
   };
+  // When the day's last timed stop ends, plus the travel from it that
+  // Google returns (labelled approximate); a time the person typed stays.
+  const hint = h("p", { class: "muted small schedule-hint" });
+  let edited = false;
+  let lookup = 0;
+  start.addEventListener("input", () => (edited = true));
   const suggest = () => {
     const day = trip?.days.find((d) => d.id === daySel.value);
     const timed = (day?.activities ?? []).filter((a) => a.startMin !== null);
-    const end = timed.length ? Math.max(...timed.map((a) => a.startMin + a.durationMin)) : 9 * 60;
+    const prev = [...timed].sort((a, b) => a.startMin + a.durationMin - (b.startMin + b.durationMin)).pop() ?? null;
+    const end = prev ? prev.startMin + prev.durationMin : 9 * 60;
     start.value = hhmm(Math.min(Math.ceil(end / 15) * 15, 23 * 60 + 45));
+    edited = false;
+    const mine = ++lookup;
+    if (!prev) return void (hint.textContent = "");
+    hint.textContent = t("Looking up the travel time from {title}…", { title: prev.title });
+    travelFrom({ prev, place: { placeId: place.placeId, source: place.source === "demo" ? "demo" : place.source ?? "google", lat: place.lat, lng: place.lng }, date: day.date, timeZone: trip.timezone, routes: ctx.config.routes })
+      .then((r) => {
+        if (mine !== lookup) return;
+        if (r.status !== "ok") {
+          hint.textContent = r.status === "off" ? t("Travel time isn't included: Google Maps isn't set up on this server.") : r.status === "unroutable" ? t("Travel time isn't included: one of the two places can't be routed.") : t("Travel time isn't included: Google returned no route between them.");
+          return;
+        }
+        const at = Math.min(Math.ceil((end + r.minutes) / 5) * 5, 23 * 60 + 55);
+        if (!edited) start.value = hhmm(at);
+        hint.textContent = t("About {time}: {title} ends at {ends}, then about {minutes} {mode} (Google Maps). Approximate.", { time: hhmm(at), title: prev.title, ends: hhmm(end), minutes: dur(r.minutes), mode: t(BY_MODE[r.mode]) });
+      });
   };
   tripSel.addEventListener("change", loadTrip);
   daySel.addEventListener("change", suggest);
@@ -146,6 +170,7 @@ export async function addToTripDialog(place, ctx) {
     h("label", { class: "field" }, h("span", {}, t("Trip")), tripSel),
     h("div", { class: "row-2" }, h("label", { class: "field" }, h("span", {}, t("Day")), daySel), h("label", { class: "field" }, h("span", {}, t("Type")), kindSel)),
     h("div", { class: "row-2" }, h("label", { class: "field" }, h("span", {}, t("Start")), start), h("label", { class: "field" }, h("span", {}, t("Duration (min)")), duration)),
+    hint,
     error,
     h("div", { class: "dialog-actions" }, h("button", { class: "btn btn-ghost", type: "button", onclick: () => dialog.close() }, t("Cancel")), submit),
   );

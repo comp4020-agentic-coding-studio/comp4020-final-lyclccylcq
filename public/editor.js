@@ -23,12 +23,15 @@ import {
   relTime,
   saves,
   toast,
+  travelFrom,
   uid,
 } from "/ui.js";
 import { locale, t, tn, tServer } from "/i18n.js";
 
 const MODE_LABEL = { WALK: "Walk", TRANSIT: "Transit", DRIVE: "Drive" };
 const MODE_WORD = { WALK: "Walking", TRANSIT: "Transit", DRIVE: "Driving" };
+// how a travel time is said: "about 12 min on foot"
+const BY_MODE = { WALK: "on foot", TRANSIT: "by public transport", DRIVE: "by car" };
 const MEAL_LABEL = { breakfast: "Breakfast", brunch: "Brunch", lunch: "Lunch", afternoon_tea: "Afternoon tea", dinner: "Dinner" };
 const MEAL_MINUTES = { breakfast: 45, brunch: 60, lunch: 60, afternoon_tea: 45, dinner: 90 };
 const FOOD_TYPES = new Set(["restaurant", "cafe", "bakery", "bar", "meal_takeaway", "coffee_shop", "food_court", "fast_food_restaurant", "tea_house", "brunch_restaurant", "breakfast_restaurant"]);
@@ -227,6 +230,8 @@ export async function openEditor(root, tripId, ctx) {
     }
   }
   const base = `/api/trips/${tripId}`;
+  // the trip's shared transport choice, for the travel time a new stop's arrival is suggested with
+  api(`${base}/preferences`).then((r) => (S.tripTravel = r.trip)).catch(() => {});
 
   // one id per open tab, so two tabs of the same person are two map views
   const session = uid();
@@ -1472,13 +1477,43 @@ export async function openEditor(root, tripId, ctx) {
         h("button", { class: "btn btn-primary", type: "submit" }, t("Confirm & add")),
       ),
     );
-    // a suggestion only: right after the day's last timed stop, without travel
-    // time, which isn't known until a route is calculated
+    // A suggestion only: when the day's last timed stop ends, plus the
+    // travel from it that Google returns (looked up as the card opens, and
+    // again for another day). Labelled approximate; a time the person typed
+    // is never replaced by a late answer.
+    let edited = false;
+    let lookup = 0;
+    form.start.addEventListener("input", () => (edited = true));
     const suggest = () => {
       const d = days.find((x) => x.id === form.dayId.value);
       form.start.value = hhmm(suggestStart(d));
+      edited = false;
       const prev = prevOf(d);
-      hint.textContent = prev ? t("Suggested: when {title} ends ({time}). Travel time isn't included yet; it appears once the route is calculated.", { title: prev.title, time: hhmm(prev.startMin + prev.durationMin) }) : t("Suggested: 09:00, as nothing on this day has a time yet.");
+      const mine = ++lookup;
+      if (!prev) return void (hint.textContent = t("Suggested: 09:00, as nothing on this day has a time yet."));
+      const ends = hhmm(prev.startMin + prev.durationMin);
+      hint.textContent = t("Suggested: when {title} ends ({time}). Looking up the travel time from there…", { title: prev.title, time: ends });
+      hint.dataset.travel = "loading";
+      travelBefore(prev, place, d.date).then((r) => {
+        if (mine !== lookup || meal || preset) return; // another day or a meal since, or a suggestion's own time
+        hint.dataset.travel = r.status;
+        if (r.status !== "ok") {
+          hint.textContent =
+            r.status === "off"
+              ? t("Suggested: when {title} ends ({time}). Travel time isn't included: Google Maps isn't set up on this server, so none is estimated.", { title: prev.title, time: ends })
+              : r.status === "unroutable"
+                ? t("Suggested: when {title} ends ({time}). Travel time isn't included: one of the two places can't be routed (a demo or approximate location).", { title: prev.title, time: ends })
+                : t("Suggested: when {title} ends ({time}). Travel time isn't included: Google returned no route between them.", { title: prev.title, time: ends });
+          return;
+        }
+        const at = Math.min(Math.ceil((prev.startMin + prev.durationMin + r.minutes) / 5) * 5, 23 * 60 + 55);
+        if (!edited) {
+          form.start.value = hhmm(at);
+          form.start.dispatchEvent(new Event("input"));
+          edited = false;
+        }
+        hint.textContent = t("Suggested: about {time}. {title} ends at {ends}, then about {minutes} {mode} (Google Maps). Approximate; change it if you like.", { time: hhmm(at), title: prev.title, ends, minutes: dur(r.minutes), mode: t(BY_MODE[r.mode]) });
+      });
     };
     // A meal suggests its usual time from the trip's settings. If that overlaps
     // a stop already planned, the nearest free slot inside the meal's range is
@@ -1935,6 +1970,10 @@ export async function openEditor(root, tripId, ctx) {
     }
   }
 
+  // the travel from the stop before a new one, as Google returns it (ui.js)
+  const travelBefore = (prev, place, date) =>
+    travelFrom({ prev, place, date, timeZone: S.trip.timezone, routes: ctx.config.routes, avoid: S.prefs?.travel?.avoidModes ?? [], transport: S.tripTravel?.transport ?? null });
+
   function suggestStart(d) {
     const timed = (d?.activities ?? []).filter((a) => a.startMin !== null);
     if (!timed.length) return 9 * 60;
@@ -2054,20 +2093,7 @@ export async function openEditor(root, tripId, ctx) {
         h("p", { class: "pa-day" }, t("Day {n} · {destination}", { n: idx + 1, destination: S.trip.destination })),
         h("p", { class: "pa-span" }, tn(r.stops, "{n} stop", "{n} stops") + `${r.span ? ` · ${hhmm(r.span.from)}–${hhmm(r.span.to)}` : ""}`),
         h("ul", { class: "pa-lines" }, status),
-        conflicts.length > 0 &&
-          h(
-            "details",
-            { class: "pa-fixes" },
-            h("summary", {}, t("See fixes")),
-            conflicts.map((x) =>
-              h(
-                "div",
-                { class: `issue issue-${x.severity}` },
-                h("p", { class: "issue-msg" }, tServer(x.message)),
-                h("div", { class: "proposals" }, d.analysis.proposals.filter((p) => p.issueId === x.id).map((p) => proposalCard(d, p, { basedOn: d.fingerprint })), h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.dismissed.add(x.id); renderCopilot(); } }, t("Keep as planned"))),
-              ),
-            ),
-          ),
+        conflicts.length > 0 && fixesForm(d, conflicts, { basedOn: d.fingerprint, picked: S.aiPicks?.fingerprint === d.fingerprint ? S.aiPicks.byIssue : null }),
       ),
       h(
         "div",
@@ -2173,7 +2199,7 @@ export async function openEditor(root, tripId, ctx) {
   // One suggested place: what Google says about it, what it costs to fit in,
   // and three actions. "Preview" shows it on the map and in the timeline as a
   // proposal; "Add" applies just this one.
-  function suggestionCard(d, draft, c, stale) {
+  function suggestionCard(d, draft, c, stale, { inList = false } = {}) {
     const pick = draft.picks?.find((p) => p.changeId === c.id);
     const g = c.candidate;
     const previewing = S.previewId === c.id;
@@ -2240,12 +2266,14 @@ export async function openEditor(root, tripId, ctx) {
                 [30, 45, 60, 75, 90, 120].map((m) => h("option", { value: m, selected: (S.mealEdits[c.id]?.durationMin ?? c.durationMin) === m }, t("{m} min", { m }))),
               ),
             ),
-          h("button", { class: "btn btn-primary btn-sm", type: "button", "data-plan-action": "apply-one", onclick: (e) => applyChanges(d, draft, [c.id], e.currentTarget) }, t("Add")),
+          !inList && h("button", { class: "btn btn-primary btn-sm", type: "button", "data-plan-action": "apply-one", onclick: (e) => applyChanges(d, draft, [c.id], e.currentTarget) }, t("Add")),
         ),
     );
   }
 
-  // Optimize: grouped by kind, each with its own Apply, plus "Apply all".
+  // Optimize: the AI's suggestions grouped by kind, each one a choice
+  // (all chosen to start with), then one button that applies exactly the
+  // chosen ones together: one request, refused if the day changed.
   function optimizeList(d, draft, stale) {
     const groups = [
       [t("Route"), draft.changes.filter((c) => c.type === "move" || c.type === "mode")],
@@ -2253,17 +2281,35 @@ export async function openEditor(root, tripId, ctx) {
       [t("Nearby"), draft.changes.filter((c) => c.type === "add" && c.kind !== "food")],
     ].filter(([, list]) => list.length);
     if (!groups.length) return h("p", { class: "small muted" }, t("No changes suggested. The day already works well for your preferences."));
+    if (S.optPick?.draftId !== draft.draftId) S.optPick = { draftId: draft.draftId, off: new Set() };
+    const off = S.optPick.off;
+    const chosen = draft.changes.filter((c) => !off.has(c.id));
+    const box = (c) =>
+      h("input", {
+        type: "checkbox",
+        class: "pa-pick",
+        "data-change-pick": c.id,
+        checked: !off.has(c.id),
+        disabled: stale,
+        "aria-label": c.type === "move" ? t("Move {title} to position {n}", { title: c.title, n: c.toIndex + 1 }) : c.type === "mode" ? `${c.from}: ${pref("modes", c.to)}` : c.candidate.name,
+        onchange: (e) => { if (e.target.checked) off.delete(c.id); else off.add(c.id); renderCopilot(); },
+      });
     const line = (c) =>
       c.type === "move"
-        ? h("li", { class: "pa-change", "data-change": "move" }, h("span", { class: "grow" }, t("Move {title} to position {n}", { title: c.title, n: c.toIndex + 1 })), !stale && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: (e) => applyChanges(d, draft, [c.id], e.currentTarget) }, t("Apply")))
+        ? h("li", { class: "pa-change", "data-change": "move" }, h("label", { class: "pa-change-pick" }, box(c), h("span", { class: "grow" }, t("Move {title} to position {n}", { title: c.title, n: c.toIndex + 1 }))))
         : c.type === "mode"
-          ? h("li", { class: "pa-change", "data-change": "mode" }, h("span", { class: "grow" }, `${c.from}: ${pref("modes", c.to)}`), !stale && h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: (e) => applyChanges(d, draft, [c.id], e.currentTarget) }, t("Apply")))
-          : suggestionCard(d, draft, c, stale);
+          ? h("li", { class: "pa-change", "data-change": "mode" }, h("label", { class: "pa-change-pick" }, box(c), h("span", { class: "grow" }, `${c.from}: ${pref("modes", c.to)}`)))
+          : h("li", { class: "pa-change pa-change-card" }, box(c), suggestionCard(d, draft, c, stale, { inList: true }));
     return h(
       "div",
       {},
       groups.map(([title, list]) => h("section", { class: "pa-group" }, h("h4", { class: "pa-group-title" }, title), h("ul", { class: "pa-change-list" }, list.map(line)))),
-      !stale && draft.changes.length > 1 && h("button", { class: "btn btn-primary btn-block", type: "button", "data-plan-action": "apply", onclick: (e) => applyChanges(d, draft, null, e.currentTarget) }, t("Apply all")),
+      !stale &&
+        h(
+          "button",
+          { class: "btn btn-primary btn-block", type: "button", "data-plan-action": "apply", disabled: chosen.length === 0, onclick: (e) => applyChanges(d, draft, chosen.length === draft.changes.length ? null : chosen.map((c) => c.id), e.currentTarget) },
+          chosen.length ? tn(chosen.length, "Apply {n} chosen change", "Apply {n} chosen changes") : t("Nothing chosen"),
+        ),
     );
   }
 
@@ -2288,6 +2334,184 @@ export async function openEditor(root, tripId, ctx) {
     }
     renderCopilot();
     renderMap();
+  }
+
+  // Asks the AI which of the app's own fixes to choose (a review of this
+  // day: one model call, only when pressed). Its recommendations become the
+  // starting choices, marked as the AI's, with its reasons; the person can
+  // still change any of them before the one Apply. It never proposes an
+  // edit of its own (the server keeps only ids from this day's analysis).
+  async function askAiPicks(d) {
+    if (S.aiPicks?.busy) return;
+    S.aiPicks = { busy: true, fingerprint: d.fingerprint };
+    renderCopilot();
+    try {
+      const res = await api(`${base}/copilot`, { method: "POST", body: { dayId: d.id, question: "", history: [], lang: pageLang() } });
+      const byIssue = {};
+      const why = {};
+      for (const rec of res.answer.recommendations) {
+        const p = d.analysis.proposals.find((x) => x.id === rec.proposalId);
+        if (!p || byIssue[p.issueId]) continue;
+        byIssue[p.issueId] = p.id;
+        why[p.id] = rec.rationale;
+      }
+      S.aiPicks = { fingerprint: res.fingerprint, byIssue, why, summary: res.answer.summary, lang: res.lang, model: res.model };
+      S.fixChoice = null; // start from the AI's picks
+    } catch (err) {
+      if (err.status === 401) return ctx.signOut();
+      S.aiPicks = { fingerprint: d.fingerprint, error: err.message };
+    }
+    renderCopilot();
+  }
+
+  // Every conflict on the day with its fixes as choices, one per problem
+  // (or "Keep as planned"), the exact edits of everything chosen listed
+  // together, and one button that applies them all (the preview is the
+  // confirmation): one request, all or nothing, refused if the day changed
+  // since (basedOn). picked: issue id -> proposal id, chosen to start with
+  // (the AI's recommendations, when it gave some); otherwise each problem's
+  // first fix. A choice that would change a stop another choice already
+  // changes is unavailable until that one is changed back.
+  function fixesForm(d, conflicts, { basedOn, picked = null }) {
+    const key = `${basedOn}`;
+    const proposalById = (id) => d.analysis.proposals.find((p) => p.id === id);
+    const targets = (p) => p.changes.map((c) => (c.type === "activity" ? `${c.activityId}:${c.field}` : `segment:${c.segmentId}`));
+    // What the day would still have after these fixes, by the same plain
+    // rules as the server's check (src/schedule.ts analyseDay: an overlap,
+    // or less time than the chosen route takes). Each fix was worked out
+    // for the plan as it is, so a chain of conflicts can need another round.
+    const conflictsAfter = (list) => {
+      const acts = d.activities.map((a) => ({ ...a }));
+      const segs = d.segments.map((x) => ({ ...x }));
+      for (const c of list.flatMap((p) => p.changes)) {
+        if (c.type === "activity") Object.assign(acts.find((a) => a.id === c.activityId) ?? {}, { [c.field]: c.to });
+        else Object.assign(segs.find((x) => x.id === c.segmentId) ?? {}, { selectedMode: c.to });
+      }
+      let n = 0;
+      for (let i = 0; i + 1 < acts.length; i++) {
+        const a = acts[i];
+        const b = acts[i + 1];
+        if (a.startMin === null || b.startMin === null) continue;
+        const gap = b.startMin - (a.startMin + a.durationMin);
+        const sg = segs.find((x) => x.fromId === a.id && x.toId === b.id);
+        const o = sg?.options.find((x) => x.mode === sg.selectedMode);
+        const travel = o?.status === "ok" && typeof o.durationSec === "number" ? Math.ceil(o.durationSec / 60) : null;
+        if (gap < 0 || (travel !== null && sg.selectedMode && travel > gap)) n++;
+      }
+      return n;
+    };
+    if (S.fixChoice?.key !== key) {
+      const byIssue = {};
+      for (const x of conflicts) {
+        const options = d.analysis.proposals.filter((p) => p.issueId === x.id);
+        byIssue[x.id] = picked?.[x.id] && options.some((p) => p.id === picked[x.id]) ? picked[x.id] : options[0]?.id ?? "keep";
+      }
+      // Without the AI's picks, start from the combination (one fix or none
+      // per problem, never two touching the same stop) that leaves the
+      // fewest conflicts, then the fewest edits: a chain of overlaps often
+      // needs each one shortened rather than everything pushed later. Only
+      // a suggestion; the person chooses. Small days only (it's a search).
+      if (!picked && conflicts.length > 1) {
+        const lists = conflicts.map((x) => [null, ...d.analysis.proposals.filter((p) => p.issueId === x.id)]);
+        if (lists.reduce((n, l) => n * l.length, 1) <= 2000) {
+          let best = null;
+          const walk = (i, acc) => {
+            if (i === lists.length) {
+              const ks = acc.flatMap(targets);
+              if (new Set(ks).size !== ks.length) return;
+              const score = [conflictsAfter(acc), ks.length];
+              if (!best || score[0] < best.score[0] || (score[0] === best.score[0] && score[1] < best.score[1])) best = { score, acc };
+              return;
+            }
+            for (const p of lists[i]) walk(i + 1, p ? [...acc, p] : acc);
+          };
+          walk(0, []);
+          if (best && best.acc.length) for (const x of conflicts) byIssue[x.id] = best.acc.find((p) => p.issueId === x.id)?.id ?? "keep";
+        }
+      }
+      S.fixChoice = { key, byIssue };
+    }
+    const choice = S.fixChoice.byIssue;
+    const takenBy = (issueId) => new Set(Object.entries(choice).filter(([i, id]) => i !== issueId && id !== "keep").flatMap(([, id]) => (proposalById(id) ? targets(proposalById(id)) : [])));
+    const chosen = Object.values(choice).filter((id) => id !== "keep").map(proposalById).filter(Boolean);
+    const owner = isOwner();
+    const nameOf = (id) => d.activities.find((a) => a.id === id)?.title ?? t("Activity");
+    const seg = (id) => d.segments.find((x) => x.id === id);
+    const changeLine = (c) =>
+      c.type === "activity"
+        ? h("li", {}, c.field === "startMin" ? t("{name}: start ", { name: nameOf(c.activityId) }) : t("{name}: duration ", { name: nameOf(c.activityId) }), h("s", {}, c.field === "startMin" ? hhmm(c.from) : dur(c.from)), " → ", h("b", {}, c.field === "startMin" ? hhmm(c.to) : dur(c.to)))
+        : h("li", {}, `${nameOf(seg(c.segmentId)?.fromId)} → ${nameOf(seg(c.segmentId)?.toId)}: `, h("s", {}, MODE_LABEL[c.from] ? t(MODE_LABEL[c.from]) : t("none")), " → ", h("b", {}, t(MODE_LABEL[c.to])));
+    const remaining = conflictsAfter(chosen);
+    const status = h("p", { class: "small", role: "status" });
+    const apply = async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        await act(api(`${base}/proposals/apply-many`, { method: "POST", body: { dayId: d.id, basedOn, proposalIds: chosen.map((p) => p.id) } }), { quiet: true });
+        for (const [i, id] of Object.entries(choice)) if (id === "keep") S.dismissed.add(`${i}@${S.trip.rev}`);
+        S.fixChoice = null;
+        S.aiPicks = null;
+        toast(tn(chosen.length, "{n} fix applied.", "{n} fixes applied."));
+      } catch (err) {
+        S.fixChoice = null;
+        toast(err.status === 409 ? t("The plan changed since these fixes were shown, so nothing was applied. Check the updated day.") : err.message, { kind: "error" });
+      }
+      renderCopilot();
+    };
+    return h(
+      "section",
+      { class: "pa-fixes", "aria-label": t("Fixes for this day"), "data-fixes": basedOn },
+      h("p", { class: "pa-fixes-h" }, t("Choose a fix for each problem")),
+      ctx.config.ai.configured && owner &&
+        h(
+          "div",
+          { class: "pa-ai-pick" },
+          S.aiPicks?.busy
+            ? h("p", { class: "small muted", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), t(" Asking the AI which fixes suit this day…"))
+            : h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-fixes-ai": "ask", onclick: () => askAiPicks(d) }, icon("spark"), picked ? t("Ask the AI again") : t("Ask the AI which to choose")),
+          S.aiPicks?.error && h("p", { class: "small form-error" }, S.aiPicks.error),
+          picked && S.aiPicks?.summary && h("div", { class: "ai-card" }, h("p", { class: "ai-label tiny" }, icon("spark"), t("AI interpretation")), h("p", { class: "ai-summary", lang: S.aiPicks.lang === "zh" ? "zh" : "en" }, S.aiPicks.summary)),
+        ),
+      conflicts.map((x, n) => {
+        const options = d.analysis.proposals.filter((p) => p.issueId === x.id);
+        const taken = takenBy(x.id);
+        const name = `fix-${n}`;
+        const radio = (value, label, extra = null, disabled = false) =>
+          h(
+            "label",
+            { class: `fix-option${choice[x.id] === value ? " on" : ""}${disabled ? " is-off" : ""}` },
+            h("input", { type: "radio", name, value, checked: choice[x.id] === value, disabled: disabled || !owner, onchange: () => { choice[x.id] = value; renderCopilot(); } }),
+            h("span", {}, label, extra),
+          );
+        return h(
+          "fieldset",
+          { class: `issue issue-${x.severity}`, "data-issue": x.id },
+          h("legend", { class: "issue-msg" }, tServer(x.message)),
+          options.map((p) => {
+            const clash = targets(p).some((k) => taken.has(k));
+            const ai = picked?.[x.id] === p.id;
+            return radio(p.id, tServer(p.label), [ai && h("span", { class: "tag tag-ai" }, t("AI pick")), ai && S.aiPicks?.why?.[p.id] && h("small", { class: "ai-text fix-why" }, S.aiPicks.why[p.id]), clash && h("small", { class: "muted" }, t(" (changes a stop another fix already changes)"))], clash && choice[x.id] !== p.id);
+          }),
+          radio("keep", t("Keep as planned")),
+        );
+      }),
+      chosen.length > 0 &&
+        h(
+          "div",
+          { class: "fix-summary" },
+          h("p", { class: "small" }, h("strong", {}, t("What will change"))),
+          h("ul", { class: "change-preview", "aria-label": t("Changes this will make") }, chosen.flatMap((p) => p.changes).map(changeLine)),
+          h(
+            "p",
+            { class: `small ${remaining ? "leg-warn" : "fix-clear"}`, "data-fixes-remaining": String(remaining) },
+            remaining ? tn(remaining, "Afterwards {n} timing conflict is left; it gets its own fixes here.", "Afterwards {n} timing conflicts are left; they get their own fixes here.") : t("This clears every timing conflict on the day."),
+          ),
+        ),
+      status,
+      owner
+        ? h("button", { class: "btn btn-primary btn-block", type: "button", "data-fixes-apply": String(chosen.length), disabled: chosen.length === 0, onclick: apply }, chosen.length ? tn(chosen.length, "Apply {n} fix for everyone", "Apply {n} fixes for everyone") : t("Nothing to apply"))
+        : h("p", { class: "small muted" }, t("Only the trip's owner can apply changes.")),
+    );
   }
 
   // basedOn: the day fingerprint this preview was built from; the server

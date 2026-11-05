@@ -69,8 +69,9 @@ contradict the README, stop and ask. Don't quietly change the product.
   explore map, right under the hero); the photo stream; "Near you" / "Ideas
   for …" (only once a place is chosen); "Explore ready-made trips" (region
   tabs and country chips directly above the cities and itineraries they
-  filter); shared by travellers; My Trips. Nothing goes between the hero and
-  the map. Picking a destination keeps the page at the map, which moves
+  filter); shared by travellers. Your own trips live on `/trips` (My Trips in
+  the top bar), not on the homepage (November 2026). Nothing goes between
+  the hero and the map. Picking a destination keeps the page at the map, which moves
   there and offers its picks tray, with "start a trip from scratch" (the
   new-trip form with the destination filled in). Regions and countries come from the curated destinations
   (`DESTINATIONS` in `src/curated.ts`, `areas()` in `src/itineraries.ts`);
@@ -178,7 +179,14 @@ contradict the README, stop and ask. Don't quietly change the product.
   plainly ("Google has no description…", "No Google reviews…"). "Add to
   Itinerary" opens the scheduling card (day, arrival, length, notes); nothing
   is sent or shared until "Confirm & add", and Cancel sends nothing. The
-  suggested arrival is the previous stop's end, never a guessed travel time.
+  suggested arrival (November 2026) is the previous stop's end plus the
+  travel Google returns from it (`travelFrom` in `ui.js`: one `/api/routes`
+  lookup per mode the person hasn't excluded, departing when that stop
+  ends; the trip's own transport choice, else the quickest of walking and
+  transit, driving only when neither has a route), labelled approximate.
+  Opening the card is the request. No answer (no key, an unroutable place,
+  no route) means the previous stop's end and a plain reason; a time the
+  person typed is never replaced.
 
 ## Truthful transportation
 
@@ -221,7 +229,15 @@ contradict the README, stop and ask. Don't quietly change the product.
   are untrusted data inside `<day_data>`, never instructions.
 - Every answer carries the day `fingerprint` it analysed; the UI marks it
   stale when the day changes, and `applyProposal` with an old `basedOn` is a
-  409 that writes nothing. Applying needs a preview and a "Confirm change".
+  409 that writes nothing. Applying needs a preview and a confirmation.
+  The panel lists every conflict with its fixes as choices (one per
+  problem, or "Keep as planned"), the exact edits of everything chosen
+  together, whether conflicts remain afterwards, and one button
+  (`POST /proposals/apply-many`, owner only): all in one `mutate()` or
+  none, refused if the day changed or two choices touch the same stop.
+  The starting choices are the ones leaving fewest conflicts; "Ask the AI
+  which to choose" (one `/copilot` call, on request) replaces them with
+  the AI's recommendations, marked and explained, still changeable.
 - Numbers shown come from the snapshot (`dayFacts`, issue messages, proposal
   previews), never from the model's text; model text is labelled "AI
   interpretation" and rendered as text nodes.
@@ -251,7 +267,9 @@ contradict the README, stop and ask. Don't quietly change the product.
   (`mealSearchPoints`), never the day's centre, and ranked by detour, Google
   rating backed by reviews, and preference; labels appear only when the data
   supports them. Each suggestion can be previewed (dashed on the timeline,
-  a marker on the map, never saved) and applied on its own (`changeIds`).
+  a marker on the map, never saved). Optimize lists its changes as choices
+  (all chosen to start with) and applies the chosen ones with one press
+  (`changeIds`); eat and nearby add one place at a time.
   The chat UI isn't shown; `/copilot` stays on the server.
 - Transport modes each show their state and why (available, excluded,
   no route from Google, needs a time, lookup failed). Google's Routes API
@@ -395,6 +413,11 @@ contradict the README, stop and ask. Don't quietly change the product.
   link shows the trip as it stands now, notes and display names included,
   through `GET /api/exports/:token` only: never member ids, invites, an edit
   or a way to join. Keep it separate from invite links and publications.
+  A public itinerary (curated, or a published journey) exports directly at
+  `/itineraries/:id/export` (November 2026), no account or copy needed:
+  read from the same public `/api/itineraries/:id`, so only what's public;
+  PDF or PNG, no travel times (the snapshot has none, and none are made
+  up). An unpublished journey's export is gone with it.
 - Every change to a trip is stored on the server as it's made (`mutate()`);
   there is no separate Save. The editor's indicator (`saves` in `ui.js`)
   shows Saving, Saved, Not saved (a write that didn't reach the server) and
@@ -428,7 +451,11 @@ contradict the README, stop and ask. Don't quietly change the product.
   choosing sends nothing. An invitation is a
   `trip_invitations` row addressed to a user id, one pending per person per
   trip (partial unique index). It grants nothing until the invitee accepts
-  it in My Trips; accepting checks recipient, `pending` and the trip, then
+  it, in My Trips or, if they're online when it's sent (November 2026), in
+  a card on whatever page they have open (`watchInvitations` in `app.js`:
+  the page's one personal stream; the count rising makes the page fetch
+  its invitations with its own session; Later leaves it in My Trips; My
+  Trips itself shows no card). Accepting checks recipient, `pending` and the trip, then
   adds the member and consumes the invitation in one `mutate()`. Accepted,
   declined and cancelled invitations never let anyone in again. Link and
   named invitations are independent: neither revokes the other.
@@ -509,7 +536,10 @@ contradict the README, stop and ask. Don't quietly change the product.
   route gets a line in `ROUTES` (`src/request-log.ts`); high-frequency traffic
   (map views, keep-alives, signalling) stays unlogged (`docs/logging.md`).
 - **Starter contract:** `/` answers 200; `/readme/` serves `README.md` in full,
-  server-rendered; listen on `0.0.0.0:$PORT`. Don't touch `fly.toml`'s machine,
+  server-rendered; listen on `0.0.0.0:$PORT`. The footer's About opens
+  `/about` (November 2026), a page for the people using Wayline, which says
+  where maps, places, routes and itineraries come from (no such line in the
+  footer itself) and links to `/readme/`. Don't touch `fly.toml`'s machine,
   volume or region settings, or `spec/invariants.test.ts`.
 
 ## Before calling something done
@@ -541,6 +571,8 @@ contradict the README, stop and ask. Don't quietly change the product.
   | Share dialog, nicknames, publishing | `spec/browser.test.ts -t "share\|nickname\|publishing\|reloading"` |
   | My Trips | `spec/browser.test.ts -t "My Trips"` |
   | Published journeys, profile, save state, export | `spec/browser-journeys.test.ts`, `spec/permissions.test.ts` |
+  | Online invitation card, fixing several conflicts, public itinerary export, About | `spec/browser-features.test.ts` |
+  | A new stop's travel-time suggestion (mocked Google) | `spec/browser-travel.test.ts` |
   | `ui.js` `h()` / `fill()` | `spec/dom-children.test.ts` |
   | Scheduling, order, start (`src/schedule.ts`, `src/trips.ts`) | `spec/schedule.test.ts`, `spec/order.test.ts`, `spec/start.test.ts`, `spec/itinerary.test.ts` |
   | Planner, review, copilot, AI budget | `spec/planner.test.ts`, `spec/review.test.ts`, `spec/plan-cancel.test.ts`, `spec/copilot.test.ts`, `spec/aiusage.test.ts` |

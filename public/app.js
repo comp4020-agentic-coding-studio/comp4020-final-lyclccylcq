@@ -6,7 +6,7 @@ import { coverImg, PHOTOS, photoFor } from "/photos.js";
 import { renderJourney } from "/journey-page.js";
 import { renderPreview } from "/preview.js";
 import { renderProfile } from "/profile.js";
-import { renderTripExport, renderTripPrint } from "/trip-print.js";
+import { renderItineraryExport, renderTripExport, renderTripPrint } from "/trip-print.js";
 import { getLang, locale, setLang, t, tn } from "/i18n.js";
 import { api, ApiError, avatar, fill, fmtRange, h, icon, openDialog, relTime, svg, toast } from "/ui.js";
 
@@ -31,6 +31,7 @@ document.addEventListener("click", (e) => {
 async function route({ keepScroll = false } = {}) {
   cleanup?.();
   cleanup = null;
+  watchInvitations();
   const scrollY = window.scrollY;
   const path = location.pathname;
   const next = new URLSearchParams(location.search).get("next");
@@ -38,6 +39,7 @@ async function route({ keepScroll = false } = {}) {
   const trip = path.match(/^\/trips\/([0-9a-f-]{36})$/);
   const tripPrint = path.match(/^\/trips\/([0-9a-f-]{36})\/print$/);
   const itinerary = path.match(/^\/itineraries\/([a-z0-9-]{3,80})$/);
+  const itineraryExport = path.match(/^\/itineraries\/([a-z0-9-]{3,80})\/export$/);
   const journey = path.match(/^\/journeys\/(pub-[0-9a-f-]{36})$/);
   const shared = path.match(/^\/export\/([A-Za-z0-9_-]{20,100})$/);
   if (keepScroll) requestAnimationFrame(() => window.scrollTo(0, scrollY));
@@ -46,10 +48,13 @@ async function route({ keepScroll = false } = {}) {
   // open to everyone
   if (path === "/") return void (cleanup = renderHome(app, ctx()));
   if (itinerary) return void (cleanup = await renderPreview(app, itinerary[1], ctx()));
+  // a public itinerary as a PDF or image, without making it a trip first
+  if (itineraryExport) return void (cleanup = await renderItineraryExport(app, itineraryExport[1]));
   // a published journey: read-only, for anyone with its link
   if (journey) return void (cleanup = await renderJourney(app, journey[1], ctx()));
   // a trip's read-only link: its members shared it; nothing here edits it
   if (shared) return void (cleanup = await renderTripExport(app, shared[1]));
+  if (path === "/about") return renderAbout();
   if (path === "/privacy") return renderPrivacy();
   if (path === "/credits") return renderCredits();
   if (path === "/experiments/pixel-train") {
@@ -218,13 +223,49 @@ function footer() {
     h(
       "nav",
       { "aria-label": t("Legal and about") },
-      h("a", { href: "/readme/" }, t("About")),
+      h("a", { href: "/about", "data-link": true }, t("About")),
       h("a", { href: "/privacy", "data-link": true }, t("Privacy")),
       h("a", { href: "/credits", "data-link": true }, t("Photo & video credits")),
       h("a", { href: "https://maps.google.com/help/terms_maps/", target: "_blank", rel: "noopener" }, t("Google Maps Terms")),
       h("a", { href: "https://policies.google.com/privacy", target: "_blank", rel: "noopener" }, t("Google Privacy Policy")),
     ),
-    h("p", { class: "muted small" }, t("Maps, places and routes come from Google Maps Platform when it's configured. Sample itineraries are curated by Wayline.")),
+  );
+}
+
+// What Wayline is, in a page for the people using it (the course README
+// stays at /readme/ for the starter contract). Where the maps, places,
+// routes and ready-made plans come from is said here, not in the footer.
+function renderAbout() {
+  app.replaceChildren(
+    topbar(),
+    h(
+      "main",
+      { class: "readme about" },
+      h("h1", {}, t("About Wayline")),
+      h("p", { class: "lede" }, t("Wayline is a travel planner for groups. Everyone on a trip shares one plan: a map beside a day-by-day timeline, where each person adds the places they want to go and sees the others' changes as they happen.")),
+      h("h2", {}, t("How it works")),
+      h(
+        "ul",
+        {},
+        h("li", {}, t("Create a trip, or start from one of Wayline's ready-made itineraries, and invite the people you're travelling with.")),
+        h("li", {}, t("Add places from the map. Between consecutive stops, Wayline looks up real travel times and points out when a day doesn't add up.")),
+        h("li", {}, t("The planning assistant suggests fixes, places to eat and a better order. Nothing changes until you choose it.")),
+        h("li", {}, t("When the plan is ready, export it as a PDF or image, share a read-only link, or publish it for others to use.")),
+      ),
+      h("h2", {}, t("Where the information comes from")),
+      h("p", {}, t("Maps, places, opening hours and routes come from Google Maps Platform when it's configured on the server; without it, Wayline shows a schematic map and labelled demo places, and never estimates a travel time. Ready-made itineraries are written and curated by Wayline. Trips shared by travellers are labelled with their author.")),
+      h("h2", {}, t("More")),
+      h(
+        "p",
+        {},
+        h("a", { href: "/privacy", "data-link": true }, t("Privacy")),
+        " · ",
+        h("a", { href: "/credits", "data-link": true }, t("Photo & video credits")),
+        " · ",
+        h("a", { href: "/readme/" }, t("Project notes")),
+      ),
+    ),
+    footer(),
   );
 }
 
@@ -345,6 +386,7 @@ function renderCredits() {
 async function signOut() {
   await api("/api/auth/logout", { method: "POST", body: {} }).catch(() => {});
   state.me = null;
+  watchInvitations();
   navigate("/", { replace: true });
 }
 
@@ -354,8 +396,100 @@ async function signOut() {
 function signedOutElsewhere() {
   if (!state.me) return;
   state.me = null;
+  watchInvitations();
   toast(t("You signed out in another tab."));
   navigate(`/login?next=${encodeURIComponent(location.pathname)}`, { replace: true });
+}
+
+// --- invitations while online ------------------------------------------------
+// Every signed-in page keeps the person's own stream open (it's also what
+// makes them "online"). It carries only a count; when the count goes up,
+// the page asks for its invitations with its own session and shows a card
+// for each one that arrived while it was open. My Trips lists them live
+// already, so it shows no card. Answering later leaves the invitation in
+// My Trips, as it would be for someone who wasn't online.
+
+const inviteWatch = { events: null, userId: null, seen: new Set(), primed: false, cards: new Map() };
+
+function watchInvitations() {
+  const userId = state.me?.id ?? null;
+  if (inviteWatch.userId === userId && inviteWatch.events) return;
+  inviteWatch.events?.close();
+  for (const card of inviteWatch.cards.values()) card.close();
+  Object.assign(inviteWatch, { events: null, userId, seen: new Set(), primed: false });
+  inviteWatch.cards.clear();
+  if (!userId) return;
+  const events = new EventSource("/api/me/events");
+  inviteWatch.events = events;
+  events.addEventListener("signed-out", () => {
+    events.close();
+    signedOutElsewhere();
+  });
+  events.addEventListener("invitations", () => {
+    api("/api/invitations")
+      .then(({ invitations }) => {
+        if (inviteWatch.events !== events) return; // signed out or switched account meanwhile
+        const pendingIds = new Set(invitations.map((i) => i.id));
+        // one cancelled or answered elsewhere: its card goes
+        for (const [id, card] of inviteWatch.cards) if (!pendingIds.has(id)) card.close();
+        const fresh = invitations.filter((i) => !inviteWatch.seen.has(i.id));
+        for (const i of invitations) inviteWatch.seen.add(i.id);
+        // the first answer is what was already waiting: My Trips has those
+        if (!inviteWatch.primed) return void (inviteWatch.primed = true);
+        if (location.pathname === "/trips") return;
+        for (const inv of fresh) invitationCard(inv);
+        if (fresh.length) document.querySelector(".topbar")?.replaceWith(topbar(currentTab()));
+      })
+      .catch(() => {});
+  });
+}
+
+const currentTab = () => (location.pathname === "/" ? "home" : location.pathname === "/trips" ? "trips" : location.pathname === "/profile" ? "profile" : "");
+
+function invitationCard(inv) {
+  const status = h("p", { class: "small muted", role: "status" });
+  const accept = h("button", { class: "btn btn-primary", type: "button", "data-invite-card": "accept" }, t("Accept"));
+  const decline = h("button", { class: "btn btn-ghost", type: "button", "data-invite-card": "decline" }, t("Decline"));
+  const later = h("button", { class: "btn btn-quiet", type: "button", "data-invite-card": "later" }, t("Later"));
+  const dialog = openDialog(
+    h(
+      "dialog",
+      { class: "dialog invite-pop", "aria-labelledby": `invite-pop-${inv.id}`, "data-invitation-card": inv.id, style: `--hue:${hue(inv.trip.destination)}` },
+      h(
+        "div",
+        { class: "stack" },
+        h("div", { class: "invite-pop-head" }, avatar(inv.inviter, "md"), h("p", { class: "small" }, h("strong", {}, inv.inviter.displayName), t(" @{username} invited you to plan", { username: inv.inviter.username }))),
+        h("h2", { id: `invite-pop-${inv.id}` }, inv.trip.title),
+        h("p", { class: "small" }, `${inv.trip.destination} · ${fmtRange(inv.trip.startDate, inv.trip.endDate)} · ${tn(inv.trip.people, "{n} traveller", "{n} travellers")}`),
+        h("p", { class: "small muted" }, t("You'll join only if you accept. If you'd rather decide later, it waits in My Trips.")),
+        status,
+        h("div", { class: "dialog-actions" }, later, h("span", { class: "spacer" }), decline, accept),
+      ),
+    ),
+  );
+  inviteWatch.cards.set(inv.id, dialog);
+  dialog.addEventListener("close", () => inviteWatch.cards.delete(inv.id));
+  later.addEventListener("click", () => dialog.close());
+  const answer = async (what) => {
+    for (const b of [accept, decline, later]) b.disabled = true;
+    try {
+      const r = await api(`/api/invitations/${inv.id}/${what}`, { method: "POST", body: {} });
+      dialog.close();
+      if (what === "accept") {
+        toast(t("You joined {title}.", { title: inv.trip.title }));
+        navigate(`/trips/${r.tripId}`);
+      } else {
+        toast(t("Declined."));
+        document.querySelector(".topbar")?.replaceWith(topbar(currentTab()));
+      }
+    } catch (err) {
+      status.textContent = err.message;
+      later.disabled = false;
+      if (err.status !== 404 && err.status !== 409) for (const b of [accept, decline]) b.disabled = false;
+    }
+  };
+  accept.addEventListener("click", () => answer("accept"));
+  decline.addEventListener("click", () => answer("decline"));
 }
 
 // --- sign in -----------------------------------------------------------------
@@ -674,15 +808,14 @@ async function renderDashboard() {
       .finally(() => (refreshing = null));
     return refreshing;
   };
-  const events = new EventSource("/api/me/events");
-  events.addEventListener("signed-out", () => {
-    events.close();
-    signedOutElsewhere();
-  });
-  events.addEventListener("invitations", () => {
+  // the page's one personal stream (watchInvitations): its count changing
+  // means the lists here may have changed
+  const events = inviteWatch.events;
+  const onInvites = () => {
     refresh();
     onTrips(); // an approval adds a trip to "Shared with you"
-  });
+  };
+  events?.addEventListener("invitations", onInvites);
   const onTrips = () => api("/api/trips").then((d) => {
     data = d;
     renderLists();
@@ -704,7 +837,7 @@ async function renderDashboard() {
       ),
       section(t("Shared with you"), data.shared, h("p", { class: "muted" }, t("When someone invites you to their trip and you accept, it shows up here."))),
     );
-  events.addEventListener("open", onTrips);
+  events?.addEventListener("open", onTrips);
 
   app.querySelector(".dash").replaceChildren(
     h(
@@ -720,7 +853,10 @@ async function renderDashboard() {
   );
   renderInvites();
   renderLists();
-  return () => events.close();
+  return () => {
+    events?.removeEventListener("invitations", onInvites);
+    events?.removeEventListener("open", onTrips);
+  };
 }
 
 const hue = (s) => [...s].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);

@@ -262,3 +262,51 @@ export function decodePolyline(str) {
 }
 
 export const km = (n) => (n < 1 ? `${Math.round(n * 1000)} m` : `${n < 10 ? n.toFixed(1) : Math.round(n)} km`);
+
+// --- travel from the stop before a new one ---
+// Where a stop can be routed from or to, as the route lookup takes it: a
+// Google place by its id, a pinned spot by its coordinates. Demo and
+// curated-only places can't be routed.
+export function waypointOf(place) {
+  if (!place) return null;
+  if (place.source === "google" && place.placeId) return { placeId: place.placeId };
+  if (place.source === "custom" && typeof place.lat === "number" && typeof place.lng === "number") return { lat: place.lat, lng: place.lng };
+  return null;
+}
+
+// A trip's wall-clock time on a date, as the instant a route departs at
+// (the trip's own time zone, settled once across DST as the server does).
+export function zonedInstant(date, minutes, timeZone) {
+  const [y, mo, d] = date.split("-").map(Number);
+  const guess = Date.UTC(y, mo - 1, d, Math.floor(minutes / 60), minutes % 60);
+  const offsetAt = (ms) => {
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - ms;
+  };
+  let ms = guess - offsetAt(guess);
+  ms = guess - offsetAt(ms);
+  return new Date(ms).toISOString();
+}
+
+// The travel from the stop before a new one, from Google (the same
+// deduplicated, rate-limited route lookup as anywhere else), departing when
+// that stop ends: one answer per mode the person hasn't excluded. The mode
+// used is the trip's own choice when it has one, else the quickest of
+// walking and transit, driving only when neither has a route. Nothing is
+// estimated: without an answer there is no travel time.
+//   { status: "ok", mode, minutes } | { status: "off" | "unroutable" | "none" }
+export async function travelFrom({ prev, place, date, timeZone, routes, avoid = [], transport = null }) {
+  if (!routes) return { status: "off" };
+  const from = waypointOf(prev?.place);
+  const to = waypointOf(place);
+  if (!from || !to) return { status: "unroutable" };
+  const departureTime = zonedInstant(date, prev.startMin + prev.durationMin, timeZone);
+  const modes = ["WALK", "TRANSIT", "DRIVE"].filter((m) => !avoid.includes(m));
+  const answers = await Promise.all(modes.map((mode) => api("/api/routes", { method: "POST", body: { origin: from, destination: to, mode, departureTime } }).then((r) => ({ ...r, mode }), () => null)));
+  const ok = answers.filter((r) => r && r.status === "ok" && typeof r.durationSec === "number");
+  if (!ok.length) return { status: "none" };
+  const want = { walk: "WALK", transit: "TRANSIT", drive: "DRIVE" }[transport ?? ""];
+  const quickest = (list) => [...list].sort((a, b) => a.durationSec - b.durationSec)[0] ?? null;
+  const pick = ok.find((r) => r.mode === want) ?? quickest(ok.filter((r) => r.mode !== "DRIVE")) ?? quickest(ok);
+  return { status: "ok", mode: pick.mode, minutes: Math.max(1, Math.ceil(pick.durationSec / 60)) };
+}

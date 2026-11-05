@@ -119,6 +119,79 @@ export async function renderTripExport(app, token) {
   return () => {};
 }
 
+// A public itinerary (one of Wayline's own, or a trip a traveller
+// published), exported as it is: no account, no copy into a trip of your
+// own first. It's read from the same public endpoint as its preview, so it
+// holds only what's public (a publication carries no notes or members). The
+// snapshot keeps no routes, and none are looked up or made up here.
+export async function renderItineraryExport(app, id) {
+  app.replaceChildren(h("main", { class: "tp" }, h("div", { class: "boot", role: "status" }, t("Preparing the itinerary…"))));
+  let it;
+  try {
+    it = await api(`/api/itineraries/${encodeURIComponent(id)}`);
+  } catch {
+    app.replaceChildren(
+      h("main", { class: "tp" }, h("div", { class: "invite-card" }, h("h1", {}, t("This itinerary isn't available")), h("p", {}, t("It may have been unpublished by its author, or the address is incomplete.")), h("a", { class: "btn btn-primary", href: "/", "data-link": true }, t("Explore Wayline")))),
+    );
+    return () => {};
+  }
+  const back = it.source === "user" ? `/journeys/${it.id}` : `/itineraries/${it.id}`;
+  const doc = itineraryDocument(it);
+  app.replaceChildren(
+    h(
+      "main",
+      { class: "tp tp-shared" },
+      h("div", { class: "tp-bar" }, h("a", { class: "btn btn-quiet btn-sm", href: back, "data-link": true }, icon("back"), t("Back to the itinerary")), exportButtons(doc, it)),
+      doc,
+    ),
+  );
+  return () => {};
+}
+
+function itineraryDocument(it) {
+  const days = [...new Set(it.stops.map((s) => s.day))].sort((a, b) => a - b);
+  const printed = new Date().toLocaleString(locale(), { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const by = it.source === "user" ? t("By {author}", { author: it.author?.displayName ?? it.author ?? "" }) : t("Curated by Wayline");
+  const cover = photoFor(it.cover ?? it.id);
+  return h(
+    "article",
+    { class: "tp-doc", "data-export-doc": "itinerary" },
+    h(
+      "header",
+      { class: "tp-head" },
+      cover && h("div", { class: "tp-cover" }, coverImg(cover, { eager: true, decorative: true })),
+      h("p", { class: "tp-kicker" }, it.destination),
+      h("h1", { class: "tp-title" }, it.title),
+      h("p", { class: "tp-sub" }, `${tn(it.days, "{n} day", "{n} days")} · ${tn(it.stopCount, "{n} stop", "{n} stops")} · ${by}`),
+      it.description && h("p", { class: "tp-notes" }, it.description),
+    ),
+    days.map((d) =>
+      h(
+        "section",
+        { class: "tp-day" },
+        h("h2", { class: "tp-day-h" }, h("span", { class: "tp-day-n" }, t("Day {n}", { n: d }))),
+        h(
+          "ol",
+          { class: "tp-stops" },
+          it.stops
+            .filter((s) => s.day === d)
+            .map((s) => {
+              const end = s.startMin !== null && s.role !== "start" ? s.startMin + s.durationMin : null;
+              const what = s.role === "start" ? t("Starting point") : s.meal ? t(MEAL_LABEL[s.meal]) : KIND_LABEL[s.kind];
+              return h(
+                "li",
+                { class: "tp-stop" },
+                h("span", { class: "tp-time" }, s.startMin !== null ? hhmm(s.startMin) : "", end !== null && h("small", {}, `–${hhmm(end)}`)),
+                h("div", {}, h("h3", {}, s.title), h("p", { class: "tp-meta" }, [what, s.role !== "start" && s.durationMin ? dur(s.durationMin) : null].filter(Boolean).join(" · ")), s.note && h("p", { class: "tp-notes" }, s.note)),
+              );
+            }),
+        ),
+      ),
+    ),
+    h("p", { class: "tp-foot" }, t("From Wayline · exported {when}. Travel times between stops aren't part of this itinerary; copy it into a trip of your own to look them up.", { when: printed })),
+  );
+}
+
 function exportButtons(doc, trip) {
   return h(
     "div",

@@ -696,34 +696,6 @@ export function renderHome(app, ctx) {
     featMore.textContent = t("Show all {n} itineraries", { n: inPlace.length });
   }
 
-  // --- my trips ---
-  const tripsBox = h("div", { class: "mini-trips" });
-  const myTrips = h(
-    "section",
-    { class: "home-section", id: "my-trips" },
-    h("div", { class: "section-head" }, h("div", {}, h("p", { class: "eyebrow" }, h("span", { class: "eyebrow-n" }, "04"), t("Yours")), h("h2", {}, t("My trips"))), me && h("a", { class: "btn btn-ghost btn-sm", href: "/trips", "data-link": true }, t("View all"))),
-    tripsBox,
-  );
-  if (!me) {
-    tripsBox.replaceChildren(
-      h("div", { class: "empty-inline" }, h("p", {}, t("Sign in to see your trips and plan with others.")), h("a", { class: "btn btn-primary btn-sm", href: "/login?next=/", "data-link": true }, t("Sign in or create an account"))),
-    );
-  } else {
-    tripsBox.replaceChildren(h("p", { class: "muted" }, t("Loading your trips…")));
-    api("/api/trips")
-      .then(({ owned, shared }) => {
-        const all = [...owned, ...shared].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 4);
-        tripsBox.replaceChildren(
-          ...(all.length
-            ? all.map((it) =>
-  tripCard(it, { cls: "trip-card mini-trip" }),
-              )
-            : [h("div", { class: "empty-inline" }, h("p", {}, t("No trips yet. Preview an itinerary above and copy it into a trip, or start from scratch.")), h("button", { class: "btn btn-primary btn-sm", type: "button", onclick: () => ctx.createTrip() }, t("Create a trip")))]),
-        );
-      })
-      .catch((err) => tripsBox.replaceChildren(h("p", { class: "form-error" }, err.message)));
-  }
-
   // trips travellers published: their own section, labelled by author, never
   // ranked in among Wayline's curated itineraries
   const sharedGrid = h("div", { class: "it-grid" });
@@ -742,7 +714,7 @@ export function renderHome(app, ctx) {
 
   regions.append(featured);
   // search first, then inspiration, then ready-made trips (near the chosen place, then by region)
-  app.replaceChildren(ctx.topbar("home"), h("main", { class: "home" }, hero.el, explore.el, streamSection, near, regions, sharedSection, myTrips), ctx.footer());
+  app.replaceChildren(ctx.topbar("home"), h("main", { class: "home" }, hero.el, explore.el, streamSection, near, regions, sharedSection), ctx.footer());
 
   S.place = activePlace();
   renderChips();

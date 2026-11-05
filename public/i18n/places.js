@@ -122,4 +122,9 @@ export const ZH = {
   "Audio only, between the two of you. Nothing is recorded.": "仅语音，只在你们两人之间。不会录音。",
   "Connection details": "连接详情",
   "Audio only, between the two of you. Nothing is recorded or sent to the AI.": "仅语音，只在你们两人之间。不会录音，也不会发送给 AI。",
+  "Looking up the travel time from {title}…": "正在查询从 {title} 过来的交通时间…",
+  "Travel time isn't included: Google Maps isn't set up on this server.": "未计入交通时间：本服务器未配置 Google Maps。",
+  "Travel time isn't included: one of the two places can't be routed.": "未计入交通时间：其中一个地点无法查询路线。",
+  "Travel time isn't included: Google returned no route between them.": "未计入交通时间：Google 没有返回两地之间的路线。",
+  "About {time}: {title} ends at {ends}, then about {minutes} {mode} (Google Maps). Approximate.": "约 {time}：{title} 在 {ends} 结束，{mode}约 {minutes}（来自 Google Maps）。仅为约数。",
 };

@@ -50,6 +50,7 @@ const ROUTES: [string, RegExp, Route][] = [
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/routes$/, { event: "TRIP_ROUTE_CALCULATED", action: "calculate_route", message: "User calculated the route between two stops" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/segments\/[0-9a-f-]{36}\/mode$/, { event: "TRIP_ROUTE_MODE_SELECTED", action: "select_mode", message: "User chose a transport mode for a leg" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/proposals\/apply$/, { event: "TRIP_SCHEDULE_MODIFIED", action: "apply_proposal", message: "User applied a schedule fix" }],
+  ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/proposals\/apply-many$/, { event: "TRIP_SCHEDULE_MODIFIED", action: "apply_proposals", message: "Owner applied several schedule fixes at once" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/copilot$/, { event: "COPILOT_ASKED", action: "ask_copilot", message: "User asked the copilot about a day" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/plan$/, { event: "AI_PLAN_DRAFTED", action: "plan_day", message: "User asked the AI to plan a day (preview only)" }],
   ["POST", /^\/api\/trips\/[0-9a-f-]{36}\/plan\/apply$/, { event: "AI_PLAN_APPLIED", action: "apply_plan", message: "User applied a previewed AI plan" }],

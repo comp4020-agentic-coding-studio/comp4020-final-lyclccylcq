@@ -60,7 +60,7 @@ export async function renderJourney(app, id, ctx) {
           { class: "jy-actions" },
           h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: copyLink }, icon("share"), t("Copy link")),
           jn.status === "published" && h("a", { class: "btn btn-ghost btn-sm", href: `/itineraries/${jn.id}`, "data-link": true }, icon("plus"), t("Make it my own trip")),
-          h("button", { class: "btn btn-quiet btn-sm", type: "button", onclick: () => print() }, t("Print")),
+          h("a", { class: "btn btn-quiet btn-sm", href: `/itineraries/${jn.id}/export`, "data-link": true, "data-jy": "export" }, t("Export")),
         ),
       ),
       h("section", { class: "jy-map", "aria-label": t("Map of the journey") }, mapHost),

@@ -506,6 +506,11 @@ async function signedInApi(req: IncomingMessage, res: ServerResponse, url: URL, 
   r = rest.match(/^\/segments\/([0-9a-f-]{36})\/mode$/);
   if (method === "POST" && r) return json(res, 200, trips.selectMode(user.id, tripId, r[1], (await body(req)).mode));
 
+  // several fixes chosen together and confirmed once: all or nothing
+  if (method === "POST" && rest === "/proposals/apply-many") {
+    const input = await body(req);
+    return json(res, 200, trips.applyProposals(user.id, tripId, input.dayId, input.proposalIds, input.basedOn));
+  }
   if (method === "POST" && rest === "/proposals/apply") {
     const input = await body(req);
     return json(res, 200, trips.applyProposal(user.id, tripId, input.dayId, input.proposalId, input.basedOn));
@@ -679,7 +684,7 @@ async function refreshStalePlaces(tripId: string): Promise<void> {
   }
 }
 
-const APP_PAGES =/^\/(login|privacy|credits|profile|journeys\/pub-[0-9a-f-]{36}|trips|trips\/[0-9a-f-]{36}(?:\/print)?|export\/[A-Za-z0-9_-]{20,100}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80}|experiments\/pixel-train)?$/;
+const APP_PAGES =/^\/(login|about|privacy|credits|profile|journeys\/pub-[0-9a-f-]{36}|trips|trips\/[0-9a-f-]{36}(?:\/print)?|export\/[A-Za-z0-9_-]{20,100}|join\/[A-Za-z0-9_-]+|itineraries\/[a-z0-9-]{3,80}(?:\/export)?|experiments\/pixel-train)?$/;
 
 const server = createServer((req, res) => withRequest(shortId("req"), () => handle(req, res)));
 

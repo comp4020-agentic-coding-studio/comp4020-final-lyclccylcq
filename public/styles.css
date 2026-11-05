@@ -219,6 +219,9 @@ textarea { resize: vertical; }
 
 .dialog { border: 0; border-radius: 18px; padding: 26px; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-shadow: var(--shadow-lg); background: var(--surface); }
 .dialog::backdrop { background: rgba(28, 36, 48, .45); backdrop-filter: blur(2px); }
+.invite-pop { border-top: 6px solid hsl(var(--hue, 20) 70% 55%); }
+.invite-pop-head { display: flex; align-items: center; gap: 10px; }
+.invite-pop-head p { margin: 0; }
 .dialog h2 { font-family: var(--serif); font-size: 26px; font-weight: 600; }
 .dialog h3 { font-size: 15px; }
 .dialog-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; flex-wrap: wrap; margin-top: 4px; }
@@ -781,9 +784,6 @@ body:has(.call-card:not([hidden]):not(.is-mini)) .toasts { bottom: auto; top: ca
 .dest-region { font-size: 13px; opacity: .9; }
 .dest-count { margin-top: 8px; font-size: 12px; font-weight: 800; background: rgba(255,255,255,.22); padding: 3px 10px; border-radius: 999px; }
 
-.mini-trips { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
-.mini-trip { display: flex; flex-direction: column; gap: 3px; padding: 16px 18px; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); text-decoration: none; color: inherit; border-top: 6px solid hsl(var(--hue) 70% 55%); }
-.mini-trip strong { font-family: var(--serif); font-size: 19px; font-weight: 600; }
 
 .site-footer { margin-top: 56px; padding: 28px clamp(20px, 6vw, 88px) 40px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: center; }
 .site-footer nav { display: flex; gap: 16px; flex-wrap: wrap; }
@@ -1149,7 +1149,25 @@ body:has(.call-card:not([hidden]):not(.is-mini)) .toasts { bottom: auto; top: ca
 .pa-muted { color: var(--muted); }
 .pa-fixes { margin-top: 8px; font-size: 13px; }
 .pa-fixes summary { cursor: pointer; font-weight: 700; color: var(--ink-2); }
-.pa-fixes .issue { margin-top: 8px; }
+.pa-fixes .issue { margin-top: 8px; border: 0; padding: 10px 12px; border-radius: 10px; min-width: 0; }
+.pa-fixes .issue legend { padding: 0; margin-bottom: 6px; float: left; width: 100%; }
+.pa-fixes-h { font-weight: 700; color: var(--ink-2); margin: 0; }
+.pa-ai-pick { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.fix-option { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 8px; cursor: pointer; clear: both; }
+.fix-option input[type=radio] { width: auto; min-height: 0; margin: 3px 0 0; padding: 0; flex: none; box-shadow: none; }
+.fix-option > span { flex: 1; min-width: 0; }
+.fix-clear { color: var(--leaf, #2f7d4f); font-weight: 600; }
+.fix-option.on { background: var(--surface); box-shadow: var(--shadow); }
+.fix-option.is-off { opacity: .55; cursor: not-allowed; }
+.fix-option .tag-ai { margin-left: 6px; }
+.fix-why { display: block; margin-top: 2px; }
+.fix-summary { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface); }
+.pa-fixes > .btn-block { margin-top: 10px; }
+.pa-change-pick { display: flex; gap: 8px; align-items: center; flex: 1; cursor: pointer; }
+.pa-change-card { display: flex; gap: 8px; align-items: flex-start; }
+.pa-pick { width: auto; min-height: 0; padding: 0; margin: 0; flex: none; box-shadow: none; }
+.pa-change-card > .pa-pick { margin-top: 14px; }
+.pa-change-card > article { flex: 1; min-width: 0; }
 .pa-actions { display: flex; flex-direction: column; gap: 8px; }
 .pa-action {
   display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; cursor: pointer;
@@ -1763,7 +1781,7 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
 .skeleton .it-cover { background: var(--paper-2); }
 
 /* My trips, on the homepage and on its own page: the same card */
-.trip-grid, .mini-trips { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 28px 20px; }
+.trip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 28px 20px; }
 .trip-card { background: none; box-shadow: none; border-radius: 0; overflow: visible; }
 .trip-card:hover { transform: none; box-shadow: none; }
 .trip-card-band { height: auto; aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; position: relative; padding: 12px 14px; }
@@ -1775,7 +1793,6 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
 .trip-card:hover h3 { color: var(--coral-ink); }
 .trip-card-dates { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--ink-2); }
 .trip-card-meta { font-size: 12.5px; margin-top: 2px; }
-.mini-trip { border-top: 0; padding: 0; }
 
 /* My Trips page */
 .dash { gap: 56px; padding-top: 56px; }

@@ -20,6 +20,7 @@ import {
   MIN_DURATION,
   type Mode,
   MODES,
+  type Proposal,
   type RouteOption,
 } from "./schedule.ts";
 
@@ -1316,6 +1317,51 @@ export function createTripStore(db: DatabaseSync, now = () => Date.now(), onChan
             if (Number(r.changes) !== 1) throw new HttpError(409, "The plan changed before the suggestion could be applied.");
           } else {
             q("update transport_segments set selected_mode = ? where id = ?").run(c.to, c.segmentId);
+          }
+        }
+        return snapshot(tripId);
+      });
+    },
+
+    // Several fixes at once, at most one per issue, chosen from one preview
+    // and confirmed by one press: all of them in one mutate(), or none. The
+    // day must be the one the preview was built from (basedOn); each change
+    // still checks the value it replaces, so two fixes touching the same
+    // stop can't stack into something nobody previewed.
+    applyProposals(userId: string, tripId: string, dayId: unknown, proposalIds: unknown, basedOn: unknown): TripSnapshot {
+      require(tripId, userId, "apply_proposal");
+      if (!Array.isArray(proposalIds) || proposalIds.length === 0 || proposalIds.length > 20 || proposalIds.some((id) => typeof id !== "string")) {
+        throw bad("Choose between 1 and 20 fixes to apply.");
+      }
+      if (typeof basedOn !== "string") throw bad("basedOn is required: the day the fixes were shown for.");
+      const day = snapshot(tripId).days.find((d) => d.id === dayId);
+      if (!day) throw notFound("That day isn't part of this trip.");
+      if (basedOn !== day.fingerprint) {
+        throw new HttpError(409, "The plan changed since these fixes were shown. Review the updated day before applying anything.", { code: "stale" });
+      }
+      const chosen = (proposalIds as string[]).map((id) => day.analysis.proposals.find((p) => p.id === id));
+      if (chosen.some((p) => !p)) throw new HttpError(409, "One of those fixes no longer applies. The plan has changed since they were shown.", { code: "stale" });
+      const issues = new Set<string>();
+      for (const p of chosen as Proposal[]) {
+        if (issues.has(p.issueId)) throw bad("Choose one fix per problem.");
+        issues.add(p.issueId);
+      }
+      // one change per stop and field (or per leg): a second would replace a value the preview didn't show
+      const touched = new Set<string>();
+      for (const c of (chosen as Proposal[]).flatMap((p) => p.changes)) {
+        const k = c.type === "activity" ? `${c.activityId}:${c.field}` : `segment:${c.segmentId}`;
+        if (touched.has(k)) throw new HttpError(409, "Two of those fixes change the same stop. Choose one of them.", { code: "overlap" });
+        touched.add(k);
+      }
+      return mutate(tripId, userId, () => {
+        for (const c of (chosen as Proposal[]).flatMap((p) => p.changes)) {
+          if (c.type === "activity") {
+            const col = c.field === "startMin" ? "start_min" : "duration_min";
+            const r = q(`update activities set ${col} = ?, version = version + 1, updated_by = ?, updated_at = ? where id = ? and ${col} = ?`).run(c.to, userId, now(), c.activityId, c.from);
+            if (Number(r.changes) !== 1) throw new HttpError(409, "The plan changed before the fixes could be applied.");
+          } else {
+            const r = q("update transport_segments set selected_mode = ? where id = ? and selected_mode is ?").run(c.to, c.segmentId, c.from);
+            if (Number(r.changes) !== 1) throw new HttpError(409, "The plan changed before the fixes could be applied.");
           }
         }
         return snapshot(tripId);

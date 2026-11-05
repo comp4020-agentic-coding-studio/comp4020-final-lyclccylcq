@@ -118,14 +118,8 @@ export const ZH = {
   "No itineraries here yet.": "这里暂无行程。",
   "Show all {n} itineraries": "显示全部 {n} 个行程",
 
-  // --- my trips, shared
-  Yours: "你的",
-  "My trips": "我的行程",
-  "View all": "查看全部",
-  "Sign in to see your trips and plan with others.": "登录后查看你的行程，并与他人一起规划。",
-  "Sign in or create an account": "登录或注册",
+  // --- shared
   "Loading your trips…": "正在加载你的行程…",
-  "No trips yet. Preview an itinerary above and copy it into a trip, or start from scratch.": "还没有行程。预览上方的行程并复制为你的行程，或从零开始。",
   "Create a trip": "创建行程",
   "Shared by travellers": "旅行者分享",
   "Trips other Wayline travellers published. Preview one, rate it, or use it as the start of your own.": "其他 Wayline 旅行者发布的行程。可以预览、评分，或以它为起点规划自己的行程。",

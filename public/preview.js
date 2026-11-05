@@ -73,6 +73,8 @@ export async function renderPreview(app, id, ctx) {
       "div",
       { class: "pv-actions" },
       !(shared && it.status !== "published") && h("button", { class: "btn btn-primary", type: "button", "data-pv": "use", onclick: copyDialog }, icon("plus"), shared ? t("Use This Template") : t("Plan this trip")),
+      // a PDF or image of it as it is, no trip of your own needed
+      h("a", { class: "btn btn-ghost", href: `/itineraries/${it.id}/export`, "data-link": true, "data-pv": "export" }, t("Export")),
       h("span", { class: "muted small" }, t("Copies the stops into a new private trip you can edit and share.")),
     ),
     days.length > 1 && dayTabs,
