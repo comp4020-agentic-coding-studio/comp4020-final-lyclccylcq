@@ -8,7 +8,7 @@ import { renderPreview } from "/preview.js";
 import { renderProfile } from "/profile.js";
 import { renderTripExport, renderTripPrint } from "/trip-print.js";
 import { getLang, locale, setLang, t, tn } from "/i18n.js";
-import { api, ApiError, avatar, fill, fmtRange, h, icon, openDialog, relTime, toast } from "/ui.js";
+import { api, ApiError, avatar, fill, fmtRange, h, icon, openDialog, relTime, svg, toast } from "/ui.js";
 
 const app = document.getElementById("app");
 const state = { me: null, config: null };
@@ -464,36 +464,63 @@ function renderAuth(next) {
         "section",
         { class: "auth-hero" },
         h("a", { class: "brand brand-lg", href: "/readme/" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), "Wayline"),
-        h("h1", {}, t("You choose where to go."), h("br"), h("em", {}, t("Wayline helps you get there."))),
+        authTitle(),
+      ),
+      h(
+        "section",
+        { class: "auth-card" },
+        h("h2", {}, t("Start planning")),
         h(
           "p",
           { class: "lede" },
           t("Plan a trip together on one map and one timeline. Pick the places you want to visit, and Wayline works out the travel time between them and flags a plan that doesn't add up."),
         ),
-        heroArt(),
         next?.startsWith("/join/") && h("p", { class: "callout" }, t("You've been invited to a trip. Sign in or create an account to join it.")),
+        form,
       ),
-      h("section", { class: "auth-card" }, h("h2", {}, t("Start planning")), form),
+      h("p", { class: "auth-credit" }, t("Illustration: Arknights EP cover art “Till the Lands Become an Orange” © Hypergryph")),
     ),
   );
 }
 
-function heroArt() {
-  const stops = [
-    ["09:00", t("Harbour walk")],
-    ["11:30", t("Gallery")],
-    ["13:00", t("Lunch by the water")],
-  ];
+// The sign-in title, hand-lettered like the EP cover behind it: white
+// rounded strokes, little stars either side, and an orange slice for the
+// "o" in World. Screen readers get the plain sentence.
+const ORANGE_SLICE = `<svg class="slice" viewBox="0 0 40 40" aria-hidden="true">
+  <circle cx="20" cy="20" r="16" fill="none" stroke="currentColor" stroke-width="3.4"/>
+  <circle cx="20" cy="20" r="2.2" fill="currentColor"/>
+  <path d="M20 9v8.2M20 22.8V31M9 20h8.2M22.8 20H31M12.4 12.4l5.6 5.6M22 22l5.6 5.6M27.6 12.4L22 18M18 22l-5.6 5.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+</svg>`;
+const SPARK = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 1.5c.6 4.6 3.9 7.9 8.5 8.5-4.6.6-7.9 3.9-8.5 8.5-.6-4.6-3.9-7.9-8.5-8.5 4.6-.6 7.9-3.9 8.5-8.5z" fill="currentColor"/></svg>`;
+const ROUTE = `<svg viewBox="0 0 300 34" preserveAspectRatio="none" aria-hidden="true">
+  <path d="M4 22c30-14 52 10 84 2s52-18 86-8 56 10 86-2 30-8 36-6" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="1 9"/>
+  <circle cx="4" cy="22" r="4.5" fill="currentColor"/><circle cx="296" cy="8" r="4.5" fill="#f6a23a" stroke="currentColor" stroke-width="2"/>
+</svg>`;
+
+function authTitle() {
+  const spark = (cls) => h("span", { class: `spark ${cls}` }, svg(SPARK));
+  const word = (text, tilt) => h("span", { class: "w", style: `--tilt:${tilt}deg` }, text);
   return h(
-    "div",
-    { class: "hero-art", "aria-hidden": "true" },
+    "h1",
+    { class: "auth-title" },
+    h("span", { class: "sr-only" }, "Till the World Becomes a Wayline"),
     h(
-      "ol",
-      {},
-      stops.map(([time, label], i) => [
-        h("li", { class: "hero-stop" }, h("b", {}, String(i + 1)), h("span", { class: "t" }, time), h("span", {}, label)),
-        i < stops.length - 1 && h("li", { class: "hero-leg" }, i === 0 ? t("18 min by ferry") : t("12 min walk")),
-      ]),
+      "span",
+      { class: "lettering", "aria-hidden": "true" },
+      h(
+        "span",
+        { class: "line" },
+        spark("s1"), spark("s2"),
+        word("Till", -4), word("the", 3),
+        h("span", { class: "w", style: "--tilt:-2deg" }, "W", svg(ORANGE_SLICE), "rld"),
+      ),
+      h(
+        "span",
+        { class: "line" },
+        word("Becomes", 2), word("a", -3),
+        h("span", { class: "w wayline", style: "--tilt:-1.5deg" }, "Wayline", h("span", { class: "route" }, svg(ROUTE))),
+        spark("s3"), spark("s4"),
+      ),
     ),
   );
 }
