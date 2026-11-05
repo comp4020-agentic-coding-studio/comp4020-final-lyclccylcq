@@ -35,8 +35,8 @@ gateway later means changing that one module.
      and modes for calculated legs from the transport preferences.
   4. The person sees a preview. **Apply Plan** sends only the draft's id; the
      server applies exactly what it previewed, in one change, and refuses if
-     the day changed (409) or the person lacks the right (a collaborator can
-     add stops but not reorder the owner's or choose modes: 403).
+     the day changed (409). Since November 2026 collaborators may apply it
+     too, like the owner (docs/permissions.md).
 
 ### Opening hours
 
