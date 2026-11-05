@@ -155,59 +155,29 @@ textarea { resize: vertical; }
 
 /* --- auth --- */
 
-/* Sign-in sits on the EP cover art: sky on top, the falling travellers
-   along the bottom. The title is hand-lettered white in the sky, the way
-   the cover's own title is; the form floats on frosted glass. */
-.auth {
-  --sky: #0a6aab;
-  position: relative; min-height: 100vh; min-height: 100dvh; isolation: isolate;
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 410px); align-items: start;
-  gap: 32px clamp(24px, 4vw, 72px); padding: clamp(24px, 4vh, 44px) clamp(20px, 5vw, 80px) 120px;
-  background: #0068a8 url("/img/art/auth-bg-hd.webp") center bottom / cover no-repeat;
-  color: #fff;
+.auth { min-height: 100vh; display: grid; grid-template-columns: 1.15fr .85fr; }
+.auth-hero {
+  position: relative; overflow: hidden; padding: 48px clamp(24px, 6vw, 88px);
+  display: flex; flex-direction: column; gap: 26px; justify-content: center;
+  background:
+    radial-gradient(circle at 85% 15%, rgba(246, 195, 67, .45), transparent 32%),
+    radial-gradient(circle at 10% 90%, rgba(15, 124, 140, .22), transparent 40%),
+    var(--paper);
 }
-.auth::before { /* a little more depth behind the lettering, none over the art */
-  content: ""; position: absolute; inset: 0 0 45% 0; z-index: -1; pointer-events: none;
-  background: linear-gradient(180deg, rgba(0, 62, 120, .35), transparent);
-}
-.auth-hero { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.auth .brand { color: #fff; text-shadow: 0 1px 6px rgba(0, 40, 90, .35); }
-.auth .lede { margin: -6px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--ink-2); }
+.auth-hero h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(36px, 4.6vw, 62px); letter-spacing: -.02em; line-height: 1.04; }
+.auth-hero h1 em { color: var(--coral); font-style: italic; }
+.lede { font-size: 18px; color: var(--ink-2); max-width: 36em; }
 .callout { background: var(--surface); border-left: 4px solid var(--coral); padding: 12px 16px; border-radius: var(--radius-sm); box-shadow: var(--shadow); font-weight: 600; }
-.auth .callout { color: var(--ink); margin: 0; }
-
-.auth-title { margin: 6px 0 0; font: 400 clamp(40px, 4.7vw, 88px)/1.04 "Gochi Hand", "Comic Sans MS", cursive; letter-spacing: .01em; }
-.auth-title .lettering { display: flex; flex-direction: column; gap: .02em; }
-.auth-title .line { position: relative; display: flex; flex-wrap: nowrap; white-space: nowrap; align-items: baseline; gap: 0 .26em; }
-.auth-title .line + .line { padding-left: .9em; }
-.auth-title .w {
-  display: inline-flex; align-items: baseline; position: relative; transform: rotate(var(--tilt, 0deg));
-  color: #fff; -webkit-text-stroke: .018em #fff; paint-order: stroke fill;
-  filter: drop-shadow(0 .03em 0 rgba(0, 50, 105, .28)) drop-shadow(0 0 .2em rgba(0, 45, 100, .25));
+.hero-art ol { list-style: none; margin: 0; padding: 0; max-width: 360px; }
+.hero-stop {
+  display: flex; align-items: center; gap: 12px; background: var(--surface); border-radius: 12px;
+  padding: 12px 14px; box-shadow: var(--shadow); font-weight: 600;
 }
-.auth-title .slice { width: .56em; height: .56em; margin: 0 .02em; align-self: center; transform: translateY(.06em) rotate(-12deg); color: #fff; }
-.auth-title .slice circle:first-child { fill: #f6a23a; }
-.auth-title .wayline .route { position: absolute; left: -.08em; right: -.18em; bottom: -.24em; height: .28em; color: #fff; }
-.auth-title .wayline .route svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.auth-title .spark { position: absolute; color: #fff; filter: drop-shadow(0 0 .12em rgba(0, 45, 100, .3)); }
-.auth-title .spark svg { display: block; width: 100%; height: 100%; }
-.auth-title .s1 { width: .3em; height: .3em; left: -.42em; top: .02em; }
-.auth-title .s2 { width: .17em; height: .17em; left: -.6em; top: .42em; }
-.auth-title .s3 { position: relative; width: .3em; height: .3em; align-self: flex-start; margin-left: -.06em; }
-.auth-title .s4 { position: relative; width: .17em; height: .17em; align-self: center; margin-left: -.22em; }
-
-.auth-card {
-  display: flex; flex-direction: column; gap: 16px; margin-top: clamp(0px, 3vh, 32px);
-  padding: 28px clamp(22px, 2.4vw, 32px); color: var(--ink);
-  background: rgba(255, 255, 255, .84); border: 1px solid rgba(255, 255, 255, .7); border-radius: 18px;
-  -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2);
-  box-shadow: 0 24px 60px -24px rgba(0, 40, 90, .55);
-}
-.auth-card h2 { font-family: "Gochi Hand", cursive; font-weight: 400; font-size: 34px; letter-spacing: .01em; color: var(--sky); }
-.auth-credit {
-  position: absolute; right: 14px; bottom: 10px; margin: 0; max-width: calc(100% - 28px);
-  font-size: 11px; color: rgba(255, 255, 255, .9); text-shadow: 0 1px 3px rgba(0, 0, 0, .55); text-align: right;
-}
+.hero-stop b { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 13px; }
+.hero-stop .t { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+.hero-leg { margin-left: 26px; padding: 8px 0 8px 22px; border-left: 3px dotted var(--coral); color: var(--coral-ink); font-size: 13px; font-weight: 700; }
+.auth-card { display: flex; flex-direction: column; justify-content: center; gap: 20px; padding: 48px clamp(24px, 5vw, 72px); background: var(--surface); border-left: 1px solid var(--line); }
+.auth-card h2 { font-family: var(--serif); font-size: 30px; }
 .auth-form { display: flex; flex-direction: column; gap: 16px; max-width: 400px; }
 .seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--paper-2); border-radius: 999px; padding: 4px; }
 .seg button { border: 0; background: transparent; padding: 8px; border-radius: 999px; font-weight: 700; cursor: pointer; color: var(--muted); }
@@ -619,11 +589,10 @@ body:has(.call-card:not([hidden]):not(.is-mini)) .toasts { bottom: auto; top: ca
   .workspace.with-copilot .pane-copilot { position: fixed; z-index: 20; top: var(--bar-h); right: 0; bottom: 0; width: min(380px, 100vw); box-shadow: var(--shadow-lg); }
 }
 @media (max-width: 899px) {
-  .auth { grid-template-columns: 1fr; gap: 18px; min-height: 100vh; padding-bottom: 82vw; background-size: 190% auto; background-position: 40% bottom; }
-  .auth-title { font-size: clamp(34px, 10.4vw, 64px); }
-  .auth-title .line { flex-wrap: wrap; white-space: normal; }
-  .auth-card { margin-top: 4px; max-width: 460px; }
-  .auth-credit { font-size: 10px; }
+  .auth { grid-template-columns: 1fr; }
+  .auth-hero { padding-top: 32px; }
+  .hero-art { display: none; }
+  .auth-card { border-left: 0; border-top: 1px solid var(--line); }
   .hide-phone { display: none !important; }
   .me-name { display: none; }
 
@@ -1526,7 +1495,7 @@ a { color: var(--sea); text-underline-offset: 3px; }
 
 input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color: var(--line-2); }
 .dialog { border-radius: 14px; }
-.dialog h2, .invite-card h1, .empty h3, .timeline-empty h3, .empty-inline h3 { font-family: var(--sans); font-weight: 600; letter-spacing: -.02em; }
+.dialog h2, .auth-card h2, .invite-card h1, .empty h3, .timeline-empty h3, .empty-inline h3 { font-family: var(--sans); font-weight: 600; letter-spacing: -.02em; }
 
 /* --- top bar --- */
 .topbar { height: 60px; background: color-mix(in srgb, var(--paper) 88%, transparent); backdrop-filter: saturate(1.4) blur(12px); -webkit-backdrop-filter: saturate(1.4) blur(12px); border-bottom-color: var(--line); }
@@ -1841,6 +1810,41 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
 .site-footer nav a:hover { color: var(--ink); text-decoration: underline; }
 
 /* sign in */
+/* The title is hand-lettered: Gochi Hand (ZCOOL KuaiLe for Chinese), every
+   word on its own tilt, ink then coral, an orange slice for an o, a dotted
+   route under Wayline and sparkles at the ends. */
+.auth-hero .auth-title {
+  margin: 0; font: 400 clamp(32px, 3.5vw, 60px)/1.1 "Gochi Hand", "ZCOOL KuaiLe", "Comic Sans MS", cursive;
+  letter-spacing: .01em; text-transform: none; color: var(--ink);
+}
+.auth-title .lettering { display: flex; flex-direction: column; gap: .06em; }
+.auth-title .line { position: relative; display: flex; align-items: baseline; gap: 0 .26em; }
+.auth-title .line-2 { padding-left: .7em; color: var(--coral); }
+:lang(zh) .auth-title .line { gap: 0 .02em; }
+:lang(zh) .auth-title .wayline { margin-left: .14em; }
+.auth-title .line { flex-wrap: nowrap; white-space: nowrap; }
+@media (max-width: 899px) {
+  .auth-hero .auth-title { font-size: min(6.1vw, 44px); }
+  .auth-title .line-2 { padding-left: .5em; }
+}
+.auth-title .w {
+  display: inline-flex; align-items: baseline; position: relative; transform: rotate(var(--tilt, 0deg));
+  -webkit-text-stroke: .016em currentColor; paint-order: stroke fill;
+}
+.auth-title .slice { width: .5em; height: .5em; margin: 0 .03em; align-self: center; transform: translateY(.08em) rotate(-12deg); color: var(--ink); }
+.auth-title .wayline { position: relative; }
+.auth-title .wayline .route { position: absolute; left: -.08em; right: -.18em; bottom: -.22em; height: .28em; color: var(--ink); }
+.auth-title .route svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.auth-title .spark { position: absolute; color: #f6a23a; }
+.auth-title .spark svg { display: block; width: 100%; height: 100%; }
+.auth-title .s1 { width: .3em; height: .3em; left: -.42em; top: .02em; }
+.auth-title .s2 { width: .17em; height: .17em; left: -.6em; top: .42em; }
+.auth-title .s3 { position: relative; width: .3em; height: .3em; align-self: flex-start; margin-left: -.06em; }
+.auth-title .s4 { position: relative; width: .17em; height: .17em; align-self: center; margin-left: -.22em; }
+.hero-stop { border-radius: 8px; box-shadow: none; border: 1px solid var(--line); }
+.hero-stop b { font-family: var(--mono); font-weight: 600; }
+.hero-stop .t { font-family: var(--mono); }
+.hero-leg { border-left: 4px dashed var(--line-2); color: var(--ink-2); font-family: var(--mono); font-weight: 500; }
 .callout { box-shadow: none; border: 1px solid var(--line); border-left: 4px solid var(--ink); border-radius: 8px; font-weight: 500; }
 .seg { border-radius: 9px; }
 .seg button { border-radius: 7px; }
@@ -2053,7 +2057,7 @@ main.home, body:has(main.home) .topbar { --line: #c3bfb3; --line-2: #a29d90; }
 /* the display face only for big page and section names, there to be looked
    at. Anything read while working (a day's date, a list of trips, numbers,
    panel titles) stays in the grotesk: tall condensed capitals tire the eye. */
-.jh-title, .hx .jh-title, .section-head h2, #explore-map h2, .dash-hero h1,
+.jh-title, .hx .jh-title, .section-head h2, #explore-map h2, .dash-hero h1, .auth-hero h1,
 .hx .jh-place {
   font-family: var(--display); font-weight: 800; text-transform: uppercase; letter-spacing: -.005em; line-height: .9;
 }

@@ -122,7 +122,7 @@ const json = (res: ServerResponse, status: number, data: unknown, headers: Recor
 // Files only by a plain name (no slashes, no dots up front), under one of a
 // few known folders at most, so nothing outside them can be asked for.
 function serveFile(res: ServerResponse, dir: string, name: string, range?: string): boolean {
-  if (!/^((img\/covers|img\/train|img\/art|video|i18n)\/)?[\w-][\w.-]*$/.test(name)) return false;
+  if (!/^((img\/covers|img\/train|video|i18n)\/)?[\w-][\w.-]*$/.test(name)) return false;
   const path = join(dir, name);
   if (!existsSync(path)) return false;
   // media doesn't change in place (a new file gets a new name), so browsers may keep it
