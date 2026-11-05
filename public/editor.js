@@ -414,6 +414,10 @@ export async function openEditor(root, tripId, ctx) {
     const tr = S.trip;
     const online = S.presence.length ? S.presence : [{ id: me.id, displayName: me.displayName }];
     const issues = tr.days.reduce((n, d) => n + d.analysis.issues.length, 0);
+    const requests = isOwner() ? tr.pendingRequests : 0;
+    // the name begins with the visible word, so a voice command naming it still works
+    const shareName = requests > 0 ? `${t("Share")}, ${t("{n} requests to join", { n: requests })}` : t("Share");
+    const publishName = tr.publication?.status === "published" ? (tr.publication.outdated ? t("Update published") : t("Published")) : t("Publish Trip");
     fill(
       bar,
       h("a", { class: "icon-btn", href: "/", "data-link": true, "aria-label": t("Back to your trips") }, icon("back")),
@@ -445,8 +449,11 @@ export async function openEditor(root, tripId, ctx) {
       ),
       saveState(),
       voice.render(),
-      h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => shareDialog(sharing()) }, icon("share"), h("span", { class: "hide-sm" }, t("Share")), isOwner() && tr.pendingRequests > 0 && h("span", { class: "badge badge-danger", "aria-label": t("{n} requests to join", { n: tr.pendingRequests }) }, String(tr.pendingRequests))),
-      isOwner() && h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-publish": tr.publication?.status ?? "none", onclick: () => publishDialog(sharing()) }, icon("spark"), h("span", { class: "hide-sm" }, tr.publication?.status === "published" ? (tr.publication.outdated ? t("Update published") : t("Published")) : t("Publish Trip"))),
+      // On a phone these two show only their icon (the words are hidden),
+      // so each carries its name, with the waiting requests and the actual
+      // publication state, in its own aria-label.
+      h("button", { class: "btn btn-ghost btn-sm", type: "button", "aria-label": shareName, onclick: () => shareDialog(sharing()) }, icon("share"), h("span", { class: "hide-sm" }, t("Share")), requests > 0 && h("span", { class: "badge badge-danger", "aria-label": t("{n} requests to join", { n: requests }) }, String(requests))),
+      isOwner() && h("button", { class: "btn btn-ghost btn-sm", type: "button", "aria-label": publishName, "data-publish": tr.publication?.status ?? "none", onclick: () => publishDialog(sharing()) }, icon("spark"), h("span", { class: "hide-sm" }, publishName)),
       // a printable copy for anyone on the trip, published or not
       h("a", { class: "btn btn-ghost btn-sm", href: `/trips/${tripId}/print`, "data-link": true, "data-export": "print", title: t("Print the plan or save it as a PDF") }, h("span", {}, t("Export"))),
       isOwner() && h("button", { class: "icon-btn", type: "button", "aria-label": t("Trip settings"), onclick: settingsDialog }, icon("settings")),

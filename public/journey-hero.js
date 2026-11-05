@@ -101,7 +101,7 @@ export function journeyHero({ start, onSearch }) {
   const count = h("span", { class: "jh-count", "aria-hidden": "true" });
   // the quieter action: a text link naming the destination on view
   const exploreName = h("span", {}, t(SCENES[0].name));
-  const explore = h("a", { class: "jh-explore", href: SCENES[0].explore ?? "/#explore-map" }, h("span", {}, t("Explore "), exploreName), h("span", { class: "jh-explore-arrow", "aria-hidden": "true" }, "\u2192"));
+  const explore = h("a", { class: "jh-explore", href: exploreFor(SCENES[0]).href ?? "/#explore-map" }, h("span", {}, t("Explore "), exploreName), h("span", { class: "jh-explore-arrow", "aria-hidden": "true" }, "\u2192"));
   explore.addEventListener("click", (e) => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     const go = exploreFor(SCENES[shown]);

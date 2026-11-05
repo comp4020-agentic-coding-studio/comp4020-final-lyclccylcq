@@ -121,6 +121,150 @@ describe.skipIf(!chromePath)("regressions: order, focus, header, entry points", 
     expect(await page.eval(`document.querySelector('.search-panel').hidden`)).toBe(true);
   }, 30_000);
 
+  // The homepage map's places list, with answers held and released out of
+  // order (no Google key: demo places around Sydney, none around Canberra,
+  // and "In Wayline plans" answered from Wayline's own plans). Each case
+  // checks what the panel and map end up showing: the list, its markers,
+  // the note naming the place, the error line and the loading line.
+  describe("the homepage map's places, answered out of order", () => {
+    const side = `document.querySelector('#explore-map .xm-side').textContent`;
+    const note = `document.querySelector('#explore-map .xm-note').textContent`;
+    const rows = `[...document.querySelectorAll('#explore-map .place-row strong')].map((e) => e.textContent)`;
+    const marks = `document.querySelectorAll('#explore-map .schematic-result').length`;
+    const loading = `Boolean(document.querySelector('#explore-map .xm-side [role=status]'))`;
+    const error = `document.querySelector('#explore-map .xm-side .form-error')?.textContent ?? null`;
+    const pressed = `document.querySelector('#explore-map .xm-cats button[aria-pressed=true]')?.textContent ?? null`;
+    const open = async () => {
+      const page = await browser.newPage();
+      await page.viewport(1440, 900);
+      await page.initScript(HOLD);
+      await page.goto(new URL("/", baseUrl).href);
+      await page.waitFor(`document.querySelector('#explore-map .xm-ideas button')`, 10000);
+      return page;
+    };
+    const city = (page: Page, name: string) => page.eval(`[...document.querySelectorAll('#explore-map .xm-ideas button')].find((b) => b.textContent === ${JSON.stringify(name)}).click()`);
+    const chip = (page: Page, label: string) => page.eval(`[...document.querySelectorAll('#explore-map .xm-cats button')].find((b) => b.textContent === ${JSON.stringify(label)}).click()`);
+    const search = (page: Page, q: string) => page.eval(`(() => { const i = document.querySelector('#explore-map .xm-search input'); i.value = ${JSON.stringify(q)}; i.form.requestSubmit(); })()`);
+    const inSydney = async (page: Page) => {
+      await city(page, "Sydney");
+      await page.waitFor(`${rows}.includes("Queen Victoria Building")`, 8000);
+    };
+
+    it("keeps the newer city's places when the older city answers last", async () => {
+      const page = await open();
+      await page.eval(`window.__hold("places/nearby")`);
+      await city(page, "Canberra");
+      await page.waitFor(`window.__held("places/nearby") === 1`);
+      // Sydney from its city card further down (it changes the destination, as the quick picks do)
+      await page.waitFor(`document.querySelector('#city-sydney .rx-go')`, 10000);
+      await page.click("#city-sydney .rx-go");
+      await page.waitFor(`window.__held("places/nearby") === 2`);
+      await page.eval(`window.__release("lat=-33.8688")`);
+      await page.waitFor(`${rows}.includes("Queen Victoria Building")`, 8000);
+      await page.eval(`window.__release("lat=-35.2809")`); // Canberra: no demo places
+      await sleep(400);
+      expect(await page.eval(note)).toContain("Sydney");
+      expect(await page.eval(rows)).toContain("Queen Victoria Building");
+      expect(await page.eval(side)).not.toMatch(/No places found here/);
+      expect(await page.eval(marks)).toBe((await page.eval<string[]>(rows)).length);
+      expect(await page.eval(loading)).toBe(false);
+      expect(await page.eval(error)).toBe(null);
+    }, 30_000);
+
+    it("ignores an older category's failure after the newer one answered", async () => {
+      const page = await open();
+      await inSydney(page);
+      await page.eval(`window.__hold("places/nearby"); window.__hold("itineraries/highlights")`);
+      await chip(page, "Museums");
+      await page.waitFor(`window.__held("type=museum") === 1`);
+      await chip(page, "In Wayline plans");
+      await page.waitFor(`window.__held("itineraries/highlights") === 1`);
+      await page.eval(`window.__release("itineraries/highlights")`);
+      await page.waitFor(`!${loading}`, 8000);
+      const wayline = await page.eval<string[]>(rows);
+      expect(wayline.length).toBeGreaterThan(0);
+      await page.eval(`window.__release("type=museum", 0, true)`);
+      await sleep(400);
+      expect(await page.eval(error)).toBe(null);
+      expect(await page.eval(rows)).toEqual(wayline);
+      expect(await page.eval(marks)).toBe(wayline.length);
+      expect(await page.eval(pressed)).toBe("In Wayline plans");
+      expect(await page.eval(loading)).toBe(false);
+    }, 30_000);
+
+    it("ignores an older search or category once the query has changed, and keeps the newer one loading", async () => {
+      const page = await open();
+      await inSydney(page);
+      await page.eval(`window.__hold("places/nearby"); window.__hold("places/search")`);
+      // a search, then a category: the search's late answer (one place) is
+      // ignored, and its ending doesn't end the category's loading
+      await search(page, "Opera");
+      await page.waitFor(`window.__held("places/search") === 1`);
+      await chip(page, "Parks");
+      await page.waitFor(`window.__held("type=park") === 1`);
+      await page.eval(`window.__release("places/search")`);
+      await sleep(400);
+      expect(await page.eval(loading)).toBe(true); // still waiting for Parks
+      expect(await page.eval(rows)).toEqual([]);
+      await page.eval(`window.__release("type=park")`);
+      await page.waitFor(`!${loading}`, 8000);
+      expect((await page.eval<string[]>(rows)).length).toBe(10); // the full demo list
+      expect(await page.eval(pressed)).toBe("Parks");
+      // a category, then a search: the category's late answer is ignored
+      await chip(page, "Restaurants");
+      await page.waitFor(`window.__held("type=restaurant") === 1`);
+      await search(page, "Bridge");
+      await page.waitFor(`window.__held("places/search") === 1`);
+      await page.eval(`window.__release("places/search")`);
+      await page.waitFor(`!${loading}`, 8000);
+      await page.eval(`window.__release("type=restaurant")`);
+      await sleep(400);
+      expect(await page.eval(rows)).toEqual(["Sydney Harbour Bridge"]);
+      expect(await page.eval(marks)).toBe(1);
+      expect(await page.eval(pressed)).toBe(null);
+      expect(await page.eval(loading)).toBe(false);
+    }, 30_000);
+
+    it("changes nothing when a pending answer arrives after the place is cleared", async () => {
+      const page = await open();
+      await inSydney(page);
+      await page.eval(`window.__hold("places/nearby")`);
+      await chip(page, "Cafés");
+      await page.waitFor(`window.__held("type=cafe") === 1`);
+      await chip(page, "Zoos");
+      await page.waitFor(`window.__held("type=zoo") === 1`);
+      await page.eval(`[...document.querySelectorAll('.chip-place ~ button')].find((x) => /Clear/.test(x.textContent)).click()`);
+      await page.waitFor(`document.querySelector('#explore-map .xm-start-title')`);
+      await page.eval(`window.__release("type=cafe")`);
+      await page.eval(`window.__release("type=zoo", 0, true)`);
+      await sleep(400);
+      expect(await page.eval(`Boolean(document.querySelector('#explore-map .xm-start-title'))`)).toBe(true);
+      expect(await page.eval(rows)).toEqual([]);
+      expect(await page.eval(marks)).toBe(0);
+      expect(await page.eval(error)).toBe(null);
+      expect(await page.eval(note)).toMatch(/Search a city/);
+    }, 30_000);
+
+    it("never draws into the map after leaving the page, whether the answer succeeds or fails", async () => {
+      const page = await open();
+      await page.eval(`window.__hold("places/nearby")`);
+      await city(page, "Sydney");
+      await page.waitFor(`window.__held("places/nearby") === 1`);
+      await chip(page, "Museums");
+      await page.waitFor(`window.__held("type=museum") === 1`);
+      await page.eval(`window.__xm = document.querySelector('#explore-map')`);
+      await page.eval(`document.querySelector('.site-footer a[href="/credits"]').click()`);
+      await page.waitFor(`location.pathname === '/credits'`);
+      await page.eval(`window.__xmBefore = window.__xm.innerHTML`);
+      await page.eval(`window.__release("type=tourist_attraction")`);
+      await page.eval(`window.__release("type=museum", 0, true)`);
+      await sleep(400);
+      expect(await page.eval(`window.__xm.innerHTML === window.__xmBefore`)).toBe(true);
+      expect(await page.eval(`window.__xm.querySelectorAll('.place-row, .form-error').length`)).toBe(0);
+      expect(await page.eval(`Boolean(document.querySelector('#explore-map'))`)).toBe(false);
+    }, 30_000);
+  });
+
   it("keeps the keyboard where it was when a collaborator changes the plan", async () => {
     const a = await browser.newPage();
     await a.viewport(1440, 900);

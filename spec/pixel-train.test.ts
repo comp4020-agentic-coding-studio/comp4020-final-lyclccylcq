@@ -147,13 +147,29 @@ describe("automatic journey playback", () => {
     }
   });
 
-  it("links to existing itineraries, with map destinations for Switzerland and Maldives", () => {
-    const slugs = new Set(CURATED.map((c) => `/itineraries/${c.slug}`));
+  // The links are built from the template's real id (`tpl-` + its slug, as
+  // src/itineraries.ts seeds it), and each one must answer on the server:
+  // a link that matched only the slug used to open "Itinerary not found".
+  it("links to existing itineraries, with map destinations for Switzerland and Maldives", async () => {
+    const ids = new Set(CURATED.map((c) => `tpl-${c.slug}`));
+    const linked = [];
     for (const s of J.SCENES) {
       const go = J.exploreFor(s);
-      if (go.href) expect(slugs.has(go.href), s.id).toBe(true);
-      else expect(go.search).toMatchObject({ label: expect.any(String), lat: expect.any(Number), lng: expect.any(Number) });
+      if (!go.href) {
+        expect(go.search, s.id).toMatchObject({ label: expect.any(String), lat: expect.any(Number), lng: expect.any(Number) });
+        continue;
+      }
+      expect(ids.has(s.explore), s.id).toBe(true);
+      expect(go.href, s.id).toBe(`/itineraries/${s.explore}`);
+      const r = await fetch(new URL(`/api${go.href}`, baseUrl));
+      expect(r.status, s.id).toBe(200);
+      const it = await r.json();
+      expect(it.id, s.id).toBe(s.explore);
+      expect(it.title, s.id).toBe(CURATED.find((c) => `tpl-${c.slug}` === s.explore)!.title);
+      expect(it.stops.length, s.id).toBeGreaterThan(0);
+      linked.push(s.id);
     }
+    expect(linked).toEqual(["london", "sydney", "shanghai"]);
   });
 });
 
@@ -234,8 +250,35 @@ describe.skipIf(!chromePath)("homepage journey in a real browser", () => {
     await page.click(".jh-pause");
     await page.waitFor("window.__journey.state().clock > " + Number(J.sceneStart(2) + 0.1));
     await page.click(".jh-actions a");
-    await page.waitFor("location.pathname === '/itineraries/sydney-harbour-highlights'");
+    await page.waitFor("location.pathname === '/itineraries/tpl-sydney-harbour-highlights'");
+    await page.waitFor("document.querySelector('.preview h1')?.textContent === 'Sydney Harbour Highlights'", 10000);
     expect(await page.eval("window.__journey")).toBeUndefined();
+  });
+
+  // Every destination's "Explore" opens a real plan: its preview loads with
+  // the template's title and stops, and the not-found card never shows.
+  // Switzerland and the Maldives have no plan, and search the map instead.
+  it("opens a loaded itinerary from every destination that links to one", async () => {
+    const opened = [];
+    for (const [i, s] of J.SCENES.entries()) {
+      const page = await open(true);
+      await page.eval(`document.querySelectorAll('.jh-stop')[${i}].click()`);
+      await page.waitFor(`window.__journey.state().shown === ${i}`);
+      await page.click(".jh-actions a");
+      if (!s.explore) {
+        await page.waitFor(`document.querySelector('.chip-place')?.textContent.includes(${JSON.stringify(s.search.label)})`, 10000);
+        expect(await page.eval("location.pathname"), s.id).toBe("/");
+        continue;
+      }
+      const title = CURATED.find((c) => `tpl-${c.slug}` === s.explore)!.title;
+      await page.waitFor(`location.pathname === ${JSON.stringify(`/itineraries/${s.explore}`)}`);
+      await page.waitFor(`!document.querySelector('.preview .boot')`, 10000);
+      expect(await page.eval("document.querySelector('.invite-card h1')?.textContent ?? null"), s.id).toBeNull();
+      expect(await page.eval("document.querySelector('.preview h1')?.textContent"), s.id).toBe(title);
+      expect(await page.eval("document.querySelectorAll('.pv-stops li').length"), s.id).toBeGreaterThan(0);
+      opened.push(s.id);
+    }
+    expect(opened).toEqual(["london", "sydney", "shanghai"]);
   });
 
   it("stays still for reduced motion, loads only the chosen photos and supports rapid selection", async () => {

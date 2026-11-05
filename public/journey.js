@@ -28,8 +28,10 @@
 //           inside the glass (checked in spec/journey.test.ts)
 //   phoneZoom (optional) how much closer a phone's narrow window looks, for
 //           a skyline that's a thin band across a wide panorama
-// `explore` is the curated itinerary the hero's button opens; without one,
-// `search` is where the homepage's map search goes instead.
+// `explore` is the id of the curated itinerary the hero's button opens,
+// exactly as the server stores it (`tpl-` + the slug in src/curated.ts),
+// never a path; without one, `search` is where the homepage's map search
+// goes instead.
 export const SCENES = [
   {
     id: "switzerland",
@@ -46,7 +48,7 @@ export const SCENES = [
     id: "london",
     name: "London",
     subtitle: "Across the Thames",
-    explore: "/itineraries/london-royal-riverside",
+    explore: "tpl-london-royal-riverside",
     night: false,
     // the horizon sits a little above the middle, so the river and the
     // Eye fill the view rather than the open sky
@@ -58,7 +60,7 @@ export const SCENES = [
     id: "sydney",
     name: "Sydney",
     subtitle: "Around the harbour",
-    explore: "/itineraries/sydney-harbour-highlights",
+    explore: "tpl-sydney-harbour-highlights",
     night: false,
     // a very wide panorama (4.1:1): the view is centred near the Opera
     // House and drifts on to the Harbour Bridge
@@ -82,7 +84,7 @@ export const SCENES = [
     id: "shanghai",
     name: "Shanghai",
     subtitle: "Night on the Huangpu",
-    explore: "/itineraries/shanghai-bund-gardens",
+    explore: "tpl-shanghai-bund-gardens",
     night: true,
     // the Pearl Tower is 0.4 of the photo's width tall, so a wider drift
     // would scale it past the window's top: its least drift is the smallest
@@ -322,4 +324,4 @@ export function band(t) {
 
 // What the hero's "Explore This Destination" does for scene s: open its
 // curated itinerary, or search the homepage's map for the place.
-export const exploreFor = (s) => (s.explore ? { href: s.explore } : { search: s.search });
+export const exploreFor = (s) => (s.explore ? { href: `/itineraries/${encodeURIComponent(s.explore)}` } : { search: s.search });

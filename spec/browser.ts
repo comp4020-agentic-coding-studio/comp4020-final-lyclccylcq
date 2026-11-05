@@ -47,6 +47,12 @@ export type Page = {
   type(text: string): Promise<void>;
   // script run in every document this page loads, before the page's own
   initScript(source: string): Promise<void>;
+  // the accessible names of the elements with this role, from Chrome's own
+  // accessibility tree (what a screen reader is given), rendered ones only
+  accessibleNames(role: string): Promise<string[]>;
+  // a real click on the one element with this role and accessible name, found
+  // through the accessibility tree; throws unless exactly one matches
+  clickAccessible(role: string, name: string): Promise<void>;
 };
 
 // A mono 16-bit WAV of a sine tone, for Chrome's fake microphone: each
@@ -207,6 +213,23 @@ export async function launch(opts: { media?: { wav: string } | "deny" } = {}) {
       },
       async microphone(origin, setting) {
         await send("Browser.setPermission", { permission: { name: "microphone" }, setting, origin, browserContextId });
+      },
+      async accessibleNames(role) {
+        await s("Accessibility.enable");
+        const { nodes } = await s("Accessibility.getFullAXTree");
+        return nodes.filter((n: any) => !n.ignored && n.role?.value === role).map((n: any) => String(n.name?.value ?? ""));
+      },
+      async clickAccessible(role, name) {
+        await s("Accessibility.enable");
+        await s("DOM.enable");
+        const { nodes } = await s("Accessibility.getFullAXTree");
+        const found = nodes.filter((n: any) => !n.ignored && n.role?.value === role && n.name?.value === name && n.backendDOMNodeId);
+        if (found.length !== 1) throw new Error(`${found.length} accessible ${role}s named ${JSON.stringify(name)}`);
+        const { model } = await s("DOM.getBoxModel", { backendNodeId: found[0].backendDOMNodeId });
+        const [x1, y1, , , x3, y3] = model.content;
+        const x = (x1 + x3) / 2;
+        const y = (y1 + y3) / 2;
+        for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await s("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
       },
       async screenshot(path) {
         const { data } = await s("Page.captureScreenshot", { format: "png" });

@@ -973,6 +973,82 @@ describe.skipIf(!chromePath)("publishing and trip settings", () => {
     expect((await fetch(new URL(`/api${pubPath}`, baseUrl))).status).toBe(404); // hidden from everyone else
   });
 
+  // On a phone the trip bar's Share and Publish show only their icons, so
+  // each must still be named, in the page's language and for the trip's
+  // real publication state. Found through Chrome's accessibility tree by
+  // role and name (what a screen reader is given), and pressed that way.
+  for (const vp of VIEWPORTS) {
+    for (const lang of ["en", "zh"] as const) {
+      it(`names Share and Publish in every publication state (${vp.name}, ${lang})`, { timeout: 40_000 }, async () => {
+        const page = await browser!.newPage();
+        await page.viewport(vp.width, vp.height, vp.mobile);
+        await signUpIn(page, baseUrl, uniqueName("aname"));
+        await inPage(page, "PATCH", "/api/me/profile", { lang });
+        const trip = await tripWithStops(page);
+        const N = lang === "zh"
+          ? { share: "分享", publish: "发布行程", published: "已发布", update: "更新已发布版本", requests: "分享, 1 个加入请求" }
+          : { share: "Share", publish: "Publish Trip", published: "Published", update: "Update published", requests: "Share, 1 requests to join" };
+        const open = async () => {
+          await page.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
+          await page.waitFor(`document.querySelector('.conn-live')`, 8000);
+        };
+        const buttons = () => page.accessibleNames("button");
+        const iconOnly = `[...document.querySelectorAll('.trip-bar [data-publish], .trip-bar .btn')].filter((b) => b.querySelector('.hide-sm')).every((b) => getComputedStyle(b.querySelector('.hide-sm')).display === 'none')`;
+        const publication = () => inPage(page, "GET", `/api/trips/${trip.id}/publication`).then((r) => r.publication);
+
+        await open();
+        expect(await page.eval(iconOnly)).toBe(vp.mobile); // the words show only on the wide screen
+        expect(await buttons()).toEqual(expect.arrayContaining([N.share, N.publish]));
+        expect((await buttons()).filter((n) => n === "")).toEqual([]); // no nameless button anywhere on the page
+
+        // Share opens its dialog
+        await page.clickAccessible("button", N.share);
+        await page.waitFor(`document.querySelector('dialog[open]')`, 3000);
+        await page.eval(`document.querySelector('dialog[open]').close()`);
+
+        // not published -> published, through the button found by its name
+        await page.clickAccessible("button", N.publish);
+        await page.waitFor(`document.querySelector('dialog[open] [data-publish=submit]')`, 3000);
+        await page.eval(`(() => { const f = document.querySelector('dialog[open] form'); f.description.value = 'Named buttons'; f.requestSubmit(); })()`);
+        await page.waitFor(`/\\/journeys\\/pub-/.test(document.querySelector('dialog[open] .pub-link input')?.value ?? '')`, 5000);
+        expect((await publication()).status).toBe("published");
+        await open();
+        expect(await buttons()).toContain(N.published);
+        expect(await buttons()).not.toContain(N.publish);
+
+        // the plan changes: the public copy is behind
+        await inPage(page, "POST", `/api/trips/${trip.id}/activities`, { clientId: `late-${Math.random()}`, dayId: trip.days[0].id, title: "Late stop", kind: "attraction", startMin: 1000, durationMin: 60 });
+        await open();
+        expect(await buttons()).toContain(N.update);
+        await page.clickAccessible("button", N.update);
+        await page.waitFor(`document.querySelector('dialog[open] [data-publish=submit]')`, 3000);
+        await page.click("dialog[open] [data-publish=submit]");
+        await page.waitFor(`!document.querySelector('dialog[open]') && document.querySelector('.trip-bar [data-publish]')?.dataset.publish === 'published'`, 5000);
+        for (let i = 0; i < 40 && (await buttons()).includes(N.update); i++) await sleep(100); // the editor reloads the trip
+        expect(await buttons()).toContain(N.published);
+        expect(await buttons()).not.toContain(N.update);
+
+        // withdrawn: named for publishing again
+        await page.clickAccessible("button", N.published);
+        await page.waitFor(`document.querySelector('dialog[open] [data-publish=unpublish]')`, 3000);
+        await page.eval(`window.confirm = () => true; document.querySelector('dialog[open] [data-publish=unpublish]').click()`);
+        await page.waitFor(`!document.querySelector('dialog[open]') && document.querySelector('.trip-bar [data-publish]').dataset.publish === 'unpublished'`, 5000);
+        expect(await buttons()).toContain(N.publish);
+        expect((await publication()).status).toBe("unpublished");
+
+        // someone asks to join: Share's name says so
+        const other = await browser!.newPage();
+        await signUpIn(other, baseUrl, uniqueName("asker"));
+        const { token } = await inPage(page, "POST", `/api/trips/${trip.id}/invite`, {});
+        await inPage(other, "POST", `/api/invites/${token}/request`, {});
+        await open();
+        await page.waitFor(`document.querySelector('.trip-bar .badge')`, 5000);
+        expect(await buttons()).toContain(N.requests);
+        expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+      });
+    }
+  }
+
   it("saves the trip's name and a meal time from Trip settings, and the timeline follows", { timeout: 20_000 }, async () => {
     const page = await browser!.newPage();
     await page.viewport(390, 844, true);

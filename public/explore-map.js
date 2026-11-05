@@ -46,6 +46,12 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
     loading: false,
     error: null,
     cache: new Map(), // this page only: the same category twice isn't re-fetched
+    // The places list being asked for: a new place, category or search, a
+    // cleared location or the page going away replaces it, and only the
+    // answer to the current one may change what's shown (an older city's
+    // answer can arrive after a newer one's).
+    req: 0,
+    gone: false,
     prefs: false, // the tray's length and food, folded away until asked for
     finding: false,
   };
@@ -89,22 +95,35 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
     });
   }
 
+  // Ends whatever places request is in flight: its answer, success or
+  // failure, will change nothing.
+  function invalidate() {
+    S.req++;
+    S.loading = false;
+  }
+
   async function run(key, url) {
+    const req = ++S.req;
+    const current = () => !S.gone && req === S.req;
     S.loading = true;
     S.error = null;
     S.selected = null;
     S.route = null;
     render();
+    let data = null;
+    let error = null;
     try {
-      const data = S.cache.get(key) ?? (url ? await api(url) : await waylinePlaces());
+      data = S.cache.get(key) ?? (url ? await api(url) : await waylinePlaces());
+      // filed under its own key whenever it comes, so it's there if asked again
       S.cache.set(key, data);
       if (S.cache.size > 30) S.cache.delete(S.cache.keys().next().value);
-      S.results = data.places;
-      S.source = data.source;
     } catch (err) {
-      S.results = [];
-      S.error = err.message;
+      error = err.message;
     }
+    if (!current()) return;
+    S.results = data ? data.places : [];
+    S.source = data ? data.source : S.source;
+    S.error = error;
     S.loading = false;
     render();
   }
@@ -171,6 +190,7 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
   }
 
   function render() {
+    if (S.gone) return;
     sub.textContent = S.origin
       ? S.source === "demo"
         ? S.origin.source === "location"
@@ -380,11 +400,14 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
     // the homepage's destinations arrived: redraw the panel's quick picks
     refresh: () => !S.origin && render(),
     setOrigin(origin) {
+      if (S.gone) return;
       const changed = !S.origin || !origin || S.origin.lat !== origin.lat || S.origin.lng !== origin.lng;
       S.origin = origin;
       picks.moveTo(origin);
       if (!changed) return;
+      invalidate();
       S.results = [];
+      S.error = null;
       S.selected = null;
       S.route = null;
       S.type = null;
@@ -393,6 +416,8 @@ export function createExploreMap(ctx, { finder = null, ideas = null, picks, onFi
       else render();
     },
     destroy() {
+      S.gone = true;
+      invalidate();
       map?.destroy();
     },
   };
