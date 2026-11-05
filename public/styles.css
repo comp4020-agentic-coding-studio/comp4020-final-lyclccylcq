@@ -1810,8 +1810,7 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
 .site-footer nav a:hover { color: var(--ink); text-decoration: underline; }
 
 /* sign in */
-/* The title is hand-lettered: Gochi Hand (ZCOOL KuaiLe for Chinese), every
-   word on its own tilt, ink then coral, an orange slice for an o, a dotted
+/* The title is hand-lettered in Gochi Hand, every word on its own tilt, ink then coral, an orange slice for an o, a dotted
    route under Wayline and sparkles at the ends. */
 .auth-hero .auth-title {
   margin: 0; font: 400 clamp(32px, 3.5vw, 60px)/1.1 "Gochi Hand", "ZCOOL KuaiLe", "Comic Sans MS", cursive;
@@ -1820,11 +1819,9 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
 .auth-title .lettering { display: flex; flex-direction: column; gap: .06em; }
 .auth-title .line { position: relative; display: flex; align-items: baseline; gap: 0 .26em; }
 .auth-title .line-2 { padding-left: .7em; color: var(--coral); }
-:lang(zh) .auth-title .line { gap: 0 .02em; }
-:lang(zh) .auth-title .wayline { margin-left: .14em; }
 .auth-title .line { flex-wrap: nowrap; white-space: nowrap; }
 @media (max-width: 899px) {
-  .auth-hero .auth-title { font-size: min(6.1vw, 44px); }
+  .auth-hero .auth-title { font-size: min(8.6vw, 52px); }
   .auth-title .line-2 { padding-left: .5em; }
 }
 .auth-title .w {
@@ -1841,6 +1838,50 @@ input:not([type=checkbox]), select, textarea { border-radius: 8px; border-color:
 .auth-title .s2 { width: .17em; height: .17em; left: -.6em; top: .42em; }
 .auth-title .s3 { position: relative; width: .3em; height: .3em; align-self: flex-start; margin-left: -.06em; }
 .auth-title .s4 { position: relative; width: .17em; height: .17em; align-self: center; margin-left: -.22em; }
+
+/* One continuous paper background behind both halves, soft colour blooms
+   blurred behind the form, which floats on frosted glass. The headings,
+   tabs, labels and button share the title's hand. */
+.auth {
+  position: relative; isolation: isolate; overflow: hidden; align-items: center;
+  background:
+    radial-gradient(circle at 42% 14%, rgba(246, 195, 67, .45), transparent 30%),
+    radial-gradient(circle at 6% 92%, rgba(15, 124, 140, .2), transparent 38%),
+    var(--paper);
+}
+.auth::before, .auth::after { content: ""; position: absolute; z-index: -1; border-radius: 50%; filter: blur(70px); pointer-events: none; }
+.auth::before { width: 46vw; height: 46vw; right: -10vw; top: -14vw; background: rgba(242, 96, 61, .22); }
+.auth::after { width: 40vw; height: 40vw; right: 4vw; bottom: -18vw; background: rgba(15, 124, 140, .2); }
+.auth-hero { background: none; }
+.auth .brand { font-size: 32px; gap: 12px; }
+.auth .brand-mark { width: 38px; height: 38px; border-radius: 10px; }
+.auth-card {
+  align-self: center; justify-self: center; width: min(440px, calc(100% - 48px)); margin: 48px 0;
+  padding: 36px clamp(24px, 3vw, 40px); gap: 18px;
+  background: rgba(255, 255, 255, .55); border: 1px solid rgba(255, 255, 255, .75); border-radius: 22px;
+  -webkit-backdrop-filter: blur(22px) saturate(1.3); backdrop-filter: blur(22px) saturate(1.3);
+  box-shadow: 0 30px 70px -30px rgba(28, 36, 48, .35);
+}
+.auth-card .auth-form { max-width: none; }
+.auth-card h2 {
+  font: 400 44px/1 "Gochi Hand", "ZCOOL KuaiLe", cursive; letter-spacing: .01em; color: var(--coral);
+  transform: rotate(-2deg); transform-origin: left center;
+}
+.auth-card .seg button, .auth-card .field > span, .auth-card .btn-primary {
+  font-family: "Gochi Hand", "ZCOOL KuaiLe", cursive; font-weight: 400; letter-spacing: .02em;
+}
+.auth-card .seg button { font-size: 19px; padding: 6px 8px; }
+.auth-card .field > span { font-size: 18px; color: var(--ink); }
+.auth-card .btn-primary { font-size: 21px; border-radius: 999px; padding-block: 10px; box-shadow: 0 8px 18px -8px rgba(229, 72, 45, .6); }
+.auth-card input { background: rgba(255, 255, 255, .8); }
+@media (max-width: 899px) {
+  .auth .brand { font-size: 26px; }
+  .auth .brand-mark { width: 32px; height: 32px; }
+  .auth-card .seg button { font-size: 17px; white-space: nowrap; }
+  .auth-card { border-top: 1px solid rgba(255, 255, 255, .75); margin: 0 0 32px; }
+  .auth::before { width: 90vw; height: 90vw; top: 60%; right: -30vw; }
+  .auth::after { width: 80vw; height: 80vw; bottom: -30vw; left: -20vw; right: auto; }
+}
 .hero-stop { border-radius: 8px; box-shadow: none; border: 1px solid var(--line); }
 .hero-stop b { font-family: var(--mono); font-weight: 600; }
 .hero-stop .t { font-family: var(--mono); }

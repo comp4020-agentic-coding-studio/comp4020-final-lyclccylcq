@@ -478,9 +478,10 @@ function renderAuth(next) {
   );
 }
 
-// The sign-in title, hand-lettered: each word on its own slight tilt, an
-// orange slice for the o in "go", a dotted route under Wayline, sparkles at
-// either end. Screen readers get the plain sentence.
+// The sign-in title, hand-lettered and the same in both languages: each
+// word on its own slight tilt, an orange slice for the o in "World", a
+// dotted route under Wayline, sparkles at either end. Screen readers get
+// the plain sentence.
 const ORANGE_SLICE = `<svg class="slice" viewBox="0 0 40 40" aria-hidden="true">
   <circle cx="20" cy="20" r="16" fill="#f6a23a" stroke="currentColor" stroke-width="3.4"/>
   <circle cx="20" cy="20" r="2.2" fill="currentColor"/>
@@ -491,38 +492,30 @@ const ROUTE = `<svg viewBox="0 0 300 34" preserveAspectRatio="none" aria-hidden=
   <path d="M4 22c30-14 52 10 84 2s52-18 86-8 56 10 86-2 30-8 36-6" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="1 9"/>
   <circle cx="4" cy="22" r="4.5" fill="currentColor"/><circle cx="296" cy="8" r="4.5" fill="#f6a23a" stroke="currentColor" stroke-width="2"/>
 </svg>`;
-const TILTS = [-4, 3, -2, 2, -3, 1.5, -1.5];
-
 function authTitle() {
-  const first = t("You choose where to go.");
-  const second = t("Wayline helps you get there.");
   const spark = (cls) => h("span", { class: `spark ${cls}` }, svg(SPARK));
-  let n = 0;
-  // Words split at spaces, and after a Chinese comma so a Chinese line
-  // still gets a tilt or two.
-  const words = (text) =>
-    text.split(/\s+|(?<=，)/).filter(Boolean).map((word) => {
-      const tilt = `--tilt:${TILTS[n++ % TILTS.length]}deg`;
-      if (word === "go.") return h("span", { class: "w", style: tilt }, "g", svg(ORANGE_SLICE), ".");
-      const at = word.indexOf("Wayline");
-      if (at < 0) return h("span", { class: "w", style: tilt }, word);
-      return h(
-        "span",
-        { class: "w", style: tilt },
-        word.slice(0, at),
-        h("span", { class: "wayline" }, "Wayline", h("span", { class: "route" }, svg(ROUTE))),
-        word.slice(at + 7),
-      );
-    });
+  const word = (text, tilt) => h("span", { class: "w", style: `--tilt:${tilt}deg` }, text);
   return h(
     "h1",
     { class: "auth-title" },
-    h("span", { class: "sr-only" }, `${first} ${second}`),
+    h("span", { class: "sr-only" }, "Till the World Becomes a Wayline"),
     h(
       "span",
       { class: "lettering", "aria-hidden": "true" },
-      h("span", { class: "line" }, spark("s1"), spark("s2"), words(first)),
-      h("span", { class: "line line-2" }, words(second), spark("s3"), spark("s4")),
+      h(
+        "span",
+        { class: "line" },
+        spark("s1"), spark("s2"),
+        word("Till", -4), word("the", 3),
+        h("span", { class: "w", style: "--tilt:-2deg" }, "W", svg(ORANGE_SLICE), "rld"),
+      ),
+      h(
+        "span",
+        { class: "line line-2" },
+        word("Becomes", 2), word("a", -3),
+        h("span", { class: "w", style: "--tilt:-1.5deg" }, h("span", { class: "wayline" }, "Wayline", h("span", { class: "route" }, svg(ROUTE)))),
+        spark("s3"), spark("s4"),
+      ),
     ),
   );
 }

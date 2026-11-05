@@ -90,8 +90,6 @@ export const ZH = {
   "Available.": "可以使用。",
   "New here": "新用户",
   "I have an account": "我已有账户",
-  "You choose where to go.": "去哪里，由你决定。",
-  "Wayline helps you get there.": "怎么去，交给 Wayline。",
   "Plan a trip together on one map and one timeline. Pick the places you want to visit, and Wayline works out the travel time between them and flags a plan that doesn't add up.": "在同一张地图、同一条时间线上一起规划行程。选好想去的地方，Wayline 会算出它们之间的交通时间，并标出安排不合理的计划。",
   "You've been invited to a trip. Sign in or create an account to join it.": "你被邀请加入一个行程。登录或创建账户即可加入。",
   "Start planning": "开始规划",
