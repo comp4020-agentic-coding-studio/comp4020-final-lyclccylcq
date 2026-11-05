@@ -140,13 +140,12 @@ describe("the itinerary", () => {
     expect((await c.send("POST", url, { dayId: day.id, basedOn: "an-old-fingerprint", proposalIds: shorten.map((p: any) => p.id) })).status).toBe(409);
     const unchanged = (await c.get(`/api/trips/${trip.id}`)).data.days[0];
     expect(unchanged.fingerprint).toBe(day.fingerprint);
-    // a collaborator can't apply fixes
+    // a collaborator applies them too (November 2026): all three in one
+    // change, and the day has no conflicts left
     const guest = await signUp(baseUrl);
     await share(c, guest, trip.id);
     const fresh = (await c.get(`/api/trips/${trip.id}`)).data.days[0];
-    expect((await guest.send("POST", url, { dayId: fresh.id, basedOn: fresh.fingerprint, proposalIds: shorten.map((p: any) => p.id) })).status).toBe(403);
-    // the owner: all three in one change, and the day has no conflicts left
-    const applied = await c.send("POST", url, { dayId: fresh.id, basedOn: fresh.fingerprint, proposalIds: shorten.map((p: any) => p.id) });
+    const applied = await guest.send("POST", url, { dayId: fresh.id, basedOn: fresh.fingerprint, proposalIds: shorten.map((p: any) => p.id) });
     expect(applied.status).toBe(200);
     const after = applied.data.days[0];
     expect(after.analysis.issues).toEqual([]);

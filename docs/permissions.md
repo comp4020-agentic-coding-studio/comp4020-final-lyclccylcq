@@ -13,11 +13,10 @@ are ignored).
 |---|---|---|---|
 | View the trip, open its live stream | ✓ | ✓ | 404 |
 | Add stops | ✓ | ✓ | 404 |
-| Edit, move, re-place or remove a stop they added | ✓ | ✓ | 404 |
-| Edit, move, re-place or remove someone else's stop | ✓ | 403 | 404 |
-| Set or change the starting point | ✓ | 403 | 404 |
+| Edit, move, re-place or remove any stop | ✓ | ✓ | 404 |
+| Set or change the starting point | ✓ | ✓ | 404 |
 | Calculate a route between stops | ✓ | ✓ | 404 |
-| Choose a transport mode, apply a copilot fix | ✓ | 403 | 404 |
+| Choose a transport mode, apply a fix or an AI suggestion | ✓ | ✓ | 404 |
 | Rename, change dates or meal times | ✓ | 403 | 404 |
 | Invite (link or nickname), see and decide join requests | ✓ | 403 | 404 |
 | Remove a collaborator | ✓ | only themself (Leave) | 404 |
@@ -29,11 +28,13 @@ says who can), and 404 means not a member, so a trip id reveals nothing.
 Removing a collaborator, or deleting the trip, sends `revoked` on their open
 streams and closes them at once (`hub.publish`).
 
-The collaborator rule is the conservative one from the October 2026 brief:
-collaborators add, and can change only what they added (`activities.created_by`).
-Before that, any member could change any stop. The version check and the
-"load theirs / save mine" conflict flow still apply, mostly between the owner
-and the stop's author now.
+Collaborators plan the trip with the owner (November 2026): any stop, the
+start, transport and fixes. From October 2026 they could change only the
+stops they added (`activities.created_by`), which manual testing showed was
+too narrow for planning together. What runs the trip itself (its name,
+dates and settings, who's on it, publishing, deleting it) stays with the
+owner. The version check and the "load theirs / save mine" conflict flow
+apply between any two people editing the same stop.
 
 ## Invite links
 

@@ -176,11 +176,12 @@ describe.skipIf(!chromePath)("in a real browser", () => {
     await alice.waitFor(`document.querySelector('[data-request] [data-status=approved]')`);
     await alice.eval(`document.querySelector('dialog[open] .dialog-actions .btn-primary').click()`);
 
-    // now Bob can open the trip; as a collaborator he sees no settings and can't remove Alice's stops
+    // now Bob can open the trip; as a collaborator he sees no settings, and
+    // plans every stop with Alice, hers included (November 2026)
     await bob.goto(new URL(`/trips/${trip.id}`, baseUrl).href);
     await bob.waitFor(`document.querySelectorAll('.timeline .stop').length === 3`);
     expect(await bob.eval<string>(`document.querySelector('.trip-bar').textContent`)).not.toMatch(/false|undefined|null|Publish/);
-    expect(await bob.eval(`document.querySelectorAll('.timeline [aria-label^="Remove "]').length`)).toBe(0);
+    expect(await bob.eval(`document.querySelectorAll('.timeline [aria-label^="Remove "]').length`)).toBe(3);
     await alice.waitFor(`document.querySelector('.conn-live') && /2 people/.test(document.querySelector('.presence-label').textContent)`);
 
     // Bob adds a stop through the UI; Alice's open page shows it
@@ -646,11 +647,8 @@ describe.skipIf(!chromePath)("collaborating live, every kind of change", () => {
     const timings: Record<string, number> = {};
     const ids = (await inPage(alice, "GET", `/api/trips/${trip.id}`)).days[0].activities.map((a: any) => a);
 
-    // Bob, a collaborator, can't remove Alice's stops: the button isn't there
-    // and the server refuses (docs/permissions.md)
-    expect(await bob.eval(`Boolean(document.querySelector('[aria-label="Remove Lunch"]'))`)).toBe(false);
-    const lunch = ids.find((a: any) => a.title === "Lunch");
-    expect(await bob.eval<number>(`fetch('/api/trips/${trip.id}/activities/${lunch.id}', { method: 'DELETE' }).then(r => r.status)`)).toBe(403);
+    // Bob, a collaborator, can remove Alice's stops too (docs/permissions.md)
+    expect(await bob.eval(`Boolean(document.querySelector('[aria-label="Remove Lunch"]'))`)).toBe(true);
 
     // Alice removes Lunch; Bob sees it go
     await alice.eval(`window.confirm = () => true; document.querySelector('[aria-label="Remove Lunch"]').click()`);

@@ -335,6 +335,8 @@ export const PATTERNS = [
 
   // --- day review notes (src/review.ts)
   [/^(Breakfast|Brunch|Lunch|Afternoon tea|Dinner) may be missing$/, (m) => `可能缺少${MEAL[m]}`],
+  [/^(Breakfast|Brunch|Lunch|Afternoon tea|Dinner) before setting out may be missing$/, (m) => `出发前可能还没安排${MEAL[m]}`],
+  [/^(Breakfast|Brunch|Lunch|Afternoon tea|Dinner) after (.+) may be missing$/, (m, a) => `${stop(a)} 之后可能还没安排${MEAL[m]}`],
   [/^(\d+) min walk from (.+?) to (.+)$/, (n, a, b) => `从 ${stop(a)} 到 ${stop(b)} 需步行 ${n} 分钟`],
   [/^No route found from (.+?) to (.+)$/, (a, b) => `没有找到从 ${stop(a)} 到 ${stop(b)} 的路线`],
   [new RegExp(`^(\\d+) h (?:(\\d+) min )?free after (.+) \\(${T}–${T}\\)$`), (h, m, a, t1, t2) => `${a} 之后有 ${h} 小时${m ? ` ${m} 分钟` : ""}空闲（${t1}–${t2}）`],

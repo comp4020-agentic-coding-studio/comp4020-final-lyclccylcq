@@ -147,3 +147,28 @@ describe.skipIf(!chromePath)("a restaurant suggestion opens its place on the map
     expect((await c.get(`/api/trips/${trip.id}`)).data.days[0].activities).toHaveLength(4);
   });
 });
+
+describe.skipIf(!chromePath)("a missing meal on the timeline, and suggestions once the day changes", () => {
+  it("opens places to eat from the meal's own row, and clears them when the day changes", async () => {
+    const { c, trip } = await tokyoTrip();
+    const page = await browser!.newPage();
+    await page.viewport(1440, 900);
+    await page.goto(new URL("/login", app.url).href);
+    await page.eval(`document.cookie = ${JSON.stringify(c.cookie + "; path=/")}`);
+    await page.goto(new URL(`/trips/${trip.id}`, app.url).href);
+    // dinner is missing between Shibuya and the night walk: the row sits there
+    await page.waitFor(`document.querySelector('[data-meal-gap="dinner:between"]')`, 20000);
+    expect(await page.eval(`(() => { const r = document.querySelector('[data-meal-gap]'); let p = r.previousElementSibling; while (p && !p.matches('.stop')) p = p.previousElementSibling; return p.querySelector('h3').textContent; })()`)).toBe("Shibuya");
+    await page.click(`[data-find-meal=dinner]`);
+    await page.waitFor(`document.querySelectorAll('.pa-card').length === 3`, 20000);
+    expect(await page.eval(`document.querySelector('.pa-sub').textContent`)).toBe("Dinner along your route");
+    // the day changes (another person, another tab): the old suggestions go
+    await c.send("POST", `/api/trips/${trip.id}/activities`, { clientId: `sg-late-${Math.random()}`, dayId: trip.days[0].id, title: "Late snack", kind: "attraction", startMin: 1290, durationMin: 30 });
+    await page.waitFor(`document.querySelector('[data-plan=cleared]')`, 10000);
+    expect(await page.eval(`document.querySelectorAll('.pa-card').length`)).toBe(0);
+    expect(await page.eval(`document.querySelector('[data-plan=cleared]').textContent`)).toContain("The day changed, so these suggestions were cleared.");
+    // looking again gives fresh ones
+    await page.eval(`[...document.querySelectorAll('[data-plan=cleared] button')].find(b => b.textContent === 'Look again').click()`);
+    await page.waitFor(`document.querySelectorAll('.pa-card').length === 3`, 20000);
+  });
+});

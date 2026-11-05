@@ -87,7 +87,10 @@ export async function openEditor(root, tripId, ctx) {
   // the server's rule (src/permissions.ts), mirrored so the UI only offers
   // what will work: owners change anything, collaborators their own stops
   const isOwner = () => role() === "owner";
-  const canEdit = (a) => isOwner() || (a.role !== "start" && a.createdBy === me.id);
+  // everyone on the trip plans it: any stop, the start, transport and fixes
+  // (the trip's name, dates, members and publishing stay with the owner)
+  const canPlan = () => role() !== null;
+  const canEdit = () => canPlan();
   const day = () => S.trip.days.find((d) => d.id === S.dayId) ?? S.trip.days[0];
   const memberName = (id) => (id === me.id ? t("you") : S.trip.members.find((m) => m.id === id)?.displayName ?? t("someone"));
   const colourOf = (id) => memberColour(S.trip.members, id);
@@ -186,8 +189,44 @@ export async function openEditor(root, tripId, ctx) {
     S.keepView = remote;
     if (!snap.days.some((d) => d.id === S.dayId)) S.dayId = snap.days[0]?.id ?? null;
     if (S.selectedId && !snap.days.some((d) => d.activities.some((a) => a.id === S.selectedId))) S.selectedId = null;
+    // changing a stop's place: if that stop is gone, there's nothing to change
+    // any more, so leave the mode instead of offering "Use for …" for it
+    if (S.replacing) {
+      const still = snap.days.flatMap((d) => d.activities).find((a) => a.id === S.replacing.id);
+      if (!still) {
+        const gone = S.replacing.title;
+        S.replacing = null;
+        if (!S.place && !S.explore && !S.results.length) {
+          searchPanel.hidden = true;
+          searchPanel.replaceChildren();
+        }
+        toast(t("{title} was removed, so there's no place to change.", { title: gone }));
+      } else S.replacing = { ...S.replacing, version: still.version, title: still.title };
+    }
+    // AI answers and suggestions are for the day as it was; once the plan
+    // changes they go, rather than staying on screen as if still true
+    dropStaleAi(snap);
     S.editing?.onSnapshot(snap);
     render();
+  }
+
+  // Once a day changes, every AI answer made for the old day goes: the
+  // suggestions panel says so and offers to look again, the AI's fix picks
+  // and its chat answers are cleared. Nothing out of date stays on screen.
+  function dropStaleAi(snap) {
+    const fp = new Map(snap.days.map((d) => [d.id, d.fingerprint]));
+    const v = S.plan;
+    if (v?.draft?.basedOn && fp.has(v.dayId) && v.draft.basedOn !== fp.get(v.dayId)) {
+      S.plan = { dayId: v.dayId, action: v.action, meal: v.meal, error: t("The day changed, so these suggestions were cleared."), cleared: true };
+      S.previewId = null;
+      S.mealEdits = {};
+      S.hoursProblem = null;
+    }
+    if (S.aiPicks && !S.aiPicks.busy && ![...fp.values()].includes(S.aiPicks.fingerprint)) S.aiPicks = null;
+    for (const [dayId, c] of S.ai) {
+      if (!fp.has(dayId)) S.ai.delete(dayId);
+      else c.turns = c.turns.filter((turn) => !turn.res || turn.res.fingerprint === fp.get(dayId));
+    }
   }
 
   // What someone else just did, seen by comparing snapshots: each stop they
@@ -639,7 +678,7 @@ export async function openEditor(root, tripId, ctx) {
         ),
       );
     }
-    if (!startOf() && !S.starting && idx === 0 && isOwner()) {
+    if (!startOf() && !S.starting && idx === 0 && canPlan()) {
       dayHead.append(h("p", { class: "day-start-link" }, h("button", { class: "linklike small", type: "button", onclick: () => beginStart() }, icon("pin"), t("Set a starting point"))));
     }
 
@@ -670,9 +709,16 @@ export async function openEditor(root, tripId, ctx) {
         h("div", { class: "stop-rail" }, h("span", { class: "stop-clock" }, proposal.startMin === null ? t("No time") : hhmm(proposal.startMin)), h("span", { class: "stop-num" }, "+")),
         h("article", { class: "stop-card" }, h("p", { class: "stop-top" }, h("span", { class: "start-badge" }, t("Proposed · not saved"))), h("h3", {}, proposal.candidate.name), h("p", { class: "stop-meta" }, h("span", {}, t("Visit {duration}", { duration: dur(proposal.durationMin) })), proposal.meal && h("span", { class: "tag tag-meal" }, t(MEAL_LABEL[proposal.meal])))),
       );
+    // a missing meal shows where it would go: before the first stop, between
+    // two, or after the last, with a way straight to places to eat there
+    // (before setting out with only a starting point: after the start)
+    const mealsAt = (pos, id) => (S.previewId ? [] : d.review.meals.filter((g) => g.position === pos && (pos === "before" ? g.beforeId === id : g.afterId === id)).map((g) => mealRow(d, g)));
+    const startOnly = (id) => (S.previewId ? [] : d.review.meals.filter((g) => g.position === "before" && !g.beforeId && g.afterId === id).map((g) => mealRow(d, g)));
     d.activities.forEach((a, i) => {
       if (i === proposalAt) items.push(proposalRow());
+      items.push(...mealsAt("before", a.id));
       items.push(stopItem(a, i, d));
+      items.push(...startOnly(a.id), ...mealsAt("between", a.id), ...mealsAt("after", a.id));
       if (i + 1 < d.activities.length) items.push(legItem(d, a, d.activities[i + 1]));
     });
     if (proposal && (proposalAt === -1 || proposalAt >= d.activities.length)) items.push(proposalRow());
@@ -687,6 +733,31 @@ export async function openEditor(root, tripId, ctx) {
       );
     }
     timeline.replaceChildren(...items);
+  }
+
+  // A meal the day seems to be missing, from the server's day review (plain
+  // rules, no model). The button opens Places to eat for that meal, searched
+  // where it would go on the route.
+  const MEAL_GAP_TEXT = {
+    before: "{meal} before setting out?",
+    between: "No {meal} planned here",
+    after: "{meal} after the last stop?",
+  };
+  function mealRow(d, g) {
+    const word = t(MEAL_LABEL[g.meal] ?? g.meal);
+    const google = ctx.config.places === "google";
+    return h(
+      "li",
+      { class: "meal-gap", "data-meal-gap": `${g.meal}:${g.position}` },
+      h("span", { class: "meal-gap-icon", "aria-hidden": "true" }, icon("food")),
+      h(
+        "div",
+        { class: "meal-gap-text" },
+        h("strong", {}, t(MEAL_GAP_TEXT[g.position], { meal: g.position === "between" ? word.toLowerCase() : word })),
+        h("small", { class: "muted" }, g.position === "before" ? t("The day starts around {meal} time. Eat near the start first?", { meal: word.toLowerCase() }) : g.position === "after" ? t("The day ends around {meal} time.", { meal: word.toLowerCase() }) : t("Usually around {time}.", { time: hhmm(g.usual) })),
+      ),
+      google && h("button", { class: "btn btn-outline btn-sm", type: "button", "data-find-meal": g.meal, onclick: () => { openCopilot(); runAction(d, "eat", { meal: g.meal }); } }, t("Find places to eat")),
+    );
   }
 
   // One stop on the day's rail: its time on the left, a dot carrying the same
@@ -744,7 +815,7 @@ export async function openEditor(root, tripId, ctx) {
                   h("button", { class: "icon-btn", type: "button", "aria-label": t("Move {title} earlier", { title: a.title }), disabled: i <= Math.max(first, firstUntimed), onclick: () => move(a.id, d.id, i - 1) }, icon("up")),
                   h("button", { class: "icon-btn", type: "button", "aria-label": t("Move {title} later", { title: a.title }), disabled: i === n - 1, onclick: () => move(a.id, d.id, i + 1) }, icon("down")),
                 ],
-          !isStart && h("button", { class: "icon-btn", type: "button", title: t("Change place"), "aria-label": t("Change the place of {title}", { title: a.title }), onclick: () => beginReplace(a) }, icon("pin")),
+          !isStart && h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-change-place": a.id, "aria-label": t("Change the place of {title}", { title: a.title }), onclick: () => beginReplace(a) }, icon("pin"), t("Change place")),
           h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => activityDialog({ activity: a }) }, icon("edit"), t("Edit")),
           h("button", { class: "icon-btn icon-btn-danger", type: "button", "aria-label": t("Remove {title}", { title: a.title }), onclick: () => removeActivity(a) }, icon("trash")),
         ),
@@ -879,7 +950,7 @@ export async function openEditor(root, tripId, ctx) {
   // Each mode says which state it's in, and why, rather than one grey:
   // available, the one in use, excluded by your preferences, not available
   // from Google, looked up for an assumed time, or the lookup failed (retry
-  // with Recalculate). Only the owner chooses; others see why they can't.
+  // with Recalculate). Anyone on the trip chooses.
   function modeState(o) {
     if ((S.prefs?.travel?.avoidModes ?? []).includes(o.mode)) return { state: "excluded", why: t("{mode} is excluded in your travel preferences.", { mode: t(MODE_WORD[o.mode]) }) };
     if (o.status === "ok") return { state: "ok", why: t("{mode}, {duration}", { mode: t(MODE_WORD[o.mode]), duration: dur(Math.max(1, Math.ceil(o.durationSec / 60))) }) + (o.assumedDeparture ? t(", looked up for {time} because the earlier stop has no time", { time: o.assumedDeparture.slice(11) }) : "") };
@@ -889,7 +960,7 @@ export async function openEditor(root, tripId, ctx) {
   }
 
   function modeChips(seg) {
-    const owner = isOwner();
+    const owner = canPlan();
     return h(
       "div",
       { class: "modes modes-compact", role: "group", "aria-label": t("Transport mode") },
@@ -2002,6 +2073,7 @@ export async function openEditor(root, tripId, ctx) {
 
   async function removeActivity(a) {
     if (!confirm(t("Remove {title} from the itinerary?", { title: a.title }))) return;
+    if (S.replacing?.id === a.id) closeSearch();
     await act(api(`${base}/activities/${a.id}`, { method: "DELETE" })).catch(() => {});
   }
 
@@ -2178,7 +2250,7 @@ export async function openEditor(root, tripId, ctx) {
     const back = h("button", { class: "linklike pa-back", type: "button", "data-plan-action": "back", onclick: () => { S.plan = null; S.previewId = null; renderCopilot(); renderMap(); } }, icon("back"), t("Back"));
     const head = [back, h("h3", { class: "pa-title" }, t(TITLES[v.action]))];
     if (v.busy) return h("div", { class: "pa-body" }, ...head, h("div", { class: "co-pending", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), h("span", {}, v.action === "optimize" ? t("Looking at the whole day…") : t("Searching Google Maps along your route…"))));
-    if (v.error) return h("div", { class: "pa-body" }, ...head, h("p", { class: "co-err small", role: "alert" }, v.error), h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => runAction(d, v.action, v.meal ? { meal: v.meal } : {}) }, t("Try again")));
+    if (v.error) return h("div", { class: "pa-body", "data-plan": v.cleared ? "cleared" : "error" }, ...head, h("p", { class: v.cleared ? "small muted" : "co-err small", role: "alert" }, v.error), h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => runAction(d, v.action, v.meal ? { meal: v.meal } : {}) }, v.cleared ? t("Look again") : t("Try again")));
     const draft = v.draft;
     const stale = draft.basedOn && draft.basedOn !== d.fingerprint;
     const meals = v.action === "eat" ? draft.meals ?? [] : [];
@@ -2434,7 +2506,7 @@ export async function openEditor(root, tripId, ctx) {
     const choice = S.fixChoice.byIssue;
     const takenBy = (issueId) => new Set(Object.entries(choice).filter(([i, id]) => i !== issueId && id !== "keep").flatMap(([, id]) => (proposalById(id) ? targets(proposalById(id)) : [])));
     const chosen = Object.values(choice).filter((id) => id !== "keep").map(proposalById).filter(Boolean);
-    const owner = isOwner();
+    const owner = canPlan();
     const nameOf = (id) => d.activities.find((a) => a.id === id)?.title ?? t("Activity");
     const seg = (id) => d.segments.find((x) => x.id === id);
     const changeLine = (c) =>
@@ -2568,7 +2640,7 @@ export async function openEditor(root, tripId, ctx) {
               h("button", { class: "btn btn-primary btn-sm", type: "button", "data-confirm": "yes", onclick: apply }, t("Confirm change")),
               h("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => { S.confirming = null; renderCopilot(); } }, t("Cancel")),
             )
-          : isOwner()
+          : canPlan()
             ? h("button", { class: "btn btn-primary btn-sm", type: "button", "data-apply": p.id, onclick: () => { S.confirming = key; renderCopilot(); } }, t("Apply this change…"))
             : h("p", { class: "small muted" }, t("Only the trip's owner can apply changes.")),
     );
@@ -2848,7 +2920,18 @@ export async function openEditor(root, tripId, ctx) {
       h("h2", {}, isNew ? t("Add an activity") : t("Edit activity")),
       note && h("p", { class: "muted small" }, note),
       banner,
-      activity?.place && h("p", { class: "muted small" }, activity.place.source === "demo" ? t("Demo place") : t("Linked to a Google Maps place")),
+      activity && activity.role !== "start" &&
+        h(
+          "div",
+          { class: "field place-field" },
+          h("span", {}, t("Place")),
+          h(
+            "p",
+            { class: "place-line" },
+            h("span", { class: "muted small" }, !activity.place ? t("No place on the map yet") : activity.place.source === "demo" ? t("Demo place") : activity.place.source === "custom" ? t("A spot picked on the map") : t("Linked to a Google Maps place")),
+            h("button", { class: "btn btn-outline btn-sm", type: "button", "data-change-place": activity.id, onclick: () => { dialog.close(); beginReplace(current() ?? activity); } }, icon("pin"), activity.place ? t("Change place") : t("Choose a place")),
+          ),
+        ),
       h("label", { class: "field" }, h("span", {}, t("Title")), h("input", { name: "title", required: true, maxlength: 120, value: activity?.title ?? "", placeholder: t("Picnic in the park") })),
       h(
         "div",

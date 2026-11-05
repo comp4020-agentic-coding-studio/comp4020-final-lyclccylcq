@@ -43,12 +43,35 @@ describe("reviewing a day beyond timing conflicts", () => {
   });
 
   it("uses the trip's own meal times, and doesn't ask for meals outside the day", () => {
-    const morning = [stop("a", "A", "09:00", 60), stop("b", "B", "10:30", 60)];
-    expect(reviewDay(morning, [], DEFAULT_MEAL_TIMES).meals).toEqual([]); // ends before lunch
+    const morning = [stop("a", "A", "08:00", 60), stop("b", "B", "09:00", 30)];
+    expect(reviewDay(morning, [], DEFAULT_MEAL_TIMES).meals).toEqual([]); // ends well before lunch
     const late = { ...DEFAULT_MEAL_TIMES, dinner: { from: 20 * 60, to: 22 * 60, usual: 21 * 60 } };
     expect(reviewDay(tokyo(), [], late).meals).toEqual([]); // the day ends at 20:51, before a 21:00 dinner
     const noLunch = tokyo().filter((s) => s.id !== "lunch");
     expect(reviewDay(noLunch, [], DEFAULT_MEAL_TIMES).meals.map((m) => m.meal)).toEqual(["lunch", "dinner"]);
+  });
+
+  it("says where a missing meal goes: before setting out, between stops, or after the last one (November 2026)", () => {
+    const start = (t: string | null) => stop("s", "Hotel", t, 0, { role: "start" });
+    // setting out at lunchtime: lunch first, after the start and before the first stop
+    const noon = reviewDay([start("12:00"), stop("a", "Bondi Beach", "13:00", 120)], [], DEFAULT_MEAL_TIMES);
+    expect(noon.meals.find((m) => m.meal === "lunch")).toMatchObject({ position: "before", afterId: "s", beforeId: "a", to: 780 });
+    expect(noon.notes.map((n) => n.text)).toContain("Lunch before setting out may be missing");
+    // only a starting point: still asked, from when it leaves
+    const only = reviewDay([start("12:00")], [], DEFAULT_MEAL_TIMES);
+    expect(only.meals).toMatchObject([{ meal: "lunch", position: "before", afterId: "s", beforeId: null }]);
+    // the first stop at 16:00 for 20 min, no start: dinner after it, named
+    const afternoon = reviewDay([stop("b", "Bondi Beach", "16:00", 20)], [], DEFAULT_MEAL_TIMES);
+    expect(afternoon.meals).toMatchObject([{ meal: "dinner", position: "after", afterId: "b", beforeId: null }]);
+    expect(afternoon.notes.map((n) => n.text)).toContain("Dinner after Bondi Beach may be missing");
+    // a full day still asks for lunch between the right stops
+    const day = reviewDay([stop("a", "A", "09:00", 150), stop("b", "B", "13:30", 60), stop("c", "C", "15:00", 60)], [], DEFAULT_MEAL_TIMES);
+    expect(day.meals.find((m) => m.meal === "lunch")).toMatchObject({ position: "between", afterId: "a", beforeId: "b" });
+    // a meal that's planned is never asked for, wherever it is
+    const planned = reviewDay([start("12:00"), stop("l", "Cafe", "12:15", 45, { kind: "food" }), stop("a", "Bondi", "13:00", 120)], [], DEFAULT_MEAL_TIMES);
+    expect(planned.meals.map((m) => m.meal)).not.toContain("lunch");
+    // a morning that ends long before lunch: nothing
+    expect(reviewDay([stop("a", "A", "07:30", 60)], [], DEFAULT_MEAL_TIMES).meals).toEqual([]);
   });
 
   it("notes long walks, legs with no route, long gaps and a crowded day, as advice", () => {

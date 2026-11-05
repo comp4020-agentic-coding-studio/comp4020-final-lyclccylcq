@@ -9,9 +9,11 @@ import { hhmm, type Mode, travelMinutes } from "./schedule.ts";
 // whose time overlaps the meal's range in the trip's own meal times. An
 // explicitly assigned meal counts only for that meal, so lunch at 12:40 never
 // covers dinner. A food stop with no meal counts for the meal whose range
-// holds its start. A meal is flagged only if the timed part of the day spans
-// most of its range and there's room for it, and never for meals before the
-// day starts or after it ends.
+// holds its start. A meal is flagged where it would go: "between" stops when
+// the timed part of the day spans most of its range; "before" setting out
+// when the day starts inside the meal's range (lunch near the first stop, or
+// the starting point, before leaving); "after" the last stop when the day
+// ends in the meal's range or up to 90 minutes before it. One place per meal.
 
 export type MealKey = "breakfast" | "brunch" | "lunch" | "afternoon_tea" | "dinner";
 export type MealWindow = { from: number; to: number; usual: number };
@@ -28,7 +30,7 @@ export type ReviewStop = {
 };
 export type ReviewSegment = { fromId: string; toId: string; selectedMode: Mode | null; options: { mode: Mode; status: string; durationSec?: number; message?: string }[] };
 
-export type MealGap = { meal: MealKey; from: number; to: number; usual: number; afterId: string | null; beforeId: string | null };
+export type MealGap = { meal: MealKey; from: number; to: number; usual: number; afterId: string | null; beforeId: string | null; position: "before" | "between" | "after" };
 export type Note = {
   id: string;
   kind: "missing_meal" | "long_walk" | "no_route" | "long_gap" | "overloaded" | "untimed";
@@ -46,6 +48,8 @@ export type DayReview = {
 // meals people usually plan a stop for; brunch and afternoon tea only when chosen
 const CORE: MealKey[] = ["lunch", "dinner"];
 const LONG_WALK_MIN = 30;
+const AFTER_LEAD_MIN = 90; // a day ending this long before a meal's range still gets "dinner after"
+const MEAL_MIN: Record<MealKey, number> = { breakfast: 45, brunch: 60, lunch: 60, afternoon_tea: 45, dinner: 75 };
 const LONG_GAP_MIN = 150;
 const MAX_ACTIVE_MIN = 11 * 60; // planned visits beyond this, in one day, are a lot
 
@@ -68,24 +72,52 @@ export function reviewDay(stops: ReviewStop[], segments: ReviewSegment[], mealTi
   };
   const covered = new Set(real.filter(isFood).map(mealOf).filter((m): m is MealKey => m !== null));
   const meals: MealGap[] = [];
-  if (span) {
-    for (const meal of CORE) {
-      const w = mealTimes[meal];
-      if (!w || covered.has(meal)) continue;
-      // the day has to reach well into the meal's range, from before it starts
+  const start = stops.find((s) => s.role === "start") ?? null;
+  const say = (meal: MealKey, position: MealGap["position"], last: ReviewStop | null) =>
+    position === "before" ? `${LABEL[meal]} before setting out may be missing` : position === "after" && last ? `${LABEL[meal]} after ${last.title} may be missing` : `${LABEL[meal]} may be missing`;
+  for (const meal of CORE) {
+    const w = mealTimes[meal];
+    if (!w || covered.has(meal)) continue;
+    const dur = MEAL_MIN[meal];
+    let gap: MealGap | null = null;
+    // between stops: the day has to reach well into the meal's range, from before it starts
+    if (span) {
       const reach = Math.min(span.to, w.to) - Math.max(span.from, w.from);
-      if (span.from > w.usual || reach < Math.min(60, w.to - w.from) / 2 || span.to < w.usual) continue;
-      // where it would go: after the stop that ends inside the meal's range
-      // nearest its usual time (or the last one before the range), and before
-      // the stop that follows. The part of the route it belongs to.
-      const inRange = timed.filter((s) => end(s) >= w.from && end(s) <= w.to);
-      const after = inRange.length
-        ? inRange.reduce((best, s) => (Math.abs(end(s) - w.usual) < Math.abs(end(best) - w.usual) ? s : best))
-        : (timed.filter((s) => end(s) <= w.from).at(-1) ?? null);
-      const next = after ? (timed[timed.indexOf(after) + 1] ?? null) : (timed[0] ?? null);
-      meals.push({ meal, from: w.from, to: w.to, usual: w.usual, afterId: after?.id ?? null, beforeId: next?.id ?? null });
-      notes.push({ id: `meal:${meal}`, kind: "missing_meal", level: "advice", text: `${LABEL[meal]} may be missing`, stopIds: [] });
+      if (!(span.from > w.usual || reach < Math.min(60, w.to - w.from) / 2 || span.to < w.usual)) {
+        // where it would go: after the stop that ends inside the meal's range
+        // nearest its usual time (or the last one before the range), and before
+        // the stop that follows. The part of the route it belongs to.
+        const inRange = timed.filter((s) => end(s) >= w.from && end(s) <= w.to);
+        const after = inRange.length
+          ? inRange.reduce((best, s) => (Math.abs(end(s) - w.usual) < Math.abs(end(best) - w.usual) ? s : best))
+          : (timed.filter((s) => end(s) <= w.from).at(-1) ?? null);
+        const next = after ? (timed[timed.indexOf(after) + 1] ?? null) : (timed[0] ?? null);
+        // nothing before it on the route: it's a meal before setting out
+        gap = after
+          ? { meal, from: w.from, to: w.to, usual: w.usual, afterId: after.id, beforeId: next?.id ?? null, position: next ? "between" : "after" }
+          : { meal, from: w.from, to: w.to, usual: w.usual, afterId: start?.id ?? null, beforeId: next?.id ?? null, position: "before" };
+      }
     }
+    // before setting out: the day sets out inside the meal's range, so eat
+    // first, near the start: the first thing after the starting point (if
+    // there is one), finishing before the first stop. A day with only a
+    // starting point counts too, from when it leaves.
+    const depart = span?.from ?? start?.startMin ?? null;
+    if (!gap && depart !== null && depart >= w.from && depart < w.to) {
+      const leave = start?.startMin ?? null;
+      const to = span ? span.from : w.to;
+      const from = leave ?? Math.max(0, to - dur - 60);
+      gap = { meal, from, to, usual: span ? Math.max(from, to - dur - 15) : Math.max(from, w.usual), afterId: start?.id ?? null, beforeId: timed[0]?.id ?? null, position: "before" };
+    }
+    // after the last stop: the day ends in the meal's range, or a little before it
+    if (!gap && span && span.to >= w.from - AFTER_LEAD_MIN && span.to < w.to - dur) {
+      const last = timed.reduce((m, s) => (end(s) >= end(m) ? s : m));
+      gap = { meal, from: Math.max(w.from, span.to), to: w.to, usual: Math.max(w.usual, span.to + 15), afterId: last.id, beforeId: null, position: "after" };
+    }
+    if (!gap) continue;
+    meals.push(gap);
+    const last = gap.afterId ? (timed.find((s) => s.id === gap.afterId) ?? null) : null;
+    notes.push({ id: `meal:${meal}`, kind: "missing_meal", level: "advice", text: say(meal, gap.position, last), stopIds: [gap.afterId, gap.beforeId].filter((x): x is string => x !== null) });
   }
 
   // --- routes

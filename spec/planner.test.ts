@@ -337,7 +337,7 @@ describe("the plan and preferences endpoints", () => {
     expect(res).toMatchObject({ status: 409, data: { code: "stale" } });
   });
 
-  it("holds collaborators to their rights when they apply a plan", async () => {
+  it("lets a collaborator apply their own plan, but nobody else's draft", async () => {
     stub.reply.fn = reorder;
     const owner = await signUp(app.url);
     const guest = await signUp(app.url);
@@ -348,9 +348,10 @@ describe("the plan and preferences endpoints", () => {
     await guest.send("PUT", "/api/me/preferences", { food: {}, travel: {} });
     const plan = await guest.send("POST", `/api/trips/${trip.id}/plan`, { dayId: trip.days[0].id });
     expect(plan.status).toBe(200);
-    expect((await guest.send("POST", `/api/trips/${trip.id}/plan/apply`, { draftId: plan.data.draftId })).status).toBe(403);
-    // someone else's draft can't be applied either
+    // someone else's draft can't be applied
     expect((await owner.send("POST", `/api/trips/${trip.id}/plan/apply`, { draftId: plan.data.draftId })).status).toBe(410);
+    // the collaborator applies it, owner's stops included (November 2026)
+    expect((await guest.send("POST", `/api/trips/${trip.id}/plan/apply`, { draftId: plan.data.draftId })).status).toBe(200);
   });
 
   it("stops at the app-wide daily limit without calling the provider, and reports usage to admins only", async () => {

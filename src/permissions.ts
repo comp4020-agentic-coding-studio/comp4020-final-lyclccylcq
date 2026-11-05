@@ -4,9 +4,12 @@ import { HttpError } from "./errors.ts";
 // rules live in one place (docs/permissions.md).
 //
 //   owner         everything
-//   collaborator  view, add stops, and change, move or remove the stops they
-//                 added themselves, and share the read-only export link;
-//                 nothing that runs the trip
+//   collaborator  plan the trip with the owner: add, change, move, re-place
+//                 or remove any stop, set the starting point, choose how to
+//                 travel, apply schedule fixes and AI suggestions, and share
+//                 the read-only export link. Not what runs the trip itself:
+//                 its name, dates and settings, who's on it, publishing, or
+//                 deleting it
 //   anyone else   nothing: the trip answers 404, as if it didn't exist
 export type Role = "owner" | "collaborator";
 
@@ -28,7 +31,7 @@ export type Action =
   | "publish"
   | "share_export";
 
-const COLLABORATOR: ReadonlySet<Action> = new Set(["view", "add_activity", "edit_own_activity", "calculate_route", "leave", "share_export"]);
+const COLLABORATOR: ReadonlySet<Action> = new Set(["view", "add_activity", "edit_own_activity", "edit_any_activity", "set_start", "calculate_route", "select_mode", "apply_proposal", "leave", "share_export"]);
 
 export const can = (role: Role | null, action: Action): boolean =>
   role === "owner" || (role === "collaborator" && COLLABORATOR.has(action));
@@ -40,10 +43,6 @@ const OWNER_ONLY: Partial<Record<Action, string>> = {
   manage_requests: "Only the trip's owner can approve or reject requests to join.",
   remove_member: "Only the trip's owner can remove people.",
   publish: "Only the trip's owner can publish it.",
-  edit_any_activity: "Only the trip's owner can change or remove stops other people added.",
-  set_start: "Only the trip's owner can change the starting point.",
-  select_mode: "Only the trip's owner can choose how to travel between stops.",
-  apply_proposal: "Only the trip's owner can apply schedule fixes.",
 };
 
 // Non-members get the same 404 as a trip that doesn't exist; members without
@@ -54,7 +53,8 @@ export function authorize(role: Role | null, action: Action): Role {
   return role;
 }
 
-// A stop: the owner may change any; a collaborator only the ones they added.
+// A stop: any member may change any stop (November 2026; before, a
+// collaborator could change only the ones they added).
 export function authorizeActivity(role: Role | null, userId: string, createdBy: string | null): Role {
   const r = authorize(role, "view");
   if (r === "owner" || createdBy === userId) return authorize(r, "edit_own_activity");

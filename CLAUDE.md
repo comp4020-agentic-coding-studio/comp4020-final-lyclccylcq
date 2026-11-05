@@ -228,7 +228,9 @@ contradict the README, stop and ask. Don't quietly change the product.
   `validateAnswer` drops anything else. Keep it that way. Titles and notes
   are untrusted data inside `<day_data>`, never instructions.
 - Every answer carries the day `fingerprint` it analysed; the UI marks it
-  stale when the day changes, and `applyProposal` with an old `basedOn` is a
+  stale when the day changes (since November 2026 the editor clears AI
+  answers, fix picks and suggestion panels made for an older fingerprint as
+  soon as a new snapshot arrives), and `applyProposal` with an old `basedOn` is a
   409 that writes nothing. Applying needs a preview and a confirmation.
   The panel lists every conflict with its fixes as choices (one per
   problem, or "Keep as planned"), the exact edits of everything chosen
@@ -259,7 +261,11 @@ contradict the README, stop and ask. Don't quietly change the product.
   a gateway can replace it.
 - **The planning assistant, not a chatbot** (October 2026). The editor's
   right panel shows the day's status from plain rules (`src/review.ts`:
-  missing meals from the trip's own meal times and assigned meals, long
+  missing meals from the trip's own meal times and assigned meals, each with
+  a `position`: "before" setting out (the day leaves in the meal's range,
+  even with only a starting point), "between" stops, or "after" the last
+  stop (the day ends in, or up to 90 min before, its range). The timeline
+  shows each as a row where it would go, with "Find places to eat"; long
   walks, legs with no route, long gaps, a crowded day; no model call) and
   three actions: "Optimize my day" (one model call), "Find places to eat"
   and "Explore nearby" (Google search and rules only, no model call).
@@ -390,9 +396,11 @@ contradict the README, stop and ask. Don't quietly change the product.
 - Roles: owner, collaborator, everyone else, decided only in
   `src/permissions.ts` (`authorize`, `authorizeActivity`). Non-members get the
   same 404 as a missing trip; members without the right get a 403. Owners do
-  everything; collaborators add stops and change, move or remove only the
-  stops they added (`created_by`), and can leave. Don't add a role check
-  anywhere else.
+  everything; collaborators plan with them (November 2026): add, change,
+  move, re-place or remove any stop, set the start, choose transport, apply
+  fixes and AI suggestions, and leave. The trip's name, dates, settings,
+  members, publishing and deletion stay with the owner. Don't add a role
+  check anywhere else.
 - Invite links are 256-bit random tokens, stored hashed, shown once, expiring
   24 hours after creation (server clock), replaced or revoked by the owner. A
   link only lets a signed-in person *request* to join; the owner approves
@@ -572,6 +580,7 @@ contradict the README, stop and ask. Don't quietly change the product.
   | My Trips | `spec/browser.test.ts -t "My Trips"` |
   | Published journeys, profile, save state, export | `spec/browser-journeys.test.ts`, `spec/permissions.test.ts` |
   | Online invitation card, fixing several conflicts, public itinerary export, About | `spec/browser-features.test.ts` |
+  | Removing a stop while changing its place, collaborators planning any stop, missing-meal rows | `spec/browser-collab.test.ts` |
   | A new stop's travel-time suggestion (mocked Google) | `spec/browser-travel.test.ts` |
   | `ui.js` `h()` / `fill()` | `spec/dom-children.test.ts` |
   | Scheduling, order, start (`src/schedule.ts`, `src/trips.ts`) | `spec/schedule.test.ts`, `spec/order.test.ts`, `spec/start.test.ts`, `spec/itinerary.test.ts` |

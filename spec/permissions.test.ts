@@ -141,7 +141,7 @@ describe("owner and collaborator rights", () => {
     return { owner, guest, outsider, trip, ownerStop };
   }
 
-  it("lets collaborators add, and change only what they added", async () => {
+  it("lets collaborators plan the trip: add, and change, move, re-place or remove any stop, the start and fixes", async () => {
     const { owner, guest, trip, ownerStop } = await shared();
     const add = await addActivity(guest, trip, { title: "Guest's stop", startMin: 600 });
     expect(add.status).toBe(201);
@@ -152,21 +152,28 @@ describe("owner and collaborator rights", () => {
     expect((await guest.send("PATCH", `/api/trips/${trip.id}/activities/${mine}`, { baseVersion: 1, notes: "mine" })).status).toBe(200);
     expect((await guest.send("PUT", `/api/trips/${trip.id}/activities/${mine}/place`, { baseVersion: 2, place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: -33.86, lng: 151.21 } })).status).toBe(200);
 
-    // the owner's stop: refused with a 403 that says why, and nothing changes
+    // the owner's stop too (November 2026): edit, re-place, move, and the
+    // starting point; a fix is checked (unknown id), not refused for the role
+    const call = (method: string, path: string, body?: unknown) => guest.send(method, `/api/trips/${trip.id}${path}`, body);
+    expect((await call("PATCH", `/activities/${ownerStop}`, { baseVersion: 1, title: "Changed by guest" })).status).toBe(200);
+    expect((await call("PUT", `/activities/${ownerStop}/place`, { baseVersion: 2, place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: -33.87, lng: 151.2 } })).status).toBe(200);
+    expect((await call("POST", `/activities/${ownerStop}/move`, { dayId: trip.days[1].id, index: 0 })).status).toBe(200);
+    expect((await call("PUT", "/start", { clientId: crypto.randomUUID(), title: "Here", place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: 0, lng: 0 }, baseVersion: null })).status).toBe(200);
+    expect((await call("POST", "/proposals/apply", { dayId: trip.days[0].id, proposalId: "x" })).status).not.toBe(403);
+    const after = (await owner.get(`/api/trips/${trip.id}`)).data;
+    expect(after.days[1].activities.find((a: any) => a.id === ownerStop)).toMatchObject({ title: "Changed by guest", updatedBy: guest.userId });
+    expect((await call("DELETE", `/activities/${ownerStop}`)).status).toBe(200);
+    // what runs the trip stays with the owner
     for (const [method, path, body] of [
-      ["PATCH", `/activities/${ownerStop}`, { baseVersion: 1, title: "Mine now" }],
-      ["DELETE", `/activities/${ownerStop}`, undefined],
-      ["POST", `/activities/${ownerStop}/move`, { dayId: trip.days[1].id, index: 0 }],
-      ["PUT", `/activities/${ownerStop}/place`, { baseVersion: 1, place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: 0, lng: 0 } }],
-      ["PUT", "/start", { clientId: crypto.randomUUID(), title: "Here", place: { placeId: `custom:${crypto.randomUUID()}`, source: "custom", lat: 0, lng: 0 }, baseVersion: null }],
-      ["POST", "/proposals/apply", { dayId: trip.days[0].id, proposalId: "x" }],
+      ["PATCH", "", { title: "Renamed" }],
+      ["DELETE", "", undefined],
+      ["PUT", "/publication", { description: "x", visibility: "link" }],
+      ["POST", "/invite", undefined],
     ] as const) {
-      const res = await guest.send(method, `/api/trips/${trip.id}${path}`, body);
+      const res = await call(method, path, body);
       expect(res.status, `${method} ${path}`).toBe(403);
       expect(res.data.error).toMatch(/owner/);
     }
-    const after = (await owner.get(`/api/trips/${trip.id}`)).data;
-    expect(after.days[0].activities.find((a: any) => a.id === ownerStop)).toMatchObject({ title: "Owner's stop", version: 1 });
 
     // the owner changes anyone's stops
     expect((await owner.send("DELETE", `/api/trips/${trip.id}/activities/${mine}`)).status).toBe(200);
