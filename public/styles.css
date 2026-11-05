@@ -163,7 +163,7 @@ textarea { resize: vertical; }
   position: relative; min-height: 100vh; min-height: 100dvh; isolation: isolate;
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 410px); align-items: start;
   gap: 32px clamp(24px, 4vw, 72px); padding: clamp(24px, 4vh, 44px) clamp(20px, 5vw, 80px) 120px;
-  background: #0068a8 url("/img/art/auth-bg.jpg") center bottom / cover no-repeat;
+  background: #0068a8 url("/img/art/auth-bg-hd.webp") center bottom / cover no-repeat;
   color: #fff;
 }
 .auth::before { /* a little more depth behind the lettering, none over the art */
