@@ -33,12 +33,15 @@ jobs:
       - name: Install a Chinese font for the browser specs
         # The runner's Chrome has no font for Chinese, so it draws those
         # characters as nothing; the site is bilingual and the image
-        # export's Chinese title check needs real glyphs to compare
+        # export's Chinese title check needs real glyphs to compare.
+        # WenQuanYi Micro Hei: one small file (fonts-noto-cjk is ~90 MB and
+        # took 13 minutes from the mirror)
+        timeout-minutes: 5
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq fonts-noto-cjk
+          sudo apt-get install -y -qq --no-install-recommends fonts-wqy-microhei
           fc-cache -f
-          fc-list :lang=zh family | head -3
+          fc-list :lang=zh family
       - name: Build and start the app
         # the same image Fly deploys, with a throwaway /data in place of the
         # volume; the spec runs against it
