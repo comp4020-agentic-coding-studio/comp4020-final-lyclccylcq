@@ -723,13 +723,31 @@ async function renderDashboard() {
   const invitesBox = h("section", { class: "dash-section invites", "aria-label": t("Invitations"), hidden: true });
   const requestsBox = h("section", { class: "dash-section invites", "aria-label": t("Requests to join your trips"), "data-dash": "requests", hidden: true });
   const myRequestsBox = h("section", { class: "dash-section", "aria-label": t("Your requests to join"), "data-dash": "my-requests", hidden: true });
+  // Each part is rebuilt only when what it shows changed. A live update that
+  // changes nothing (the stream reconnecting, an invitation sent and then
+  // cancelled) leaves the nodes alone, so a button being pressed or a link
+  // with the keyboard focus is still there when the press or key ends.
+  const shown = new Map(); // box -> what it shows, as a key
+  const changed = (box, value) => {
+    const key = JSON.stringify([getLang(), value]);
+    if (shown.get(box) === key) return false;
+    shown.set(box, key);
+    return true;
+  };
   const renderInvites = () => {
+    if (changed(invitesBox, invites.invitations)) renderInvitations();
+    if (changed(requestsBox, invites.requests ?? [])) renderRequests();
+    if (changed(myRequestsBox, invites.myRequests ?? [])) renderMyRequests();
+  };
+  const renderInvitations = () => {
     invitesBox.hidden = invites.invitations.length === 0;
     fill(
       invitesBox,
       h("h2", {}, t("Invitations"), h("span", { class: "badge badge-danger" }, String(invites.invitations.length))),
       h("ul", { class: "invite-list" }, invites.invitations.map(inviteRow)),
     );
+  };
+  const renderRequests = () => {
     const reqs = invites.requests ?? [];
     requestsBox.hidden = reqs.length === 0;
     fill(
@@ -737,6 +755,8 @@ async function renderDashboard() {
       h("h2", {}, t("Requests to join your trips"), h("span", { class: "badge badge-danger" }, String(reqs.length))),
       h("ul", { class: "invite-list" }, reqs.map(requestRow)),
     );
+  };
+  const renderMyRequests = () => {
     const mine = invites.myRequests ?? [];
     myRequestsBox.hidden = mine.length === 0;
     const LABEL = { pending: t("Waiting for approval"), approved: t("Approved"), rejected: t("Not approved") };
@@ -824,17 +844,37 @@ async function renderDashboard() {
       actions,
     );
   };
-  let refreshing = null;
-  const refresh = async () => {
-    refreshing ??= api("/api/invitations")
-      .then((r) => {
-        invites = r;
-        renderInvites();
-      })
-      .catch(() => {})
-      .finally(() => (refreshing = null));
-    return refreshing;
+  // Asking again, in order: every request takes a number and an answer
+  // older than one already shown is dropped, so a slow old answer can't put
+  // back what a newer one removed. One that fails (the network dropped) is
+  // asked again once the browser is back online.
+  const latest = (path, use) => {
+    let asked = 0;
+    let shown = 0;
+    let failed = false;
+    const ask = () => {
+      const n = ++asked;
+      return api(path)
+        .then((r) => {
+          if (n < shown || !app.contains(lists)) return;
+          shown = n;
+          failed = false;
+          use(r);
+        })
+        .catch(() => (failed = true));
+    };
+    return { ask, retry: () => failed && ask() };
   };
+  const invitesQ = latest("/api/invitations", (r) => {
+    invites = r;
+    renderInvites();
+  });
+  const tripsQ = latest("/api/trips", (d) => {
+    data = d;
+    renderLists();
+  });
+  const refresh = () => invitesQ.ask();
+  const onTrips = () => tripsQ.ask();
   // the page's one personal stream (watchInvitations): its count changing
   // means the lists here may have changed
   const events = inviteWatch.events;
@@ -843,12 +883,16 @@ async function renderDashboard() {
     onTrips(); // an approval adds a trip to "Shared with you"
   };
   events?.addEventListener("invitations", onInvites);
-  const onTrips = () => api("/api/trips").then((d) => {
-    data = d;
-    renderLists();
-  }).catch(() => {});
+  // after the stream (re)connects, both lists catch up on what was missed
+  const onOpen = () => onInvites();
+  const onOnline = () => {
+    invitesQ.retry();
+    tripsQ.retry();
+  };
+  addEventListener("online", onOnline);
   const lists = h("div", {});
-  const renderLists = () =>
+  const renderLists = () => {
+    if (!changed(lists, [data.owned, data.shared])) return;
     fill(
       lists,
       section(
@@ -864,7 +908,8 @@ async function renderDashboard() {
       ),
       section(t("Shared with you"), data.shared, h("p", { class: "muted" }, t("When someone invites you to their trip and you accept, it shows up here."))),
     );
-  events?.addEventListener("open", onTrips);
+  };
+  events?.addEventListener("open", onOpen);
 
   app.querySelector(".dash").replaceChildren(
     h(
@@ -882,7 +927,8 @@ async function renderDashboard() {
   renderLists();
   return () => {
     events?.removeEventListener("invitations", onInvites);
-    events?.removeEventListener("open", onTrips);
+    events?.removeEventListener("open", onOpen);
+    removeEventListener("online", onOnline);
   };
 }
 

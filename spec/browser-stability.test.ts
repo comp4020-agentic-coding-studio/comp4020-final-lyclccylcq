@@ -11,7 +11,7 @@ const baseUrl = inject("baseUrl");
 let browser: NonNullable<Awaited<ReturnType<typeof launch>>>;
 beforeAll(async () => {
   if (chromePath) browser = (await launch())!;
-}, 30_000); // starting Chrome alongside the other browser files on a two-core CI runner
+});
 afterAll(() => browser?.close());
 
 type P = Parameters<typeof inPage>[0];
@@ -304,15 +304,14 @@ describe.skipIf(!chromePath)("the exported image of a long title", () => {
     expectEveryLineInked(png, k, layout.lines);
   }, 30_000);
 
-  it("draws a wrapped Chinese title on every line too", async (test) => {
+  it("draws a wrapped Chinese title on every line too", async () => {
     const page = await browser.newPage();
     await page.viewport(390, 844, true);
     await signUpIn(page, baseUrl, uniqueName("pngzh"));
-    // A machine with no Chinese font (CI's Ubuntu image) draws these
-    // characters as nothing, on the page and in the image alike, so there's
-    // no line to compare. Skipped there, said in the output, never passed.
+    // needs a font for Chinese in the browser (CI installs fonts-noto-cjk);
+    // without one the characters draw as nothing and this says so plainly
     const cjk = await page.eval<boolean>(`(() => { const c = document.createElement('canvas'); c.width = 200; c.height = 60; const g = c.getContext('2d'); g.font = '40px serif'; g.fillText('悉尼', 10, 45); const d = g.getImageData(0, 0, 200, 60).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 128) n++; return n > 50; })()`);
-    if (!cjk) return test.skip("this browser has no font for Chinese characters");
+    expect(cjk, "this browser has no font for Chinese characters").toBe(true);
     const trip = await newTrip(page, "悉尼海港与海滩周末慢行：从歌剧院到邦迪再到库吉的每一个观景点与咖啡馆");
     await stop(page, trip, "歌剧院", 600, 60);
     await page.goto(new URL(`/trips/${trip.id}/print`, baseUrl).href);

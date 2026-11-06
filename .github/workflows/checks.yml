@@ -30,6 +30,15 @@ jobs:
         with:
           cache: true
       - run: pnpm install --frozen-lockfile
+      - name: Install a Chinese font for the browser specs
+        # The runner's Chrome has no font for Chinese, so it draws those
+        # characters as nothing; the site is bilingual and the image
+        # export's Chinese title check needs real glyphs to compare
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+          fc-cache -f
+          fc-list :lang=zh family | head -3
       - name: Build and start the app
         # the same image Fly deploys, with a throwaway /data in place of the
         # volume; the spec runs against it

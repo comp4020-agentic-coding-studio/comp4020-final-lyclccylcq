@@ -29,6 +29,10 @@ export type Page = {
   // a real (trusted) mouse click at the element's centre, which counts as a
   // user gesture for the browser's autoplay rules; click() doesn't always
   tap(selector: string): Promise<void>;
+  // the same real press and release, with `between` run after the press
+  // and before the release: what happens on the page while a finger or
+  // mouse button is down (a live update arriving, say)
+  tapAround(selector: string, between: () => Promise<void>): Promise<void>;
   // a real click at viewport coordinates (a spot on a map, say)
   tapAt(x: number, y: number): Promise<void>;
   screenshot(path: string): Promise<void>;
@@ -177,6 +181,16 @@ export async function launch(opts: { media?: { wav: string } | "deny" } = {}) {
         );
         if (!at) throw new Error(`nothing to tap at ${selector}`);
         for (const type of ["mousePressed", "mouseReleased"]) await s("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: 1 });
+      },
+      async tapAround(selector, between) {
+        const at = await page.eval<{ x: number; y: number } | null>(
+          `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView({ block: 'nearest' }); const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+        );
+        if (!at) throw new Error(`nothing to tap at ${selector}`);
+        await s("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y });
+        await s("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 });
+        await between();
+        await s("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x, y: at.y, button: "left", clickCount: 1 });
       },
       async key(name) {
         const shift = name.startsWith("Shift+");
