@@ -323,6 +323,41 @@ describe.skipIf(!chromePath)("the exported image of a long title", () => {
   }, 30_000);
 });
 
+describe.skipIf(!chromePath)("the read-only link panel on a trip's export page", () => {
+  for (const vp of [{ w: 1440, h: 900, m: false }, { w: 390, h: 844, m: true }]) {
+    it(`shows an empty field before there's a link, never "null" (${vp.w}×${vp.h})`, async () => {
+      const page = await browser.newPage();
+      await page.viewport(vp.w, vp.h, vp.m);
+      await signUpIn(page, baseUrl, uniqueName("rol"));
+      const trip = await newTrip(page, "Link panel");
+      await page.goto(new URL(`/trips/${trip.id}/print`, baseUrl).href);
+      await page.waitFor(`document.querySelector('.tp-share h2')`, 10000);
+      const panel = `document.querySelector('.tp-share')`;
+      // no link yet: the field is there and empty, there's nothing to copy, and no stray text
+      expect(await page.eval(`${panel}.textContent.includes('null')`)).toBe(false);
+      expect(await page.eval(`document.querySelector('[data-export-link=field]').value`)).toBe("");
+      expect(await page.eval(`document.querySelector('[data-export-link=copy]').disabled`)).toBe(true);
+      expect(await page.eval(`document.querySelector('[data-export-link=make]').textContent`)).toBe("Make a read-only link");
+      expect(await page.eval(`document.querySelector('[data-export-link=revoke]')`)).toBe(null);
+      expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
+      // made: the same field holds the link, ready to copy
+      await page.click("[data-export-link=make]");
+      await page.waitFor(`/\\/export\\//.test(document.querySelector('[data-export-link=field]')?.value ?? '')`, 8000);
+      expect(await page.eval(`document.querySelector('[data-export-link=copy]').disabled`)).toBe(false);
+      // opened again later: the link isn't shown again (only its hash is kept), and it says so
+      await page.goto(new URL(`/trips/${trip.id}/print`, baseUrl).href);
+      await page.waitFor(`document.querySelector('[data-export-link=revoke]')`, 10000);
+      expect(await page.eval(`document.querySelector('[data-export-link=field]')`)).toBe(null);
+      expect(await page.eval(`${panel}.textContent`)).toMatch(/It's shown only once/);
+      // switched off: back to the empty field, still no "null"
+      await page.click("[data-export-link=revoke]");
+      await page.waitFor(`!document.querySelector('[data-export-link=revoke]')`, 8000);
+      expect(await page.eval(`document.querySelector('[data-export-link=field]')?.value`)).toBe("");
+      expect(await page.eval(`${panel}.textContent.includes('null')`)).toBe(false);
+    });
+  }
+});
+
 // Holds the page's GET /api/invitations answers until the test releases
 // them, so their order can be chosen. Each request waits under a number
 // (0, 1, 2, … in the order they were sent); release(n) lets that one through.

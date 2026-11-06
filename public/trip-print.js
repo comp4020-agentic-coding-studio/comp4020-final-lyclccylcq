@@ -1,6 +1,6 @@
 import { coverImg, photoFor } from "/photos.js";
 import { locale, t, tn } from "/i18n.js";
-import { api, dur, fmtDay, fmtRange, h, hhmm, icon, KIND_LABEL, toast } from "/ui.js";
+import { api, dur, fill as fillIn, fmtDay, fmtRange, h, hhmm, icon, KIND_LABEL, toast } from "/ui.js";
 
 // A trip as a document to keep, in three forms, with nothing published:
 //   /trips/:id/print   for its members: completes the routes, then offers
@@ -39,12 +39,17 @@ export async function renderTripPrint(app, tripId, ctx) {
 
   function renderLink() {
     const url = token && `${location.origin}/export/${token}`;
-    linkPanel.replaceChildren(
+    // ui.js fill(), not replaceChildren(): it drops the parts that don't
+    // apply (a null child), where replaceChildren wrote "null" on the page.
+    // (Imported as fillIn: this function's own fill() renders the page.)
+    // Before there's a link the field is there, empty, with nothing to copy.
+    fillIn(
+      linkPanel,
       h("h2", {}, t("Read-only link")),
       h("p", { class: "small muted" }, t("Anyone with the link sees this trip as it stands, notes included, and can save it as a PDF or image. Nobody can change anything through it. It isn't a publication and isn't listed anywhere.")),
-      url
-        ? h("div", { class: "tp-link" }, h("input", { readonly: true, value: url, "aria-label": t("Read-only link"), onfocus: (e) => e.target.select() }), h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-export-link": "copy", onclick: () => copy(url) }, t("Copy")))
-        : link && h("p", { class: "small" }, t("A link was made {date}. It's shown only once; make a new one to copy it again (the old one stops working).", { date: new Date(link.createdAt).toLocaleDateString(locale(), { day: "numeric", month: "short" }) })),
+      url || !link
+        ? h("div", { class: "tp-link" }, h("input", { readonly: true, value: url || "", placeholder: url ? null : t("No link yet"), "aria-label": t("Read-only link"), "data-export-link": "field", onfocus: (e) => e.target.select() }), h("button", { class: "btn btn-ghost btn-sm", type: "button", "data-export-link": "copy", disabled: !url, onclick: () => url && copy(url) }, t("Copy")))
+        : h("p", { class: "small" }, t("A link was made {date}. It's shown only once; make a new one to copy it again (the old one stops working).", { date: new Date(link.createdAt).toLocaleDateString(locale(), { day: "numeric", month: "short" }) })),
       h(
         "div",
         { class: "tp-link-actions" },

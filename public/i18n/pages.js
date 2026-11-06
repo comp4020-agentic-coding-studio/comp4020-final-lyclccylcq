@@ -97,6 +97,7 @@ export const ZH = {
   "Preparing your trip…": "正在准备你的行程…",
   "Calculating every route between your stops…": "正在计算各站点之间的所有路线…",
   "Read-only link": "只读链接",
+  "No link yet": "还没有链接",
   "Anyone with the link sees this trip as it stands, notes included, and can save it as a PDF or image. Nobody can change anything through it. It isn't a publication and isn't listed anywhere.": "任何拿到链接的人都能看到这个行程的当前状态（包括备注），并可以保存为 PDF 或图片。没有人能通过它修改任何内容。它不是发布，也不会在任何地方公开列出。",
   Copy: "复制",
   "A link was made {date}. It's shown only once; make a new one to copy it again (the old one stops working).": "已于 {date} 生成过一个链接。链接只显示一次；如需再次复制，请生成新链接（旧链接将失效）。",
