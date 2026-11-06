@@ -376,7 +376,6 @@ export const ZH = {
   "you": "你",
   "{duration} short": "差 {duration}",
   "{error} Make the change again when you're back online.": "{error} 恢复联网后请重新修改。",
-  "{error} Their version is on screen; choose again to replace it.": "{error} 屏幕上显示的是对方的版本；请重新选择来替换。",
   "{first} and {n} more changes": "{first}，另有 {n} 项修改",
   "{meal} along your route": "沿路线的{meal}",
   "{meal} usually {span} on this trip.": "这个行程的{meal}通常在 {span}。",
@@ -452,4 +451,10 @@ export const ZH = {
   "The day starts around {meal} time. Eat near the start first?": "出发时正值{meal}时间，要不要先在起点附近吃？",
   "The day ends around {meal} time.": "行程结束时正值{meal}时间。",
   "Usually around {time}.": "通常在 {time} 左右。",
+  "{title} was just changed by someone else. Check it before you replace it.": "{title} 刚被其他人修改了。替换前请先确认。",
+  "Someone else changed this stop while you were choosing: it's now {title}.": "你选择地点期间，其他人修改了这个站点：现在是 {title}。",
+  "{who} changed it first. It's now {current}.": "{who} 先修改了它。现在是 {current}。",
+  "Someone else": "其他人",
+  "Replace {current} with {place}": "把 {current} 换成 {place}",
+  "{error} Nothing was changed. Check what's there now before replacing it.": "{error} 没有做任何修改。替换前请先确认现在的内容。",
 };

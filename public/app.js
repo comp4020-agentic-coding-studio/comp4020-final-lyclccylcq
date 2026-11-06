@@ -409,14 +409,21 @@ function signedOutElsewhere() {
 // already, so it shows no card. Answering later leaves the invitation in
 // My Trips, as it would be for someone who wasn't online.
 
-const inviteWatch = { events: null, userId: null, seen: new Set(), primed: false, cards: new Map() };
+const inviteWatch = { events: null, userId: null, seen: new Set(), cards: new Map(), seq: 0, applied: -1, baseNo: 0, baseline: null, early: null };
 
+// Each count change asks for the list again, and answers can come back in
+// any order. Every request takes a number; an answer older than one already
+// used is dropped, so an old list can't close a card a newer one opened.
+// The first request is the baseline: what was already waiting when the page
+// opened (My Trips has those), which never pops up. If a newer answer comes
+// back before it, that answer waits for the baseline instead of guessing,
+// so a slow baseline can't swallow an invitation sent meanwhile.
 function watchInvitations() {
   const userId = state.me?.id ?? null;
   if (inviteWatch.userId === userId && inviteWatch.events) return;
   inviteWatch.events?.close();
   for (const card of inviteWatch.cards.values()) card.close();
-  Object.assign(inviteWatch, { events: null, userId, seen: new Set(), primed: false });
+  Object.assign(inviteWatch, { events: null, userId, seen: new Set(), seq: 0, applied: -1, baseNo: 0, baseline: null, early: null });
   inviteWatch.cards.clear();
   if (!userId) return;
   const events = new EventSource("/api/me/events");
@@ -425,22 +432,42 @@ function watchInvitations() {
     events.close();
     signedOutElsewhere();
   });
+  const show = (invitations) => {
+    const pendingIds = new Set(invitations.map((i) => i.id));
+    // one cancelled or answered elsewhere: its card goes
+    for (const [id, card] of inviteWatch.cards) if (!pendingIds.has(id)) card.close();
+    const fresh = invitations.filter((i) => !inviteWatch.seen.has(i.id));
+    for (const i of invitations) inviteWatch.seen.add(i.id);
+    if (location.pathname === "/trips") return;
+    for (const inv of fresh) invitationCard(inv);
+    if (fresh.length) document.querySelector(".topbar")?.replaceWith(topbar(currentTab()));
+  };
   events.addEventListener("invitations", () => {
+    const n = inviteWatch.seq++;
     api("/api/invitations")
       .then(({ invitations }) => {
         if (inviteWatch.events !== events) return; // signed out or switched account meanwhile
-        const pendingIds = new Set(invitations.map((i) => i.id));
-        // one cancelled or answered elsewhere: its card goes
-        for (const [id, card] of inviteWatch.cards) if (!pendingIds.has(id)) card.close();
-        const fresh = invitations.filter((i) => !inviteWatch.seen.has(i.id));
-        for (const i of invitations) inviteWatch.seen.add(i.id);
-        // the first answer is what was already waiting: My Trips has those
-        if (!inviteWatch.primed) return void (inviteWatch.primed = true);
-        if (location.pathname === "/trips") return;
-        for (const inv of fresh) invitationCard(inv);
-        if (fresh.length) document.querySelector(".topbar")?.replaceWith(topbar(currentTab()));
+        if (n === inviteWatch.baseNo && !inviteWatch.baseline) {
+          // the baseline: already waiting, so never a card
+          inviteWatch.baseline = invitations;
+          for (const i of invitations) inviteWatch.seen.add(i.id);
+          if (inviteWatch.early) {
+            const early = inviteWatch.early;
+            inviteWatch.early = null;
+            show(early);
+          } else inviteWatch.applied = Math.max(inviteWatch.applied, n);
+          return;
+        }
+        if (n <= inviteWatch.applied) return; // older than what's on screen
+        inviteWatch.applied = n;
+        if (!inviteWatch.baseline) return void (inviteWatch.early = invitations);
+        show(invitations);
       })
-      .catch(() => {});
+      .catch(() => {
+        // no baseline (offline, say): the next answer that arrives becomes
+        // it, as on a page just opened; nothing already waiting pops up
+        if (n === inviteWatch.baseNo && !inviteWatch.baseline && inviteWatch.events === events) inviteWatch.baseNo = inviteWatch.seq;
+      });
   });
 }
 

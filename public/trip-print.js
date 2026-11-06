@@ -383,17 +383,20 @@ async function drawDocument(doc) {
     const upper = cs.textTransform === "uppercase";
     const spacing = parseFloat(cs.letterSpacing) || 0;
     if ("letterSpacing" in g) g.letterSpacing = `${spacing}px`;
-    // split into the lines the browser wrapped it into
+    // split into the lines the browser wrapped it into. A new line starts
+    // where a character sits clearly lower than the line so far (more than
+    // half its own height) and goes back to the left. Comparing tops, not
+    // one line's bottom with the next one's top: with a tight line height
+    // (a large title) the glyph boxes of two lines overlap, and that test
+    // saw one long line that ran off the image.
     let start = 0;
-    let lineTop = null;
-    let lineLeft = 0;
-    let lineBottom = 0;
+    let line = null; // { top, bottom, left, right } of the line so far
     const flush = (end) => {
-      const s = text.slice(start, end).replace(/\s+$/, "");
-      if (s && lineTop !== null) {
+      const s = text.slice(start, end).trim();
+      if (s && line) {
         const ascent = parseFloat(cs.fontSize) * 0.8;
-        const lh = lineBottom - lineTop;
-        g.fillText(upper ? s.toUpperCase() : s, lineLeft - box.left, lineTop - box.top + (lh - parseFloat(cs.fontSize)) / 2 + ascent);
+        const lh = line.bottom - line.top;
+        g.fillText(upper ? s.toUpperCase() : s, line.left - box.left, line.top - box.top + (lh - parseFloat(cs.fontSize)) / 2 + ascent);
       }
     };
     for (let i = 0; i < text.length; i++) {
@@ -401,18 +404,21 @@ async function drawDocument(doc) {
       range.setEnd(n, i + 1);
       const rects = range.getClientRects();
       if (!rects.length) continue;
-      const r = rects[0];
-      if (lineTop === null) {
-        lineTop = r.top;
-        lineLeft = r.left;
-        lineBottom = r.bottom;
+      const r = rects[rects.length - 1];
+      if (!r.width && !r.height) continue;
+      // a space starts nothing: where it falls at a wrap the browser keeps it
+      // at the end of the line before, so the next line begins at its first letter
+      if (/\s/.test(text[i]) && (!line || r.top - line.top > (r.bottom - r.top) / 2)) continue;
+      if (!line) {
+        line = { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
         start = i;
-      } else if (r.top >= lineBottom - 1) {
+      } else if (r.top - line.top > (r.bottom - r.top) / 2 && r.left < line.right - 1) {
         flush(i);
         start = i;
-        lineTop = r.top;
-        lineLeft = r.left;
-        lineBottom = r.bottom;
+        line = { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+      } else {
+        line.right = Math.max(line.right, r.right);
+        line.bottom = Math.max(line.bottom, r.bottom);
       }
     }
     flush(text.length);

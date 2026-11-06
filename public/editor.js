@@ -201,7 +201,15 @@ export async function openEditor(root, tripId, ctx) {
           searchPanel.replaceChildren();
         }
         toast(t("{title} was removed, so there's no place to change.", { title: gone }));
-      } else S.replacing = { ...S.replacing, version: still.version, title: still.title };
+      } else if (still.version !== S.replacing.version && still.version !== S.replacing.stale?.version) {
+        // Someone else changed this stop while a new place was being chosen.
+        // The change keeps the version it began from, so a press of the old
+        // "Use for …" is refused by the server (409) rather than quietly
+        // replacing what they did; the panel says what's there now, and
+        // going ahead takes a confirmation against it.
+        S.replacing = { ...S.replacing, stale: { version: still.version, title: still.title } };
+        toast(t("{title} was just changed by someone else. Check it before you replace it.", { title: S.replacing.title }));
+      }
     }
     // AI answers and suggestions are for the day as it was; once the plan
     // changes they go, rather than staying on screen as if still true
@@ -1474,12 +1482,7 @@ export async function openEditor(root, tripId, ctx) {
               t("Set as starting point"),
             )
           : S.replacing
-            ? h(
-                "button",
-                { class: "btn btn-primary", type: "button", disabled: Boolean(p.pending), onclick: () => confirmReplace({ placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng }, p.name) },
-                icon("pin"),
-                t("Use for {title}", { title: S.replacing.title }),
-              )
+            ? replaceAction({ placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng }, p.name, { disabled: Boolean(p.pending) })
             : h(
               "button",
               { class: "btn btn-primary add-to-trip", type: "button", disabled: Boolean(p.pending), onclick: () => scheduleCard({ title: p.name, kind: guessKind(p.types), types: p.types, place: { placeId: p.placeId, source: p.source, lat: p.lat, lng: p.lng }, hours: S.placeDetails?.hours ?? suggestionFor(p.placeId)?.candidate.hours ?? null, preset: suggestionFor(p.placeId) }) },
@@ -1782,6 +1785,7 @@ export async function openEditor(root, tripId, ctx) {
         icon(S.replacing ? "pin" : "plus"),
         S.replacing ? t("Use this spot for {title}", { title: S.replacing.title }) : t("Add this spot"),
       ),
+      S.replacing?.confirm && replaceAction({ placeId: `custom:${uid()}`, source: "custom", lat: ex.lat, lng: ex.lng }, ex.label && !/^near /i.test(ex.label) ? ex.label : "Pinned spot", { confirmOnly: true }),
     );
   }
 
@@ -1791,6 +1795,8 @@ export async function openEditor(root, tripId, ctx) {
   // spot on the map), then the card's button says "Use for …".
 
   function beginReplace(a) {
+    // version: the stop as it was when choosing began. It's sent with the
+    // change and never moved on by a snapshot (see applySnapshot).
     S.replacing = { id: a.id, version: a.version, title: a.title };
     S.starting = null;
     S.place = null;
@@ -1804,6 +1810,30 @@ export async function openEditor(root, tripId, ctx) {
     searchInput.focus();
   }
 
+  // What it says while someone else's change to the stop is waiting to be
+  // seen: the stop as it is now, by name.
+  const staleNote = () =>
+    S.replacing?.stale &&
+    h("p", { class: "small leg-warn", role: "status", "data-replace-stale": String(S.replacing.stale.version) }, t("Someone else changed this stop while you were choosing: it's now {title}.", { title: S.replacing.stale.title }));
+
+  // The button that uses a place for the stop being changed. Normally
+  // "Use for …". After the server refused a change because someone else
+  // changed the stop first, it names what's there now and goes ahead only
+  // from this explicit press, against the version just seen.
+  function replaceAction(place, title, { disabled = false, confirmOnly = false } = {}) {
+    const r = S.replacing;
+    if (r.confirm)
+      return h(
+        "div",
+        { class: "stack" },
+        h("p", { class: "small leg-warn", role: "status" }, t("{who} changed it first. It's now {current}.", { who: r.confirm.by ? memberName(r.confirm.by) : t("Someone else"), current: r.confirm.title })),
+        h("button", { class: "btn btn-primary", type: "button", disabled, "data-replace-confirm": String(r.confirm.version), onclick: () => confirmReplace(place, title, { confirmed: true }) }, icon("pin"), t("Replace {current} with {place}", { current: r.confirm.title, place: title })),
+      );
+    if (confirmOnly) return null;
+    const use = h("button", { class: "btn btn-primary", type: "button", disabled, onclick: () => confirmReplace(place, title) }, icon("pin"), t("Use for {title}", { title: r.title }));
+    return r.stale ? h("div", { class: "stack" }, staleNote(), use) : use;
+  }
+
   function replacePanel() {
     return h(
       "div",
@@ -1812,29 +1842,38 @@ export async function openEditor(root, tripId, ctx) {
       h(
         "div",
         { class: "start-body" },
+        staleNote(),
         h("p", {}, t("Search above, click a place on the map, or click anywhere to use that exact spot.")),
         h("p", { class: "muted small" }, t("Its time, length, notes and meal stay as they are.")),
       ),
     );
   }
 
-  async function confirmReplace(place, title) {
+  // Sent with the version the change began from, or, only after the person
+  // confirmed against someone else's newer change, that change's version.
+  // A request older than the stop is refused by the server (409) and
+  // writes nothing; then the person sees what's there and decides.
+  async function confirmReplace(place, title, { confirmed = false } = {}) {
     const r = S.replacing;
+    const baseVersion = confirmed && r.confirm ? r.confirm.version : r.version;
     try {
-      const snap = await act(api(`${base}/activities/${r.id}/place`, { method: "PUT", body: { baseVersion: r.version, place, title } }), { quiet: true });
+      const snap = await act(api(`${base}/activities/${r.id}/place`, { method: "PUT", body: { baseVersion, place, title } }), { quiet: true });
       S.replacing = null;
       closeSearch();
       S.selectedId = r.id;
       render();
       const a = snap.days.flatMap((d) => d.activities).find((x) => x.id === r.id);
       if (a?.place?.lat != null) map.focus(a.place);
-      toast(t("{old} is now {place}.", { old: r.title, place: title }));
+      toast(t("{old} is now {place}.", { old: confirmed && r.confirm ? r.confirm.title : r.title, place: title }));
     } catch (err) {
-      if (err.status === 409 && err.data?.current) {
-        S.replacing = { ...r, version: err.data.current.version, title: err.data.current.title };
-        toast(t("{error} Their version is on screen; choose again to replace it.", { error: err.message }), { kind: "error" });
+      if (err.status === 409 && err.data?.current && S.replacing?.id === r.id) {
+        const cur = err.data.current;
+        // still choosing for this stop; the next press has to be the confirmation
+        S.replacing = { ...r, stale: null, confirm: { version: cur.version, title: cur.title, by: cur.updatedBy ?? null } };
+        toast(t("{error} Nothing was changed. Check what's there now before replacing it.", { error: err.message }), { kind: "error" });
       } else toast(err.message, { kind: "error" });
       render();
+      renderSearch();
     }
   }
 
@@ -2544,15 +2583,20 @@ export async function openEditor(root, tripId, ctx) {
           S.aiPicks?.error && h("p", { class: "small form-error" }, S.aiPicks.error),
           picked && S.aiPicks?.summary && h("div", { class: "ai-card" }, h("p", { class: "ai-label tiny" }, icon("spark"), t("AI interpretation")), h("p", { class: "ai-summary", lang: S.aiPicks.lang === "zh" ? "zh" : "en" }, S.aiPicks.summary)),
         ),
-      conflicts.map((x, n) => {
+      conflicts.map((x) => {
         const options = d.analysis.proposals.filter((p) => p.issueId === x.id);
         const taken = takenBy(x.id);
-        const name = `fix-${n}`;
+        // named by the problem and the fix themselves, not their places in
+        // the list: the radio group stays one group, and after a choice
+        // re-renders the panel, focus returns to the same radio (keepFocus
+        // finds it by data-focus), so the arrow keys and Tab carry on from
+        // there instead of starting again at the top of the page
+        const name = `fix:${x.id}`;
         const radio = (value, label, extra = null, disabled = false) =>
           h(
             "label",
             { class: `fix-option${choice[x.id] === value ? " on" : ""}${disabled ? " is-off" : ""}` },
-            h("input", { type: "radio", name, value, checked: choice[x.id] === value, disabled: disabled || !owner, onchange: () => { choice[x.id] = value; renderCopilot(); } }),
+            h("input", { type: "radio", name, value, "data-focus": `fix:${x.id}:${value}`, checked: choice[x.id] === value, disabled: disabled || !owner, onchange: () => { choice[x.id] = value; keepFocus(renderCopilot); } }),
             h("span", {}, label, extra),
           );
         return h(
