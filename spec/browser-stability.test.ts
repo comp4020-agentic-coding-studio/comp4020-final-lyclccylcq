@@ -11,7 +11,7 @@ const baseUrl = inject("baseUrl");
 let browser: NonNullable<Awaited<ReturnType<typeof launch>>>;
 beforeAll(async () => {
   if (chromePath) browser = (await launch())!;
-});
+}, 30_000); // starting Chrome alongside the other browser files on a two-core CI runner
 afterAll(() => browser?.close());
 
 type P = Parameters<typeof inPage>[0];

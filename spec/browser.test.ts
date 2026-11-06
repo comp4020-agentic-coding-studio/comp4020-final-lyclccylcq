@@ -201,7 +201,10 @@ describe.skipIf(!chromePath)("in a real browser", () => {
     const moved = await bob.waitFor(`JSON.stringify(${stopTitles}.slice(0, 3)) === '["Opera House","Zoo","Lunch"]'`, 3000);
     expect(moved).toBeLessThan(1500);
     await sleep(50);
-  });
+    // the promise is the two 1.5 s checks above; the whole walk (two
+    // sign-ups, a join request and its approval, two page loads) needs more
+    // than vitest's 5 s default on a busy CI runner
+  }, 20_000);
 });
 
 // The homepage's discovery flow, end to end in a real browser.
