@@ -2,6 +2,8 @@
 
 > People choose where they want to go. Wayline helps them figure out how to get there.
 
+[![Watch the 4-minute film: a Sydney weekend, planned together](docs/readme-video-cover.jpg)](https://lyclccylcq.github.io/wayline-film/)
+
 Wayline is a collaborative travel planner. A group shares one trip: an interactive map beside a day-by-day timeline. Everyone picks places, arranges them into days and sees each other's changes as they happen. Between consecutive stops Wayline looks up real travel times and points out when a plan doesn't add up.
 
 ![The trip editor: a Google map of Sydney with numbered stops beside Day 1's timeline](docs/readme-editor-desktop.png)
