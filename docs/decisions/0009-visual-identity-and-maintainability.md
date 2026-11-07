@@ -26,6 +26,8 @@ After the structural work, I returned to larger homepage and visual-system revis
 
 The original typography and layout lacked a product identity. I wanted the page to feel like Wayline, not just another website with a different topic. I chose a language resembling a metro network, using routes and stations to emphasise the meaning of a journey. That idea carried into the itinerary, homepage and other screens ([e945d13](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/e945d1354537723aa19d172a1c29b8bbecf097f0), [d2476c7](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/d2476c7b229990ca2dca86fdfa4f5bd8b372f775), [0b21109](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/0b21109354401066a91db8898902ec79d0ce41fe)).
 
+The window idea was inspired by short AI-made scenery videos I had recently seen. The metro-style route animation took its reference from metro systems themselves.
+
 ### Finishing the experience and deciding what not to add
 
 Once the broader direction was in place, I continued refining details through multi-user testing. This included the registration and sign-in experience, the collaboration workflow and bugs that appeared while people used it. I added an English/Chinese switch for my own needs. I also wanted My Trips removed from the homepage, keeping personal trips in the dedicated personal trip/account area rather than repeating them in the discovery page.

@@ -3,6 +3,7 @@
 The first part follows my product decisions and the changes that came from using Wayline. The later sections explain the implementation, how agent work was directed and checked, and what the evidence establishes.
 
 - [Product decisions and revisions](#starting-from-a-situation-i-had-actually-experienced)
+- [Examining these choices through the readings](#examining-these-choices-through-the-readings)
 - [Implementation and engineering trade-offs](#implementation-and-engineering-trade-offs)
 - [Directing the agent and correcting its work](#directing-the-agent-and-correcting-its-work)
 - [Evidence and remaining limits](#evidence-and-remaining-limits)
@@ -81,7 +82,11 @@ The next decision was crucial to what I meant by using AI in a product. Claude's
 
 I did not want a chat-based customer-service assistant beside the itinerary. I wanted an easy-to-use tool: a button should start a defined task, within limits I had chosen for the product. The traveller should not need to learn how to prompt another general-purpose model just to inspect a schedule or look for food.
 
+This choice also drew on a separate personal project: my fitness-logging AI agent app. Improving its AI coach had taught me to reduce the exchanges needed to get a task done. If an operation can be completed with one action, I do not want to keep talking to the interface to make it happen.
+
 I therefore changed the visible interaction to buttons and task-specific results. The planning assistant shows the day's state and offers actions such as optimisation, food suggestions and nearby exploration. Suggestions can be previewed and selected before being applied. This made my earlier decision about the assistant's role concrete in the interface ([f99cdf0](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/f99cdf0fd8eab349be33927f029429835df09a6d)). Later, several fixes could be previewed together, and old suggestions were cleared when the shared day changed ([48c1215](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/48c1215f7dc005ae3f7edc9249b0afcae5f8b0aa), [9c63890](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/9c63890d03fb62abda5af5a3e8538d9f3e0579b8); [ADR 0007](docs/decisions/0007-bounded-planning-assistant.md)).
+
+The same concern led to a later correction in issue repair. The earlier flow made the person choose and confirm a repair, then repeat that process for the next problem. I changed it so the person can choose the fixes for the day, preview the combined changes and apply the selection with one action. The aim was to cut repeated interaction while keeping the choice with the person doing the planning ([48c1215](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/48c1215f7dc005ae3f7edc9249b0afcae5f8b0aa)).
 
 ## Restaurant constraints improved through use and crit feedback
 
@@ -108,6 +113,8 @@ That idea still needed judgement after implementation. I reported that the windo
 After the structural work, I returned to larger homepage and visual-system revisions. The homepage developed over several rounds: the early video/window experiments preceded the 29 October module extraction, while the transit-line system and further homepage changes followed it.
 
 The original typography and layout lacked a product identity. I wanted the page to feel like Wayline, not just another website with a different topic. I chose a language resembling a metro network, using routes and stations to emphasise the meaning of a journey. That idea carried into the itinerary, homepage and other screens ([e945d13](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/e945d1354537723aa19d172a1c29b8bbecf097f0), [d2476c7](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/d2476c7b229990ca2dca86fdfa4f5bd8b372f775), [0b21109](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/0b21109354401066a91db8898902ec79d0ce41fe); [ADR 0009](docs/decisions/0009-visual-identity-and-maintainability.md)).
+
+The window idea was inspired by short AI-made scenery videos I had recently seen. The metro-style route animation took its reference from metro systems themselves.
 
 ## Finishing the experience and deciding what not to add
 
@@ -138,6 +145,14 @@ That made me reconsider the GitHub analogy I had started with. In the repository
 I therefore widened collaborators' planning rights substantially. They can change any stop, adjust the starting point and transport, and apply planning fixes and suggestions. A small group of management actions remains with the owner: the trip's settings, membership, publishing and deletion. Private access and version checks still apply; allowing people to plan together does not require dropping those protections.
 
 This revised the assumption behind the earlier role model. I now separate the authority to manage a trip from the ability to plan it with other people. The implementation and its rules/tests changed together in [9c63890](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/9c63890d03fb62abda5af5a3e8538d9f3e0579b8). [ADR 0008](docs/decisions/0008-planning-rights-and-management.md) records both stages, including the classmate planning experience that changed my judgement.
+
+## Examining these choices through the readings
+
+The two readings discussed in the README help me examine these choices while preparing the final account.
+
+Robin Sloan's [*An app can be a home-cooked meal*](https://www.robinsloan.com/notes/home-cooked-app/) helps explain why serving a particular group is enough to justify a tool. That fits my intention to keep using Wayline after the course. His family app knows its members in advance; Wayline's travel groups can change, so accounts, invitations and private trips still serve a purpose.
+
+Amershi et al.'s [*Guidelines for Human-AI Interaction*](https://www.microsoft.com/en-us/research/publication/guidelines-for-human-ai-interaction/) give me a way to examine the assistant: can people understand its role, call it when needed, and reject or correct its suggestions? Task buttons and selectable previews are my response for this planning workflow. The reading supports those interaction concerns; the decision to move away from repeated conversation came from my own AI-coach experience.
 
 ## Implementation and engineering trade-offs
 

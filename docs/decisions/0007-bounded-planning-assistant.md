@@ -24,7 +24,11 @@ The next decision was crucial to what I meant by using AI in a product. Claude's
 
 I did not want a chat-based customer-service assistant beside the itinerary. I wanted an easy-to-use tool: a button should start a defined task, within limits I had chosen for the product. The traveller should not need to learn how to prompt another general-purpose model just to inspect a schedule or look for food.
 
+This choice also drew on a separate personal project: my fitness-logging AI agent app. Improving its AI coach had taught me to reduce the exchanges needed to get a task done. If an operation can be completed with one action, I do not want to keep talking to the interface to make it happen.
+
 I therefore changed the visible interaction to buttons and task-specific results. The planning assistant shows the day's state and offers actions such as optimisation, food suggestions and nearby exploration. Suggestions can be previewed and selected before being applied. This made my earlier decision about the assistant's role concrete in the interface ([f99cdf0](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/f99cdf0fd8eab349be33927f029429835df09a6d)). Later, several fixes could be previewed together, and old suggestions were cleared when the shared day changed ([48c1215](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/48c1215f7dc005ae3f7edc9249b0afcae5f8b0aa), [9c63890](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/9c63890d03fb62abda5af5a3e8538d9f3e0579b8)).
+
+The same concern led to a later correction in issue repair. The earlier flow made the person choose and confirm a repair, then repeat that process for the next problem. I changed it so the person can choose the fixes for the day, preview the combined changes and apply the selection with one action. The aim was to cut repeated interaction while keeping the choice with the person doing the planning ([48c1215](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/48c1215f7dc005ae3f7edc9249b0afcae5f8b0aa)).
 
 ### Restaurant constraints improved through use and crit feedback
 

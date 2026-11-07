@@ -2,72 +2,93 @@
 
 > People choose where they want to go. Wayline helps them figure out how to get there.
 
+Wayline is a shared travel-planning workspace: a map, a day-by-day timeline, and a few friends working on the same trip.
+
+Between consecutive stops, Wayline looks up real travel times and points out when a day's timing does not add up.
+
+[Open Wayline](https://comp4020-final-lyclccylcq.fly.dev/)
+
 [![Watch the 4-minute film: a Sydney weekend, planned together](docs/readme-video-cover.jpg)](https://lyclccylcq.github.io/wayline-film/)
 
-Wayline is a collaborative travel planner. A group shares one trip: an interactive map beside a day-by-day timeline. Everyone picks places, arranges them into days and sees each other's changes as they happen. Between consecutive stops Wayline looks up real travel times and points out when a plan doesn't add up.
+## A quick start
 
-![The trip editor: a Google map of Sydney with numbered stops beside Day 1's timeline](docs/readme-editor-desktop.png)
+1. Open Wayline and browse the map or ready-made trips. Create an account and sign in when you want your own plan; English and Chinese are available.
+2. In My Trips, choose **New trip**, or open a ready-made itinerary and choose **Plan this trip** (**Use This Template** for a published journey). Choose dates and a starting point.
+3. Search or select a place on the map, then choose **Add to Itinerary**. Adjust times and lengths on the timeline. Changes save as you make them. On a phone, use the **Map**, **Plan** and **Assistant** tabs.
+4. Use **Share** to invite a friend by their registered nickname or by link. A link recipient requests access and the owner approves. Each person uses their own account and browser session; both can work on the plan. When both are online, **Call** offers a two-person voice call and needs microphone permission.
+5. Open **Assistant** to inspect the day, choose fixes, preview their combined effect and apply the selection together.
+6. Use **Export** for a PNG or PDF to consult on your phone. The owner can use **Publish** to share a read-only snapshot. Publishing and inviting someone to edit are separate actions.
 
-![The same trip on a phone: the timeline, with Map, Plan and Copilot tabs](docs/readme-editor-phone.png)
+## What good means to me
 
-![The public homepage: destination search and curated itineraries to copy](docs/readme-home-desktop.png)
+A good product should have real practical or entertainment value. I should know who it is for and what situation it will be used in. The workflow should be friendly enough that a person can use it without a manual, although a little guidance is welcome. It should also have an idea and character of its own, beyond putting another product in a new skin.
 
-_Screenshots from 12 October 2026: the homepage from the live site; the editor from a local copy of the same commit with real Google keys, showing a copy of a curated itinerary. Its stops have no stored Google match, so they're labelled "Approximate location" and travel times can't be calculated for them. The interface has changed since: the phone's third tab is now Assistant, and the homepage no longer lists your trips (they're on My Trips)._
+My three core tests are practical value, fitness for purpose and ease of use: there is a reason to use it, it works for its intended situation, and the person can understand how to use it. Wayline applies those tests to a small group of friends planning a short trip, especially somewhere unfamiliar. They already have some places they want to visit; the difficult part is turning those choices into a day they can understand and arrange together.
 
-## From Virtual Gym to Wayline
+## Why I want to keep using it
 
-This project began as Virtual Gym, a shared pixel-art gym where real workouts moved your character. Seeing others online changed little about anyone's experience, and its use alongside existing fitness apps was hard to justify, so in October 2026 the project pivoted to collaborative travel planning. The gym's development record stays in `PROCESS.md`, `reflections/` and `docs/decisions/`.
+I did not start Wayline just to finish a course assignment. I wanted a tool I would actually use afterwards. Its requirements came from real situations I was in, and almost everything I added had a need behind it. The map, shared plan, assistant and phone-friendly export all went through those choices. [PROCESS](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/blob/main/PROCESS.md) records the reasons and changes in detail.
 
-## Who it's for
+The map makes location and distance part of the decision. The shared timeline lets us see how one person's choice changes the same plan we are both discussing. Real travel information matters; an unavailable route should remain unknown rather than become a confident guess.
 
-Small groups, roughly two to six people, planning a short trip together, who care more about a plan that actually works than about discovering new places. Today that planning is spread across a map app, a shared document, a group chat and screenshots, and the hard part is fitting choices together: whether the zoo and lunch fit in one morning once the ferry is counted, and whose copy of the plan is current.
+Real-time interaction is central to this project. I want a platform people choose to return to, including me. Sharing a finished itinerary is useful, while live collaboration lets us think, change things and respond to each other during the planning itself. That ongoing work is the experience I want Wayline to support.
 
-## How collaboration works
+![The public homepage with its train-window scenery and destination entry](docs/readme-home-desktop.png)
 
-Everyone invited to a trip edits the same itinerary, which lives on the server. When someone adds a stop, moves lunch to one o'clock, changes how long the museum takes or swaps a stop's place for another, the change is saved and then pushed to every open editor, appearing within about a second. An edit made against an outdated version is refused instead of silently overwriting someone. Trips are private: only the owner and the people they invite can see or change them. The owner invites in one of two ways: a revocable link, or by searching for the nickname they registered as “Your name” and sending them an invitation. If that person has Wayline open, a card appears at once with who invited them and to which trip, to accept, decline or leave for later; otherwise the invitation waits in their My Trips. Each account has a unique login username and a unique nickname; search results show both so you can confirm the person you meant.
+*The homepage gives the trip a travel setting, with a destination to explore and a way to start planning.*
 
-Invite links last 24 hours and never let anyone in by themselves: each person asks to join, and the owner approves or rejects them. Collaborators plan the trip with the owner: they add, change, move, re-place or remove any stop, set the starting point, choose how to travel and apply suggested fixes. Only the owner renames the trip or changes its dates and settings, manages who's on it, publishes it or deletes it. Publishing shares a read-only snapshot, without notes or the people on the trip, that others can rate (1–5 stars, one review each), copy into a private trip of their own with "Use This Template", or export as an image or PDF without signing in; Wayline's curated itineraries export the same way. The copy is independent: neither side's later edits reach the other ([docs/permissions.md](docs/permissions.md)).
+## How planning together works
 
-The server writes one structured JSON log line for each significant action (who signed in, who opened a trip, who added, moved or retimed a stop, who joined or left the live session, and every refused or failed operation), always attributed to the account behind the session cookie. It never logs passwords, cookies, keys, notes or map positions ([docs/logging.md](docs/logging.md)).
+A change is saved and sent to the other open editors, appearing within about a second without a reload. An edit based on an outdated stop is refused with the current version, so a conflict becomes a choice instead of silently losing someone's work. The map and timeline show one shared plan, while each person's map view remains their own.
 
-Two people on a trip can also talk it through in an audio-only voice call from the editor's top bar, while both keep editing the same plan. The call is between them: browser to browser over WebRTC, never recorded, transcribed or sent to the AI, and never part of the itinerary. One call has two people. Reliable calling across different networks needs a TURN relay configured on the server ([ADR 0004](docs/decisions/0004-webrtc-voice-calls.md)).
+Private trips are visible only to their members. Collaborators can plan any stop, the starting point and transport; the owner retains trip settings, membership, publishing and deletion. Invite links last 24 hours and let an account request access for the owner to approve. Invitations by registered nickname identify the account directly ([permissions](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/blob/main/docs/permissions.md)).
 
-## The planned role of AI
+![Desktop editor showing a Sydney map beside the day's timed stops](docs/readme-editor-desktop.png)
 
-The planning assistant helps; it doesn't decide. Most of what it says comes from plain rules, not a model. Overlaps and too-short gaps are calculated by arithmetic, from travel times Google's Routes API actually returned; when a new stop is added after another, its suggested time already includes Google's travel time from the stop before, labelled approximate. The same rules notice a missing meal and show it on the timeline where it would go: lunch before setting out when the day starts at noon, dinner between two stops, or dinner after the last one. Each comes with "Find places to eat", which searches Google near that point of the route and checks opening hours, with no model call.
+*At 1920×1080, numbered map markers correspond to the stops in the timeline. Google travel times sit between activities, alongside the available transport choices.*
 
-When a day has timing conflicts, the assistant lists each with the fixes the app worked out (start a stop later, shorten the one before, switch how you travel, or keep it as planned). It previews everything chosen together, says whether any conflict would remain, and applies the lot with one press. An AI can preselect the fixes it recommends and say why, but the person chooses and presses. "Optimize my day" is the one feature that drafts with a model: an order for stops without set times, ways of travelling, and a few nearby places Google returned that match your preferences. Its changes are listed as choices, and only the chosen ones are applied. It never moves a stop whose time you set, never picks a way of travelling you excluded, and never invents a place. Allergies and dietary needs are treated as constraints, but Google can't confirm what a restaurant serves, so every food suggestion says to check with the restaurant.
+![Phone editor showing the same Sydney day with Map, Plan and Assistant tabs](docs/readme-editor-phone.png)
 
-Nothing changes until someone applies it, and anything applied is refused if the day changed since it was suggested. Once the day changes, suggestions made for the old day are cleared instead of staying on screen. Numbers shown come from the app's own calculation; AI text is labelled as interpretation. Your food preferences stay private to you; a trip shares only transport, pace, budget and interests. Without a configured AI key, the rule-based checks and Google suggestions still work and the app says AI is unavailable ([docs/ai.md](docs/ai.md)).
+*At 390×844, Map, Plan and Assistant provide separate views of the same workspace. The day keeps its times and travel segments, with collaborators' additions identified.*
 
-## Why this interaction should be meaningful
+The server records significant actions and refusals against the signed-in account, leaving passwords, keys and private notes out of its logs. Two members can also talk in an audio-only call while they edit. Calls are not recorded, transcribed or passed to the AI.
 
-In Virtual Gym, other people were visible but nothing they did touched your session. In Wayline, the hope is that interaction matters because the plan is genuinely shared: one person's change shapes everyone's day, and conflicts become decisions the group makes together. That is a design intention, still to be evaluated with real groups.
+## AI should be a tool I can act on
 
-## What good means here
+My approach came from another personal project: a fitness-logging AI agent app. Refining its AI coach taught me a practical lesson about interaction. If a task can be completed with one action, I do not want to keep chatting to make it happen.
 
-- planning happens by touching the map and timeline, not filling in forms;
-- the people on a trip share one plan, never diverging copies (a template someone uses becomes their own, separate trip);
-- travel information is truthful: real route data, or a plain "unknown", and demo data is always labelled;
-- the assistant explains and suggests; people decide;
-- a private trip stays private.
+That experience informed Wayline's task buttons and its later repair flow. Instead of choosing and confirming one fix, then repeating the process for the next problem, I can choose the fixes I want, see their combined effect and apply them together. The person still chooses what changes. I want AI to help inspect and refine the plan, with fewer exchanges needed to get the work done.
 
-## Which claims are checked
+Most schedule checks come from rules: overlaps and too-short gaps are calculated from times and Google route results. Food suggestions look for places along the route and check opening hours. A model can recommend among the fixes the application has worked out; **Optimize my day** can draft a day's changes from the chosen stops and nearby Google candidates. In that draft, times already set by the traveller remain fixed.
 
-`spec/` enforces the checkable parts: outsiders get nothing, and each role gets exactly the rights above; retried adds don't duplicate; stale edits and stale fixes are refused; schedule maths is exact; changes reach another session, and another real browser, within a second; data survives a restart; server keys never reach the browser; no route or travel time is invented (the Google parts against a stand-in for Google, not the live service). A production audit found one gap: the server checked the starting point's version only when a request included it. That check is now required, and a test covers it (ADR 0003). Whether planning feels direct and calm is judged by people using it.
+Suggestions are previewed and selected before they are applied. If the day changes in the meantime, the old proposal is refused and its suggestions are cleared. Rule-based checks and Google suggestions also work independently of a configured AI key ([AI implementation](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/blob/main/docs/ai.md)).
 
-## What it deliberately doesn't do
+## Where the ideas came from
 
-No booking, payments, feeds, text chat or comments, whole AI-generated trips or multi-day route optimisation. Each would move decisions away from the travellers or the focus away from the shared plan. The one exception to "no chat" is the two-person voice call above: talking while both look at the same map and timeline keeps the plan at the centre, where a text channel would compete with it. No video, group calls or call recording.
+My references were mainly practical and visual. Recent AI-made window-view scenery clips inspired the homepage's window-like carousel. Metro maps themselves suggested the route-and-station visual language and animation. The interaction experience from my own AI coach informed the assistant, as described above.
 
-## Sources
+These are the influences I actually used. The photographs and video assets on the site have their own [credits](https://comp4020-final-lyclccylcq.fly.dev/credits); visual inspiration and the source of those assets are separate. The design choices are recorded in [ADR 0007](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/blob/main/docs/decisions/0007-bounded-planning-assistant.md) and [ADR 0009](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/blob/main/docs/decisions/0009-visual-identity-and-maintainability.md).
 
-Work this definition is argued from, and against:
+### Related comparisons
 
-- Clay Shirky, [*Situated Software*](https://gwern.net/doc/technology/2004-03-30-shirky-situatedsoftware) (2004), and Robin Sloan, [*An app can be a home-cooked meal*](https://www.robinsloan.com/notes/home-cooked-app/) (2020): software for one small group, not everyone. Hence two to six travellers, and no feeds or reviews.
-- Ben Shneiderman, [*Direct Manipulation: A Step Beyond Programming Languages*](https://doi.org/10.1109/MC.1983.1654471), IEEE Computer 16(8), 1983: visible objects, acted on directly, with immediate feedback. Hence the map and timeline over forms.
-- Martin Fowler, [*Optimistic Offline Lock*](https://martinfowler.com/eaaCatalog/optimisticOfflineLock.html): detect a conflicting edit by its version and refuse it. Hence "refused instead of silently overwriting".
-- Evan Wallace, [*How Figma's multiplayer technology works*](https://www.figma.com/blog/how-figmas-multiplayer-technology-works/) (2019): a server-authoritative alternative to operational transforms, but last writer wins per property. Wayline keeps the server's authority and refuses stale edits instead.
-- Kleppmann et al., [*Local-first software*](https://www.inkandswitch.com/local-first/) (Ink & Switch, 2019): the case for offline editing and automatic merging (CRDTs). Wayline gives up offline editing for one copy on the server (ADR 0003).
-- Amershi et al., [*Guidelines for Human-AI Interaction*](https://doi.org/10.1145/3290605.3300233), CHI 2019: make clear what the system can do and why, and make it easy to dismiss or correct. Hence an assistant that explains and proposes, and applies only what a person chose.
-- Google Maps Platform, [Places API policies](https://developers.google.com/maps/documentation/places/web-service/policies): attribution and limits on storing Google content. Hence route data only from Google, or "unknown".
+Robin Sloan's [*An app can be a home-cooked meal*](https://www.robinsloan.com/notes/home-cooked-app/) offers a useful comparison: software can be worthwhile because it serves particular people well. That fits my aim of making something I will keep using. Wayline's groups can change between trips, so it retains explicit accounts, invitations and privacy boundaries rather than copying his fixed-family setup.
+
+Amershi et al.'s [*Guidelines for Human-AI Interaction*](https://www.microsoft.com/en-us/research/publication/guidelines-for-human-ai-interaction/) emphasise making capabilities understandable and making AI easy to invoke, dismiss and correct. Wayline's task buttons, selectable fixes and previews put those concerns into the planning workflow. The guidelines help explain the interaction standard; my own AI-coach work supplied the practical experience behind it.
+
+## Sharing belongs to the tool
+
+People can publish a journey they have designed so that someone else can read or reuse it. Sharing should start from the usefulness of the itinerary itself. An official explanation of why a plan is recommended helps explain the choice; a user's rating or written review evaluates the plan. Both can have a place in a travel tool.
+
+A published journey is a read-only snapshot without private notes or trip membership. Editing the working trip does not update that snapshot until the owner republishes. **Use This Template** makes an independent private copy, so later changes on either side do not rewrite the other person's plan. Exporting a member's own plan as an image or PDF is another way to carry the result away from the editor.
+
+My boundary is about what the platform is for. I want a workspace for travel design, rather than another Instagram. Ratings and reviews can remain as feedback on an itinerary. I do not want follows, social feeds or attention-seeking interaction to become the reason people use Wayline. I may add other useful feedback later, while keeping travel planning at the centre.
+
+## What I can check
+
+Data, permissions, persistence and logs have automated checks. Browser and audio tests also cover particular interaction and call failures. They are useful checks, but people still need to operate the interface and confirm the experience: whether the next action is understandable, the page works at their screen size, and a voice call is usable on their devices and networks.
+
+The checked promises include private access, non-duplicating retried adds, refused stale edits, schedule arithmetic, live delivery and persistence. They are carried into the [working rules](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/blob/main/CLAUDE.md) and [tests](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/tree/main/spec).
+
+Planning an actual route with a classmate showed that the earlier own-stop-only permissions kept passing ordinary edits back to the owner. I widened the planning rights so members could arrange the day together ([ADR 0008](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/blob/main/docs/decisions/0008-planning-rights-and-management.md)). That is one concrete way actual use changed what I accepted as usable.
+
+My own use and classmates' feedback informed the changes in PROCESS. [Validation notes](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/blob/main/docs/final-validation-notes.md) distinguish the automated checks, real-service examples and manual observations.
