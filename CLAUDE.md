@@ -11,8 +11,8 @@ current instructions and confirmed decisions. Keep the documents consistent
 when a requested product change alters a rule; surface unresolved conflicts
 before changing behaviour.
 
-> People choose where they want to go. Wayline helps them figure out how to
-> get there.
+> People choose where they want to go. Wayline helps them design their trip
+> together.
 
 ## Working with the student
 

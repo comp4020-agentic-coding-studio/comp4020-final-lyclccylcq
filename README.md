@@ -1,6 +1,6 @@
 # Wayline
 
-> People choose where they want to go. Wayline helps them figure out how to get there.
+> People choose where they want to go. Wayline helps them design their trip together.
 
 Wayline is a shared travel-planning workspace: a map, a day-by-day timeline, and a few friends working on the same trip.
 
