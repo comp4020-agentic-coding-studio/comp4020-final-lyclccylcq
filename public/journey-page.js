@@ -13,17 +13,22 @@ const MEAL_LABEL = { breakfast: "Breakfast", brunch: "Brunch", lunch: "Lunch", a
 
 export async function renderJourney(app, id, ctx) {
   const { config, me } = ctx;
-  app.replaceChildren(ctx.topbar(""), h("main", { class: "journey" }, h("div", { class: "boot", role: "status" }, t("Opening the journey…"))), ctx.footer());
+  // left while loading (app.js route): nothing here touches the page after that
+  const live = ctx.page?.live ?? (() => true);
+  const boot = h("main", { class: "journey" }, h("div", { class: "boot", role: "status" }, t("Opening the journey…")));
+  app.replaceChildren(ctx.topbar(""), boot, ctx.footer());
   let jn;
   try {
     jn = await api(`/api/itineraries/${encodeURIComponent(id)}`);
   } catch {
-    app.querySelector("main").replaceChildren(
+    if (!live()) return () => {};
+    boot.replaceChildren(
       h("div", { class: "invite-card" }, h("h1", {}, t("This journey isn't available")), h("p", {}, t("It may have been unpublished by its author, or the link is incomplete.")), h("a", { class: "btn btn-primary", href: "/", "data-link": true }, t("Explore Wayline"))),
     );
     return () => {};
   }
 
+  if (!live()) return () => {};
   const days = [...new Set(jn.stops.map((s) => s.day))].sort((a, b) => a - b);
   const located = (s) => typeof s.lat === "number" && typeof s.lng === "number";
   const photo = photoFor(jn.cover);
@@ -105,6 +110,10 @@ export async function renderJourney(app, id, ctx) {
   // the overview: the stops in order, as the snapshot has them (no route
   // lines: the snapshot keeps no travel times, and none are made up)
   const map = await createMap(mapHost, { config, onSelectStop: () => {}, onSelectResult: () => {} });
+  if (!live()) {
+    map.destroy();
+    return () => {};
+  }
   map.update({
     stops: jn.stops.filter(located).map((s) => ({ id: s.id, title: s.title, kind: s.kind, lat: s.lat, lng: s.lng, start: s.role === "start", selected: false, day: s.day })),
     results: [],

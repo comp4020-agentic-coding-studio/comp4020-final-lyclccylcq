@@ -14,6 +14,20 @@ const app = document.getElementById("app");
 const state = { me: null, config: null };
 let cleanup = null;
 
+// Every navigation is a new page. A page that's still loading when the
+// person moves on is left: whatever it was waiting for (an itinerary, a
+// map, a profile) may still arrive, and must then change nothing: not the
+// new page's content, not the router's cleanup, no error toast. Each page
+// gets a token; async renderers check page.live() after every await and
+// before every write, and destroy what they built if it's gone. Only a live
+// page's cleanup is kept; a left page's runs at once.
+let routeGen = 0;
+let page = { live: () => true };
+const settle = (p, fn) => {
+  if (p.live()) cleanup = fn ?? null;
+  else fn?.();
+};
+
 export function navigate(path, { replace = false } = {}) {
   if (replace) history.replaceState(null, "", path);
   else history.pushState(null, "", path);
@@ -31,6 +45,8 @@ document.addEventListener("click", (e) => {
 async function route({ keepScroll = false } = {}) {
   cleanup?.();
   cleanup = null;
+  const gen = ++routeGen;
+  const here = (page = { live: () => gen === routeGen });
   watchInvitations();
   const scrollY = window.scrollY;
   const path = location.pathname;
@@ -47,54 +63,55 @@ async function route({ keepScroll = false } = {}) {
 
   // open to everyone
   if (path === "/") return void (cleanup = renderHome(app, ctx()));
-  if (itinerary) return void (cleanup = await renderPreview(app, itinerary[1], ctx()));
+  if (itinerary) return settle(here, await renderPreview(app, itinerary[1], ctx()));
   // a public itinerary as a PDF or image, without making it a trip first
-  if (itineraryExport) return void (cleanup = await renderItineraryExport(app, itineraryExport[1]));
+  if (itineraryExport) return settle(here, await renderItineraryExport(app, itineraryExport[1], here));
   // a published journey: read-only, for anyone with its link
-  if (journey) return void (cleanup = await renderJourney(app, journey[1], ctx()));
+  if (journey) return settle(here, await renderJourney(app, journey[1], ctx()));
   // a trip's read-only link: its members shared it; nothing here edits it
-  if (shared) return void (cleanup = await renderTripExport(app, shared[1]));
+  if (shared) return settle(here, await renderTripExport(app, shared[1], here));
   if (path === "/about") return renderAbout();
   if (path === "/privacy") return renderPrivacy();
   if (path === "/credits") return renderCredits();
   if (path === "/experiments/pixel-train") {
     // experimental, unlinked: loaded only when someone opens this address
     const { renderPixelTrain } = await import("/pixel-train.js");
+    if (!here.live()) return;
     return void (cleanup = renderPixelTrain(app, ctx()));
   }
   if (path === "/login") return state.me ? navigate(next || "/", { replace: true }) : renderAuth(next);
 
   // everything else needs an account
   if (!state.me) return navigate(`/login?next=${encodeURIComponent(path + location.search)}`, { replace: true });
-  if (join) return renderJoin(join[1]);
+  if (join) return renderJoin(join[1], here);
   if (trip) {
     app.replaceChildren(h("div", { class: "boot", role: "status" }, t("Opening trip…")));
     try {
-      cleanup = await openEditor(app, trip[1], { me: state.me, config: state.config, navigate, signOut, signedOutElsewhere });
+      settle(here, await openEditor(app, trip[1], { me: state.me, config: state.config, navigate, signOut, signedOutElsewhere, page: here }));
     } catch (err) {
-      renderMissing(err instanceof ApiError && err.status === 404 ? t("This trip doesn't exist, or you don't have access to it.") : err.message);
+      if (here.live()) renderMissing(err instanceof ApiError && err.status === 404 ? t("This trip doesn't exist, or you don't have access to it.") : err.message);
     }
     return;
   }
-  if (path === "/profile") return void (cleanup = await renderProfile(app, ctx()));
+  if (path === "/profile") return settle(here, await renderProfile(app, ctx()));
   // a trip to export (PDF, image, read-only link), for its members; nothing is published
   if (tripPrint) {
     try {
-      cleanup = await renderTripPrint(app, tripPrint[1], ctx());
+      settle(here, await renderTripPrint(app, tripPrint[1], ctx()));
     } catch (err) {
-      renderMissing(err instanceof ApiError && err.status === 404 ? t("This trip doesn't exist, or you don't have access to it.") : err.message);
+      if (here.live()) renderMissing(err instanceof ApiError && err.status === 404 ? t("This trip doesn't exist, or you don't have access to it.") : err.message);
     }
     return;
   }
   if (path === "/trips") {
-    cleanup = (await renderDashboard()) ?? null;
-    if (new URLSearchParams(location.search).get("new") === "1") newTripDialog();
+    settle(here, (await renderDashboard(here)) ?? null);
+    if (here.live() && new URLSearchParams(location.search).get("new") === "1") newTripDialog();
     return;
   }
   renderMissing(t("There's no page at this address."));
 }
 
-const ctx = () => ({ me: state.me, config: state.config, navigate, signOut, topbar, footer, createTrip, refreshMe });
+const ctx = () => ({ me: state.me, config: state.config, navigate, signOut, topbar, footer, createTrip, refreshMe, page });
 
 // after a profile change: the session's account, read again
 async function refreshMe() {
@@ -703,16 +720,19 @@ function heroArt() {
 
 // --- dashboard ---------------------------------------------------------------
 
-async function renderDashboard() {
-  app.replaceChildren(topbar("trips"), h("main", { class: "dash" }, h("div", { class: "boot" }, t("Loading your trips…"))));
+async function renderDashboard(here = page) {
+  const dash = h("main", { class: "dash" }, h("div", { class: "boot" }, t("Loading your trips…")));
+  app.replaceChildren(topbar("trips"), dash);
   let data;
   let invites;
   try {
     [data, invites] = await Promise.all([api("/api/trips"), api("/api/invitations")]);
   } catch (err) {
+    if (!here.live()) return;
     if (err.status === 401) return signOut();
-    return app.querySelector(".dash").replaceChildren(h("p", { class: "form-error" }, err.message));
+    return dash.replaceChildren(h("p", { class: "form-error" }, err.message));
   }
+  if (!here.live()) return;
   const card = (t) => tripCard(t);
   const section = (title, list, empty) =>
     h("section", { class: "dash-section" }, h("h2", {}, title), list.length ? h("div", { class: "trip-grid" }, list.map(card)) : empty);
@@ -911,7 +931,7 @@ async function renderDashboard() {
   };
   events?.addEventListener("open", onOpen);
 
-  app.querySelector(".dash").replaceChildren(
+  dash.replaceChildren(
     h(
       "div",
       { class: "dash-hero" },
@@ -996,16 +1016,18 @@ function newTripDialog(destination = "") {
 
 // A link lets a signed-in person ask to join; the owner approves. The page
 // shows only whose trip it is and where this person stands.
-async function renderJoin(token) {
+async function renderJoin(token, here = page) {
   app.replaceChildren(topbar(), h("main", { class: "center-page" }, h("div", { class: "boot" }, t("Checking your invite…"))));
   const main = app.querySelector("main");
   let p;
   try {
     p = await api(`/api/invites/${token}`);
   } catch (err) {
+    if (!here.live()) return;
     main.replaceChildren(h("div", { class: "invite-card", "data-join": "invalid" }, h("h1", {}, t("Invite not valid")), h("p", {}, err.message), h("a", { class: "btn btn-ghost", href: "/", "data-link": true }, t("Go to your trips"))));
     return;
   }
+  if (!here.live()) return; // left while checking: don't pull the person back
   if (p.state === "member") return navigate(`/trips/${p.tripId}`, { replace: true });
   const status = h("p", { class: "small", role: "status", "data-join-status": p.state });
   const card = h("div", { class: "invite-card", style: `--hue:${hue(p.destination)}`, "data-join": p.state });

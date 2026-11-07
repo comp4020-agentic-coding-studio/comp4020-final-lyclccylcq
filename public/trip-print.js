@@ -20,8 +20,10 @@ const MEAL_LABEL = { breakfast: "Breakfast", brunch: "Brunch", lunch: "Lunch", a
 const MODE_WORD = { WALK: "Walk", TRANSIT: "Public transport", DRIVE: "Drive" };
 
 export async function renderTripPrint(app, tripId, ctx) {
+  const live = ctx.page?.live ?? (() => true);
   app.replaceChildren(h("main", { class: "tp" }, h("div", { class: "boot", role: "status" }, t("Preparing your trip…"))));
   let trip = await api(`/api/trips/${tripId}`); // a 404 for non-members, handled by the router
+  if (!live()) return () => {};
   let routes = null;
   if (ctx.config.routes) {
     fill(h("div", { class: "boot", role: "status", "data-export-routes": "running" }, t("Calculating every route between your stops…")));
@@ -33,7 +35,9 @@ export async function renderTripPrint(app, tripId, ctx) {
       routes = { error: err.message };
     }
   }
+  if (!live()) return () => {};
   let link = (await api(`/api/trips/${tripId}/export-link`).catch(() => ({ link: null }))).link;
+  if (!live()) return () => {};
   let token = null; // only known right after it's made: the server keeps a hash
   const linkPanel = h("section", { class: "tp-share", "aria-label": t("Read-only link") });
 
@@ -101,17 +105,21 @@ export async function renderTripPrint(app, tripId, ctx) {
 }
 
 // The read-only link: no account needed, nothing to change
-export async function renderTripExport(app, token) {
+// page: the router's token for this page (app.js); once it's left, nothing
+// below writes to the page
+export async function renderTripExport(app, token, page = { live: () => true }) {
   app.replaceChildren(h("main", { class: "tp" }, h("div", { class: "boot", role: "status" }, t("Opening the trip…"))));
   let trip;
   try {
     trip = await api(`/api/exports/${encodeURIComponent(token)}`);
   } catch {
+    if (!page.live()) return () => {};
     app.replaceChildren(
       h("main", { class: "tp" }, h("div", { class: "invite-card" }, h("h1", {}, t("This link isn't available")), h("p", {}, t("It may have been switched off by someone on the trip, or the address is incomplete.")), h("a", { class: "btn btn-primary", href: "/", "data-link": true }, t("Explore Wayline")))),
     );
     return () => {};
   }
+  if (!page.live()) return () => {};
   const doc = tripDocument(trip, { routes: null, routing: trip.routing, shared: true });
   app.replaceChildren(
     h(
@@ -129,17 +137,19 @@ export async function renderTripExport(app, token) {
 // own first. It's read from the same public endpoint as its preview, so it
 // holds only what's public (a publication carries no notes or members). The
 // snapshot keeps no routes, and none are looked up or made up here.
-export async function renderItineraryExport(app, id) {
+export async function renderItineraryExport(app, id, page = { live: () => true }) {
   app.replaceChildren(h("main", { class: "tp" }, h("div", { class: "boot", role: "status" }, t("Preparing the itinerary…"))));
   let it;
   try {
     it = await api(`/api/itineraries/${encodeURIComponent(id)}`);
   } catch {
+    if (!page.live()) return () => {};
     app.replaceChildren(
       h("main", { class: "tp" }, h("div", { class: "invite-card" }, h("h1", {}, t("This itinerary isn't available")), h("p", {}, t("It may have been unpublished by its author, or the address is incomplete.")), h("a", { class: "btn btn-primary", href: "/", "data-link": true }, t("Explore Wayline")))),
     );
     return () => {};
   }
+  if (!page.live()) return () => {};
   const back = it.source === "user" ? `/journeys/${it.id}` : `/itineraries/${it.id}`;
   const doc = itineraryDocument(it);
   app.replaceChildren(

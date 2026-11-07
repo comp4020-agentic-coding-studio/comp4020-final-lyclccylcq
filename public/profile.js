@@ -17,15 +17,20 @@ const TABS = [
 
 export async function renderProfile(app, ctx) {
   const { navigate, signOut, refreshMe } = ctx;
-  app.replaceChildren(ctx.topbar("profile"), h("main", { class: "profile" }, h("div", { class: "boot", role: "status" }, t("Loading your profile…"))), ctx.footer());
+  // left while loading (app.js route): nothing here touches the page after that
+  const live = ctx.page?.live ?? (() => true);
+  const boot = h("main", { class: "profile" }, h("div", { class: "boot", role: "status" }, t("Loading your profile…")));
+  app.replaceChildren(ctx.topbar("profile"), boot, ctx.footer());
   let profile, trips, pubs;
   try {
     [{ profile }, trips, { publications: pubs }] = await Promise.all([api("/api/me/profile"), api("/api/trips"), api("/api/me/publications")]);
   } catch (err) {
+    if (!live()) return () => {};
     if (err.status === 401) return signOut();
-    app.querySelector("main").replaceChildren(h("p", { class: "form-error pad" }, err.message));
+    boot.replaceChildren(h("p", { class: "form-error pad" }, err.message));
     return () => {};
   }
+  if (!live()) return () => {};
   const hashTab = location.hash.slice(1);
   const S = { tab: TABS.some(([k]) => k === hashTab) ? hashTab : "created", editing: false };
 

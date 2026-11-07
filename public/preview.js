@@ -14,17 +14,22 @@ const MODE_LABEL = { WALK: "Walk", TRANSIT: "Public transport", DRIVE: "Drive" }
 // inspected on demand, and travel between stops looked up only when asked.
 export async function renderPreview(app, id, ctx) {
   const { config, navigate } = ctx;
-  app.replaceChildren(ctx.topbar("home"), h("main", { class: "preview" }, h("div", { class: "boot", role: "status" }, t("Loading itinerary…"))));
+  // left while loading (app.js route): nothing here touches the page after that
+  const live = ctx.page?.live ?? (() => true);
+  const main = h("main", { class: "preview" }, h("div", { class: "boot", role: "status" }, t("Loading itinerary…")));
+  app.replaceChildren(ctx.topbar("home"), main);
   let it;
   try {
     it = await api(`/api/itineraries/${encodeURIComponent(id)}`);
   } catch (err) {
-    app.querySelector("main").replaceChildren(
+    if (!live()) return () => {};
+    main.replaceChildren(
       h("div", { class: "invite-card" }, h("h1", {}, t("Itinerary not found")), h("p", {}, err.message), h("a", { class: "btn btn-primary", href: "/", "data-link": true }, t("Back to recommendations"))),
     );
     return () => {};
   }
 
+  if (!live()) return () => {};
   // a trip a traveller published (pub-…) rather than one of Wayline's own
   const shared = it.source === "user";
   // loading: the modes with a lookup in flight (each answer belongs to the mode it was asked for)
@@ -82,13 +87,18 @@ export async function renderPreview(app, id, ctx) {
     stopsBox,
     shared && reviewsBox,
   );
-  app.querySelector("main").replaceChildren(h("div", { class: "preview-grid" }, mapPane, panel));
+  main.replaceChildren(h("div", { class: "preview-grid" }, mapPane, panel));
 
   const map = await createMap(mapHost, {
     config,
     onSelectStop: (sid) => select(sid, true),
     onSelectResult: () => {},
   });
+  // left while the map was starting: it's never shown, so it goes now
+  if (!live()) {
+    map.destroy();
+    return () => {};
+  }
 
   function renderDays() {
     dayTabs.replaceChildren(

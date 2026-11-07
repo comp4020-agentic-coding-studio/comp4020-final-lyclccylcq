@@ -38,7 +38,10 @@ const FOOD_TYPES = new Set(["restaurant", "cafe", "bakery", "bar", "meal_takeawa
 const MODE_ICON = { WALK: "walk", TRANSIT: "transit", DRIVE: "drive" };
 
 export async function openEditor(root, tripId, ctx) {
+  // left while opening (app.js route): no editor is mounted, no stream opened
+  const live = ctx.page?.live ?? (() => true);
   const first = await api(`/api/trips/${tripId}`);
+  if (!live()) return () => {};
   const S = {
     trip: first,
     dayId: null,
@@ -149,6 +152,11 @@ export async function openEditor(root, tripId, ctx) {
     onMapClick: (at) => mapClicked(at),
     onViewChange: (v) => shareView(v),
   });
+  // left while the map was starting: only the map exists so far, and it goes
+  if (!live()) {
+    map.destroy();
+    return () => {};
+  }
 
   const isPhone = () => matchMedia("(max-width: 899px)").matches;
 
@@ -472,7 +480,7 @@ export async function openEditor(root, tripId, ctx) {
     const publishName = tr.publication?.status === "published" ? (tr.publication.outdated ? t("Update published") : t("Published")) : t("Publish Trip");
     fill(
       bar,
-      h("a", { class: "icon-btn", href: "/", "data-link": true, "aria-label": t("Back to your trips") }, icon("back")),
+      h("a", { class: "icon-btn", href: "/trips", "data-link": true, "aria-label": t("Back to your trips") }, icon("back")),
       h(
         "div",
         { class: "trip-title" },
