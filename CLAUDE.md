@@ -2,20 +2,47 @@
 
 Wayline is a collaborative travel itinerary planner: a shared trip, an
 interactive map and a day-by-day timeline, with real transport times between
-consecutive stops and an AI copilot that explains schedule problems. It
+consecutive stops and a task-based assistant for reviewing and refining a day. It
 replaced the Virtual Gym in October 2026; the gym's history stays in git,
 `PROCESS.md`, `reflections/` and `docs/decisions/0001–0002`. `README.md` is
 the argument for what good means here. This file holds the rules that follow
-from it, and `spec/` holds the parts that can be checked. If a change would
-contradict the README, stop and ask. Don't quietly change the product.
+from it, and `spec/` holds the parts that can be checked. Follow the student's
+current instructions and confirmed decisions. Keep the documents consistent
+when a requested product change alters a rule; surface unresolved conflicts
+before changing behaviour.
 
 > People choose where they want to go. Wayline helps them figure out how to
 > get there.
 
+## Working with the student
+
+- **Current submission phase (November 2026): documentation and final
+  verification.** Keep application behaviour at the functional baseline
+  recorded in `docs/final-validation-notes.md` unless the student requests
+  a specific implementation change. Documentation commits may advance HEAD;
+  identify the actual version being checked.
+- **Start from the use case.** Practical value, fitness for purpose and ease
+  of use are the student's standards. Tie a proposed feature to a real
+  planning problem and the action it helps someone complete. Preserve the
+  journey-window imagery, metro-route language and light visual system when
+  fixing screens; a redesign or another theme is a product decision.
+- **The student directs product choices.** Agents implement, investigate and
+  check them. Tests establish particular behaviours; the student judges the
+  intended experience. Carry confirmed decisions forward and make routine
+  implementation choices within the requested scope.
+- **Check review findings against the current work.** Identify the commit and
+  relevant uncommitted changes. Reproduce a suspected defect or check its
+  code and tests before applying a review suggestion. Keep technical faults
+  distinct from proposed changes to the student's preferences.
+- **Keep changes bounded.** Inspect the branch, status and diff before
+  editing, and preserve other work. For a broader refactor, state the module
+  boundary, behaviour to retain and checks to run. Keep unrelated feature
+  and visual changes out of that refactor unless requested.
+
 ## Product rules
 
 - **The map and the timeline are the product.** The editor is a large map
-  beside one day's timeline (tabs on phones). The copilot is a collapsible
+  beside one day's timeline (tabs on phones). The Assistant is a collapsible
   side panel. Don't add dashboards, feeds or panels that compete with them.
 - **Direct manipulation first.** Search, add, retime, resize, change place
   and remove happen on the map and timeline and show at once. Forms are for
@@ -49,7 +76,11 @@ contradict the README, stop and ask. Don't quietly change the product.
   coordinates and a `custom:<uuid>` id (source `custom`). It's routed by
   coordinates, labelled "Pinned spot", and never given a made-up Google id.
   Its coordinates are the travellers' choice, so they don't expire.
-- **No text chat, comments, social feeds, bookings, payments, expenses,
+- **Sharing serves planning.** Keep official recommendation reasons separate
+  from travellers' ratings and written reviews of published journeys. Those
+  evaluations are supported; do not remove them under a blanket "no social
+  features" rule. Followers and social feeds are outside the product's focus.
+- **No text chat, comment threads, social feeds, bookings, payments, expenses,
   whole AI-generated trips or multi-day route optimisation** (V1 scope). The
   AI may draft one day's plan from the stops people chose plus a few Google
   places, for a person to preview and apply (see "The AI copilot"). Reviews
@@ -238,7 +269,7 @@ contradict the README, stop and ask. Don't quietly change the product.
   The panel lists every conflict with its fixes as choices (one per
   problem, or "Keep as planned"), the exact edits of everything chosen
   together, whether conflicts remain afterwards, and one button
-  (`POST /proposals/apply-many`, owner only): all in one `mutate()` or
+  (`POST /proposals/apply-many`, any trip member): all in one `mutate()` or
   none, refused if the day changed or two choices touch the same stop.
   The starting choices are the ones leaving fewest conflicts; "Ask the AI
   which to choose" (one `/copilot` call, on request) replaces them with
@@ -394,6 +425,29 @@ contradict the README, stop and ask. Don't quietly change the product.
   Trip settings); picking a meal suggests its usual time, or the nearest free
   slot in its range, and says so. Nothing is replaced.
 
+## Page lifetime and cleanup
+
+- Async page work must check that its page is still live after waiting and
+  before writing DOM, showing an error, navigating or installing cleanup.
+  A late success or failure must leave the new page alone. Destroy a map or
+  other resource that finishes starting after its page has gone
+  (`public/app.js`, `spec/browser-navigation.test.ts`).
+- A page or dialog owns its listeners, timers, streams and pending work.
+  Remove them when that owner closes, including repeated share-dialog opens.
+  Keep resources whose owner is still active, such as the persistent call
+  window across editor renders (`public/share.js`, `public/voice.js`).
+- HTTP reloads and live events must obey the same revision checks. A slower
+  response must not replace newer state; preserve the version a user began
+  editing against (`public/editor.js`, `spec/browser.test.ts`).
+- Cancelling an optimisation or disconnecting its caller must stop upstream
+  work, close its usage record and release its running slot without keeping
+  a draft. Also cover leaving during preparation, before a model call starts
+  (`src/planning.ts`, `spec/plan-cancel.test.ts`).
+- For a confirmed behavioural defect, reproduce its trigger in the relevant
+  regression check; capture timing when it is part of the failure. Update
+  an affected rule or test promise so a later session can detect a recurrence.
+  Include late errors as well as late successes where either can cause it.
+
 ## Access and secrets
 
 - Roles: owner, collaborator, everyone else, decided only in
@@ -476,9 +530,9 @@ contradict the README, stop and ask. Don't quietly change the product.
   most shared trips first, then most recent, at most 8. One click on Invite
   sends the same invitation as the search; Escape closes the menu, not the
   dialog.
-  There are no friend requests, friend lists or social graph (README: no
-  social features); the list is derived from trip membership and stored
-  nowhere.
+  There are no friend requests, friend lists or social graph; the list is
+  derived from trip membership and stored nowhere. The README keeps travel
+  planning central while allowing evaluation of published itineraries.
 - A signed-in person's own stream (`/api/me/events`) carries only a count of
   pending invitations, never trip content; trip streams stay members-only.
 - Sessions are HttpOnly SameSite=Lax cookies (Secure behind Fly's TLS), stored
@@ -489,6 +543,11 @@ contradict the README, stop and ask. Don't quietly change the product.
   is pinned by `spec/restart.test.ts`. No keys in the repo, ever. Browser
   and server Maps keys are different keys with different restrictions
   (`docs/google-maps-keys.md`).
+- Fly secrets supply deployment credentials; public browser-key restrictions,
+  provider controls and application usage limits remain separate. Keep the
+  shared AI allowance and public-endpoint throttling in place. Describe code
+  defaults as defaults, and verify live settings without exposing secret
+  values before claiming them (`docs/decisions/0011-api-credentials-and-usage-controls.md`).
 - Google content: store place ids indefinitely; coordinates and route
   options are a temporary copy dropped/refreshed after 30 days; addresses,
   hours and details are fetched live and never stored. Show "Google Maps"
@@ -553,6 +612,30 @@ contradict the README, stop and ask. Don't quietly change the product.
   footer itself) and links to `/readme/`. Don't touch `fly.toml`'s machine,
   volume or region settings, or `spec/invariants.test.ts`.
 
+## Documentation and evidence
+
+- The student owns the personal reasons, judgements and experiences in the
+  submission. Edit from their confirmed account, preserving its meaning,
+  voice and detail; do not shorten it unless asked. Keep technical
+  explanation separate from those reasons. Do not invent personal claims,
+  research positions, feedback, reading history or results.
+- Submission prose is English. Keep Chinese review drafts outside the
+  submission checkout, and exclude them from staging, commits and uploads.
+  English evidence links must lead to English documents, with no local
+  workspace paths. The bilingual application remains governed by Languages.
+- Keep the documents aligned: README argues for the product; PROCESS
+  explains decisions and work; ADRs expand the trade-offs; CLAUDE holds
+  operating rules; spec protects testable promises. Keep each claim within
+  what the cited commit, check or student account establishes.
+- Distinguish actual design influences, media credits and readings used to
+  examine earlier choices during final documentation. Verify sources and
+  commit links; mark retrospective records and their implementation dates
+  accurately. New rules belong in the current change, not an invented past.
+- Preserve the README's quick start, demo-film URL and cover, and its current
+  screenshot guide when editing. Check document links on GitHub and at
+  `/readme/`; repository Markdown links in the live README need usable
+  GitHub targets. Keep captions consistent with the pictured interface.
+
 ## Before calling something done
 
 - Run the tests the change can affect, not the whole suite each time. The
@@ -561,6 +644,9 @@ contradict the README, stop and ask. Don't quietly change the product.
   - **Styles, copy or images only** (`public/styles.css`, `public/img/`, wording
     no spec pins): no tests. Look at it at 1920×1080 and 390×844 in a real
     browser (screenshots).
+  - **Markdown or working rules only**: check claims and links, and run
+    `pnpm check:evidence`. If README changes, also inspect `/readme/` at both
+    viewports. The commit/push/deploy gate below still applies.
   - **Client JS or DOM for one page**: `pnpm typecheck`, then that page's spec
     file, narrowed with `-t "<test name>"` where it helps (table below).
   - **Server or data logic** (`src/`): `pnpm typecheck`, then its spec files.
@@ -585,6 +671,8 @@ contradict the README, stop and ask. Don't quietly change the product.
   | Online invitation card, fixing several conflicts, public itinerary export, About | `spec/browser-features.test.ts` |
   | Removing a stop while changing its place, collaborators planning any stop, missing-meal rows | `spec/browser-collab.test.ts` |
   | A new stop's travel-time suggestion (mocked Google) | `spec/browser-travel.test.ts` |
+  | Navigation, late page responses and map startup | `spec/browser-navigation.test.ts` |
+  | Place-replacement races, focus, export wrapping and invitation-card races | `spec/browser-stability.test.ts` |
   | `ui.js` `h()` / `fill()` | `spec/dom-children.test.ts` |
   | Scheduling, order, start (`src/schedule.ts`, `src/trips.ts`) | `spec/schedule.test.ts`, `spec/order.test.ts`, `spec/start.test.ts`, `spec/itinerary.test.ts` |
   | Planner, review, copilot, AI budget | `spec/planner.test.ts`, `spec/review.test.ts`, `spec/plan-cancel.test.ts`, `spec/copilot.test.ts`, `spec/aiusage.test.ts` |
@@ -599,21 +687,55 @@ contradict the README, stop and ask. Don't quietly change the product.
   In the `-t` patterns `\|` is only the table's escape: type a plain `|`
   (`-t "homepage|location|explore places"`), or the pattern matches nothing.
 
-- Every spec runs against a running app (`spec/global-setup.ts` finds it via
-  `APP_URL`). Start one on a fresh `DATA_DIR` with the optional keys cleared:
-  `GOOGLE_MAPS_BROWSER_KEY= GOOGLE_MAPS_SERVER_KEY= CLOUDFLARE_TURN_KEY_ID= CLOUDFLARE_TURN_API_TOKEN= pnpm start`
-  in one shell, the tests in another. `pnpm check:evidence` too before a crit.
+- Specs use a running app (`spec/global-setup.ts` finds it via `APP_URL`).
+  Run this from the repository root for an isolated pre-commit check. It
+  creates temporary data, chooses an unused local port and clears inherited
+  Google, AI and TURN credentials in a subshell. Direct Node startup avoids
+  loading `.env`. The process check stops the run if the server has exited;
+  the trap stops the test server and removes only its temporary directory.
+
+```sh
+(
+  set -eu
+  wayline_check_dir="$(mktemp -d "${TMPDIR:-/tmp}/wayline-check.XXXXXX")"
+  wayline_check_pid=
+  trap '
+    if [ -n "$wayline_check_pid" ]; then
+      kill "$wayline_check_pid" 2>/dev/null || true
+      wait "$wayline_check_pid" 2>/dev/null || true
+    fi
+    rm -rf "$wayline_check_dir"
+  ' EXIT
+  wayline_check_port="$(node --input-type=module -e '
+    import { createServer } from "node:net";
+    const probe = createServer();
+    probe.listen(0, "127.0.0.1", () => {
+      process.stdout.write(String(probe.address().port));
+      probe.close();
+    });
+  ')"
+  export DATA_DIR="$wayline_check_dir" PORT="$wayline_check_port"
+  export APP_URL="http://127.0.0.1:$PORT"
+  export OPENAI_API_KEY= GOOGLE_MAPS_BROWSER_KEY= GOOGLE_MAPS_SERVER_KEY=
+  export CLOUDFLARE_TURN_KEY_ID= CLOUDFLARE_TURN_API_TOKEN= WAYLINE_TURN_SECRET=
+  node --disable-warning=ExperimentalWarning src/server.ts >"$wayline_check_dir/server.log" 2>&1 &
+  wayline_check_pid=$!
+  pnpm typecheck
+  kill -0 "$wayline_check_pid"
+  pnpm test:fast --maxWorkers=2
+  pnpm check:evidence
+)
+```
+
 - The tests assume the optional-key-off path: several specs
   (`spec/order.test.ts`, `spec/browser.test.ts`, the "forced relay without
   TURN" cases in `spec/browser-call.test.ts`) test what the app does with
-  `GOOGLE_MAPS_BROWSER_KEY`/`GOOGLE_MAPS_SERVER_KEY`/`CLOUDFLARE_TURN_KEY_ID`/
-  `CLOUDFLARE_TURN_API_TOKEN` unset — demo places, the schematic map, "no TURN
-  relay is configured" — which is still a real README promise ("without a
-  key the matching feature switches off and the app says so"), not a
-  leftover from before Google Maps was wired up. A real `.env` with those
-  keys set makes the app actually call Google/Cloudflare, which breaks those
-  assertions. Keep the keys in `.env` for your own manual testing of the real
-  integrations.
+  `GOOGLE_MAPS_BROWSER_KEY`/`GOOGLE_MAPS_SERVER_KEY`/`OPENAI_API_KEY`/
+  `CLOUDFLARE_TURN_KEY_ID`/`CLOUDFLARE_TURN_API_TOKEN`/`WAYLINE_TURN_SECRET`
+  cleared — demo places, the schematic map, AI unavailable and "no TURN relay
+  is configured". Specs that need a provider use their own controlled test
+  configuration. Keep real credentials in `.env` for separate manual checks
+  of live integrations; the isolated runner leaves that file unchanged.
 - For UI changes, look at it at 1920×1080 and 390×844 in a real browser.
   `spec/browser.test.ts` checks layout at both, keyboard reordering,
   persistence after reload, and two browsers seeing each other's changes.
@@ -624,6 +746,11 @@ contradict the README, stop and ask. Don't quietly change the product.
 - Never claim a Google or AI integration works unless it has been exercised
   with real credentials; say what was and wasn't verified. The same for
   calls across networks and TURN relay.
-- Don't write first-person process claims, research or reflections for the
-  student. Factual notes go in `docs/`.
+- Follow Documentation and evidence when editing the student's writing:
+  preserve their account and ask for missing personal input rather than
+  inventing it. Factual technical notes can go in `docs/`.
+- Before an authorised commit, inspect the staged file list and diff against
+  the reviewed version. After an authorised push, follow CI and deployment,
+  and check the relevant live page against that commit. Distinguish local
+  checks, a commit, a push and a verified deployment in the completion report.
 - When I correct the same mistake twice, the fix goes here or into `spec/`.
