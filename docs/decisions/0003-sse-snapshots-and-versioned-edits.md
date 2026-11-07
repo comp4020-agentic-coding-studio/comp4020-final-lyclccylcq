@@ -12,9 +12,11 @@ Wayline's group plans one trip together: a map beside a day-by-day timeline.
 diverging copies", "people decide" and "a private trip stays private", and
 promises that a change "appears within about a second" while "an edit made
 against an outdated version is refused instead of silently overwriting
-someone". The app is one Node process on one `shared-cpu-1x` Fly machine with
-256 MB and no runtime dependencies (ADR 0001). Trips are small: a few days,
-tens of stops.
+someone". At the time of this decision, the app was one Node process on one
+`shared-cpu-1x` Fly machine with 256 MB and no runtime dependencies
+(ADR 0001). The later AI integration added the OpenAI SDK, as recorded in
+[PROCESS](../../PROCESS.md#runtime-and-deployment); SSE itself still needs
+no added dependency. Trips are small: a few days, tens of stops.
 
 ## Problem
 
