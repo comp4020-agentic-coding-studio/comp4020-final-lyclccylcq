@@ -1,7 +1,8 @@
 # 4. Two-person voice calls: WebRTC media, signalling on the trip's SSE stream
 
-Date: 2026-10-13 · Status: proposed (implemented and tested locally; not
-deployed; TURN not provisioned; drafted by the agent for the author's review)
+Date: 2026-10-13 · Rationale and status reviewed: 2026-11-07.
+Status: accepted and implemented; deployment and TURN provisioning are recorded
+in History. Verification remains limited to the cases described below.
 
 ## Context
 
@@ -12,6 +13,16 @@ collaborators; it must never be recorded, transcribed or sent to the AI. It
 must reuse Wayline's accounts, trip membership and real-time hub
 (ADR 0003), keep the map and timeline central, and never touch the
 itinerary's revision.
+
+## Author's rationale and scope decision (recorded 2026-11-07)
+
+Voice calling was an additional module. I do not consider it as fundamental as the map or shared itinerary. My starting point was simple: if two people could talk directly while looking at the plan, they would not need to open another calling application just to discuss it. I hoped this would make the real-time experience more immediate and convenient.
+
+I have also reflected on the risk of that choice. The final version supports a call between two people, while itinerary collaboration supports more than two. That mismatch is a genuine limitation. A larger group can plan together, but cannot all use the built-in call at once.
+
+Repeated testing showed how much reliability work voice introduced under the project's conditions. Connection signalling, actual audio playback, recovery and the network path all mattered. A direct peer connection is not available on every network, so a [TURN relay](https://webrtc.org/getting-started/turn-server) is needed as a fallback in those situations. The relay and its bandwidth are separate obligations from serving the planning page; increasing the size of calls would add further complexity. I therefore kept the call at two participants instead of continuing towards a multi-person voice room.
+
+This was a cautious scope decision, not evidence that calling had become reliable everywhere. TURN was provisioned and relay paths were tested, and later fixes addressed silent audio and stuck or lost connections. The remaining device and network limits still matter ([fcf8928](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/fcf892875dda6a250f20d4d678ef8b24cc088e14), [825820a](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/825820a99855287fa5ab19a73e342f10cd10d39e), [5e6863c](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/commit/5e6863c16ab0d8257a79e0ede1caba8f06adeb28)).
 
 ## Problem
 
@@ -160,12 +171,13 @@ that can't connect directly.
 - **Single machine.** Call state and the hub are in memory; a second Fly
   machine would split them (ADR 0003). A restart ends every call
   ("server restarted").
-- **Not production-ready across networks until TURN is provisioned and
-  tested.** The automated tests run both browsers on one machine, where a
-  direct (host-candidate) connection always works. They prove signalling,
-  negotiation and media delivery, not NAT traversal. Without TURN, calls
-  between restrictive networks (symmetric NAT, some mobile carriers,
-  corporate Wi-Fi) will fail to connect and end with a clear message.
+- **Cross-network verification remains limited.** TURN was provisioned on
+  2026-10-15 and real relay paths were checked as recorded in History.
+  Automated browser tests still run both peers on one machine; they establish
+  the tested signalling, negotiation, playback and recovery behaviour.
+  Forced-relay checks establish those relay cases, not reliability on every
+  device, browser or network. Without a usable direct or relay path, a call
+  fails with a message.
 - Two participants only; no group calls, video, screen sharing or
   recording.
 - Leaving with the tab closed relies on a best-effort `keepalive` hang-up
@@ -214,3 +226,8 @@ that can't connect directly.
   credentials minted for both sides (STUN included), and relay on both,
   either or neither side connected. Still unverified: other devices,
   networks and browsers.
+
+- 2026-11-07: the author's retrospective rationale records voice as an optional
+  module, the mismatch between two-person calls and multi-user planning, and
+  the decision to stop short of a group voice room. The status and limitation
+  text above were aligned with the existing deployment/TURN history.
