@@ -8,7 +8,7 @@ import { haversineKm } from "../src/geo.ts";
 const toMin = (s: string) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3));
 
 describe("the curated itinerary library", () => {
-  it("covers about twenty cities in four regions, each with a country and an itinerary", () => {
+  it("covers about twenty cities in five regions, each with a country and an itinerary", () => {
     expect(CURATED_VERSION).toBeGreaterThanOrEqual(2);
     expect(DESTINATIONS.length).toBeGreaterThanOrEqual(15);
     expect(new Set(DESTINATIONS.map((d) => d.id)).size).toBe(DESTINATIONS.length);

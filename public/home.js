@@ -500,7 +500,7 @@ export function renderHome(app, ctx) {
       "div",
       { class: "empty-inline wide" },
       h("h3", {}, t("Wayline doesn't have itineraries near {place} yet", { place: S.place.label })),
-      h("p", { class: "muted" }, t("Curated routes cover a set of cities across Europe, North America, East Asia and Oceania (see Explore ready-made trips). Below are individual places nearby, not complete itineraries.")),
+      h("p", { class: "muted" }, t("Curated routes cover a set of cities across Europe, North America, Asia and Oceania (see Explore ready-made trips). Below are individual places nearby, not complete itineraries.")),
     );
     nearGrid.replaceChildren(intro);
     try {

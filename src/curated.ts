@@ -9,7 +9,9 @@
 // it up; place ids already verified for an unchanged query are kept.
 
 // 2: fourteen more cities across Europe, North America, East Asia and Oceania
-export const CURATED_VERSION = 2;
+// 3: Lake Brienz (Switzerland) and Malé & Hulhumalé (Maldives), so every
+//    destination in the homepage's journey window opens a plan of its own
+export const CURATED_VERSION = 3;
 
 export type Category = "half-day" | "one-day" | "weekend" | "food-culture" | "nature-outdoors" | "city-highlights";
 export type StopKind = "attraction" | "food" | "shopping" | "accommodation" | "custom";
@@ -42,7 +44,8 @@ export type CuratedItinerary = {
 // The browsing regions on the homepage. A destination's `region` stays the
 // display line it has always had (search and the demo places read it);
 // `area` and `country` are what the homepage filters on.
-export const AREAS = ["Europe", "North America", "East Asia", "Oceania"] as const;
+// South Asia: the Maldives (November 2026), an Indian Ocean nation, never filed under East Asia
+export const AREAS = ["Europe", "North America", "East Asia", "South Asia", "Oceania"] as const;
 export type Area = (typeof AREAS)[number];
 
 export type Destination = { id: string; name: string; region: string; country: string; area: Area; lat: number; lng: number; blurb: string };
@@ -65,6 +68,9 @@ export const DESTINATIONS: Destination[] = [
   { id: "new-york", name: "New York", region: "New York, United States", country: "United States", area: "North America", lat: 40.7128, lng: -74.006, blurb: "Central Park, galleries and skyline views." },
   { id: "san-francisco", name: "San Francisco", region: "California, United States", country: "United States", area: "North America", lat: 37.7749, lng: -122.4194, blurb: "The Golden Gate, hills and the bay." },
   { id: "los-angeles", name: "Los Angeles", region: "California, United States", country: "United States", area: "North America", lat: 34.0522, lng: -118.2437, blurb: "Griffith views, museums and the coast." },
+  // the two journey-window places that had no plan (November 2026)
+  { id: "lake-brienz", name: "Lake Brienz", region: "Bernese Oberland, Switzerland", country: "Switzerland", area: "Europe", lat: 46.7296, lng: 7.9614, blurb: "Lakeside villages, waterfalls and the Alps above." },
+  { id: "male", name: "Malé", region: "Kaafu Atoll, Maldives", country: "Maldives", area: "South Asia", lat: 4.1755, lng: 73.5093, blurb: "The capital's markets and mosque, and Hulhumalé's beach." },
 ];
 
 // What kind of eating each food stop is, written by hand from what the place
@@ -77,6 +83,9 @@ export const FOOD_STYLES = ["local", "market", "street", "cafe", "seafood"] as c
 export type FoodStyle = (typeof FOOD_STYLES)[number];
 
 export const FOOD_STYLE_OF: Record<string, FoodStyle[]> = {
+  "Brienz, Switzerland": ["local"],
+  "Majeedhee Magu, Malé, Maldives": ["local"],
+  "Nirolhu Magu, Hulhumalé, Maldives": ["seafood"],
   "Kingston Foreshore, Kingston ACT": [],
   "Lonsdale Street, Braddon ACT": ["cafe"],
   "The Rocks, Sydney NSW": [],
@@ -714,6 +723,56 @@ export const CURATED: CuratedItinerary[] = [
       S("Venice Beach Boardwalk", "attraction", "15:30", 75, 33.985, -118.4695, "Venice Beach Boardwalk, Los Angeles", { day: 2 }),
       S("Santa Monica Pier at sunset", "attraction", "17:15", 60, 34.0094, -118.4973, "Santa Monica Pier", { day: 2 }),
       S("Dinner in Santa Monica", "food", "18:45", 90, 34.0157, -118.4966, "Third Street Promenade, Santa Monica", { day: 2 }),
+    ],
+  },
+  // --- Lake Brienz (Bernese Oberland, Switzerland) ---
+  // The journey window's Swiss view is Lake Brienz from Oberried. One day
+  // round the lake from Interlaken; stops checked against Wikipedia and the
+  // villages' and operators' own pages (November 2026). No timetables or
+  // fares are written here: travel between stops comes from Google.
+  {
+    slug: "lake-brienz-giessbach",
+    title: "Lake Brienz: Iseltwald, Giessbach Falls & Brienz",
+    destination: "Lake Brienz",
+    timezone: "Europe/Zurich",
+    description: "A day round Lake Brienz from Interlaken: the Höhematte meadow under the Jungfrau, Iseltwald's jetty on the south shore, the tiered Giessbach Falls, lunch and woodcarving in Brienz, and the lakeshore at Oberried.",
+    categories: ["one-day", "nature-outdoors"],
+    featured: true,
+    ref: [46.7296, 7.9614],
+    days: 1,
+    stops: [
+      S("Höhematte, Interlaken", "attraction", "09:00", 30, 46.6864, 7.8599, "Höhematte, Interlaken"),
+      S("Iseltwald", "attraction", "10:00", 45, 46.7, 7.967, "Iseltwald, Switzerland", { note: "The village is free to walk; the famous jetty has a turnstile and a small fee." }),
+      S("Giessbach Falls", "attraction", "11:15", 75, 46.7322, 8.024, "Giessbach Falls, Brienz", { note: "The path passes behind the falls. The Giessbach funicular and the lake boats don't run in winter." }),
+      S("Lunch in Brienz", "food", "13:00", 60, 46.75, 8.033, "Brienz, Switzerland"),
+      S("Brienz village & woodcarving", "attraction", "14:15", 60, 46.7535, 8.036, "Brienz, Switzerland, woodcarving", { note: "Brienz is known for woodcarving; its school was founded in 1862. The Rothorn steam railway starts here in summer only." }),
+      S("Oberried lakeshore", "attraction", "15:45", 45, 46.733, 7.95, "Oberried am Brienzersee", { note: "The view in Wayline's journey window: Lake Brienz from Oberried." }),
+    ],
+  },
+  // --- Malé & Hulhumalé (Maldives) ---
+  // Two inhabited local islands joined by the Sinamalé Bridge, open to any
+  // visitor without a boat. Resort islands (the journey window's photo is
+  // one, in Ari Atoll) are private and need their own booking, so none is
+  // here. Checked against Wikipedia and Visit Maldives (November 2026).
+  {
+    slug: "male-hulhumale-local",
+    title: "Malé & Hulhumalé: A Day on the Local Islands",
+    destination: "Malé",
+    timezone: "Indian/Maldives",
+    description: "The capital's fish and produce markets, the coral-stone Old Friday Mosque, Sultan Park and the National Museum, then across the Sinamalé Bridge to Hulhumalé's beach and seafront. Both are inhabited islands: dress modestly, and there's no alcohol.",
+    categories: ["one-day", "city-highlights"],
+    featured: true,
+    ref: [4.1755, 73.5093],
+    days: 1,
+    stops: [
+      S("Malé Fish Market", "attraction", "08:30", 30, 4.18, 73.5097, "Malé Fish Market"),
+      S("Malé Local Market", "shopping", "09:10", 30, 4.1801, 73.5099, "Malé Local Market"),
+      S("Old Friday Mosque (Hukuru Miskiy)", "attraction", "10:00", 30, 4.1781, 73.5125, "Hukuru Miskiy, Malé", { note: "An active mosque: visitors see it from outside and its old graveyard, dressed modestly, away from prayer times." }),
+      S("Sultan Park & National Museum", "attraction", "10:45", 75, 4.1773, 73.51, "National Museum, Malé"),
+      S("Lunch in Malé", "food", "12:15", 60, 4.1752, 73.5094, "Majeedhee Magu, Malé, Maldives"),
+      S("Artificial Beach", "attraction", "13:45", 30, 4.1743, 73.5186, "Artificial Beach, Malé"),
+      S("Hulhumalé Beach", "attraction", "15:00", 90, 4.2119, 73.5434, "Hulhumalé Beach, Maldives", { note: "A local beach: modest swimwear. Swimsuits are for the designated tourist beach." }),
+      S("Dinner on Nirolhu Magu", "food", "17:30", 75, 4.2125, 73.5428, "Nirolhu Magu, Hulhumalé, Maldives"),
     ],
   },
 ];

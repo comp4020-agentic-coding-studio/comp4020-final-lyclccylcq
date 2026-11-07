@@ -28,6 +28,8 @@ export const DESTINATIONS_ZH: Record<string, DestinationZh> = {
   "new-york": { name: "纽约", region: "纽约州，美国", blurb: "中央公园、美术馆和天际线景观。" },
   "san-francisco": { name: "旧金山", region: "加利福尼亚州，美国", blurb: "金门大桥、山丘和海湾。" },
   "los-angeles": { name: "洛杉矶", region: "加利福尼亚州，美国", blurb: "格里菲斯的景色、博物馆和海岸。" },
+  "lake-brienz": { name: "布里恩茨湖", region: "伯尔尼高地，瑞士", blurb: "湖畔村庄、瀑布和头顶的阿尔卑斯山。" },
+  male: { name: "马累", region: "卡夫环礁，马尔代夫", blurb: "首都的市场和清真寺，以及胡鲁马累的海滩。" },
 };
 
 export const ITINERARIES_ZH: Record<string, ItineraryZh> = {
@@ -479,6 +481,46 @@ export const ITINERARIES_ZH: Record<string, ItineraryZh> = {
       "Venice Beach Boardwalk": "威尼斯海滩木栈道",
       "Santa Monica Pier at sunset": "日落时的圣莫尼卡码头",
       "Dinner in Santa Monica": "圣莫尼卡晚餐",
+    },
+  },
+  // --- Lake Brienz ---
+  "lake-brienz-giessbach": {
+    title: "布里恩茨湖：伊瑟尔特瓦尔德、吉斯巴赫瀑布与布里恩茨",
+    destination: "布里恩茨湖",
+    description: "从因特拉肯出发环布里恩茨湖一日：少女峰下的霍赫马特草坪、南岸伊瑟尔特瓦尔德的栈桥、层层跌落的吉斯巴赫瀑布，在布里恩茨吃午饭、看木雕，再到奥伯里德的湖岸。",
+    stops: {
+      "Höhematte, Interlaken": "霍赫马特草坪（因特拉肯）",
+      Iseltwald: "伊瑟尔特瓦尔德",
+      "Giessbach Falls": "吉斯巴赫瀑布",
+      "Lunch in Brienz": "在布里恩茨吃午饭",
+      "Brienz village & woodcarving": "布里恩茨村与木雕",
+      "Oberried lakeshore": "奥伯里德湖岸",
+    },
+    notes: {
+      "The village is free to walk; the famous jetty has a turnstile and a small fee.": "村子可以免费游览；那座著名的栈桥设有闸机，需付少量费用。",
+      "The path passes behind the falls. The Giessbach funicular and the lake boats don't run in winter.": "步道从瀑布后方穿过。吉斯巴赫缆索铁路和湖上游船冬季停运。",
+      "Brienz is known for woodcarving; its school was founded in 1862. The Rothorn steam railway starts here in summer only.": "布里恩茨以木雕闻名，当地的木雕学校创立于 1862 年。罗特峰蒸汽齿轨铁路从这里出发，仅夏季运行。",
+      "The view in Wayline's journey window: Lake Brienz from Oberried.": "Wayline 旅程窗口里的那幅景色：从奥伯里德望向布里恩茨湖。",
+    },
+  },
+  // --- Malé & Hulhumalé ---
+  "male-hulhumale-local": {
+    title: "马累与胡鲁马累：本地岛屿一日",
+    destination: "马累",
+    description: "首都的鱼市和农产品市场、珊瑚石砌成的古星期五清真寺、苏丹公园和国家博物馆，再经锡纳马累大桥到胡鲁马累的海滩和海滨。两座都是有居民的岛屿：请穿着得体，岛上不供应酒精。",
+    stops: {
+      "Malé Fish Market": "马累鱼市",
+      "Malé Local Market": "马累本地市场",
+      "Old Friday Mosque (Hukuru Miskiy)": "古星期五清真寺（Hukuru Miskiy）",
+      "Sultan Park & National Museum": "苏丹公园与国家博物馆",
+      "Lunch in Malé": "在马累吃午饭",
+      "Artificial Beach": "人造海滩",
+      "Hulhumalé Beach": "胡鲁马累海滩",
+      "Dinner on Nirolhu Magu": "在 Nirolhu Magu 吃晚饭",
+    },
+    notes: {
+      "An active mosque: visitors see it from outside and its old graveyard, dressed modestly, away from prayer times.": "这是仍在使用的清真寺：游客可在外部及古墓园参观，请穿着得体，并避开礼拜时间。",
+      "A local beach: modest swimwear. Swimsuits are for the designated tourist beach.": "这是本地海滩，请穿着保守的泳装；比基尼等泳装只适用于指定的游客海滩。",
     },
   },
 };

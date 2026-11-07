@@ -224,7 +224,14 @@ describe.skipIf(!chromePath)("homepage discovery in a real browser", () => {
     await page.waitFor(`/Europe/.test(document.querySelector('#itineraries h3').textContent)`);
     const areas = await page.eval<string[]>(`[...document.querySelectorAll('#itineraries .it-cover-dest')].map(e => e.textContent)`);
     expect(areas.length).toBeGreaterThan(0);
-    expect(areas.every((d) => /Paris|London|Rome|Barcelona|Amsterdam/.test(d))).toBe(true);
+    expect(areas.every((d) => /Paris|London|Rome|Barcelona|Amsterdam|Lake Brienz/.test(d))).toBe(true);
+    // South Asia (the Maldives, November 2026) is its own region, never East Asia
+    await page.eval(`document.querySelector('.rx-tab[data-area="South Asia"]').click()`);
+    await page.waitFor(`/South Asia/.test(document.querySelector('#itineraries h3').textContent)`);
+    expect(await page.eval<string[]>(`[...document.querySelectorAll('#itineraries .it-cover-dest')].map(e => e.textContent)`)).toEqual(["Malé"]);
+    await page.eval(`document.querySelector('.rx-tab[data-area="East Asia"]').click()`);
+    await page.waitFor(`/East Asia/.test(document.querySelector('#itineraries h3').textContent)`);
+    expect(await page.eval<string[]>(`[...document.querySelectorAll('#itineraries .it-cover-dest')].map(e => e.textContent)`)).not.toContain("Malé");
     expect(await page.eval(`document.documentElement.scrollWidth <= innerWidth`)).toBe(true);
   });
 

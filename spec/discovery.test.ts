@@ -68,11 +68,11 @@ describe("itinerary recommendations", () => {
     expect(names).toEqual(expect.arrayContaining(["Canberra", "Sydney", "Tokyo", "Paris", "London", "New York", "Seoul", "Shanghai", "Melbourne"]));
     // every destination says where it is, and has at least one itinerary
     for (const x of d.data.destinations) {
-      expect(x).toMatchObject({ country: expect.any(String), area: expect.stringMatching(/^(Europe|North America|East Asia|Oceania)$/) });
+      expect(x).toMatchObject({ country: expect.any(String), area: expect.stringMatching(/^(Europe|North America|East Asia|South Asia|Oceania)$/) });
       expect(x.itineraries, x.name).toBeGreaterThan(0);
     }
     // regions in order, each listing its countries
-    expect(d.data.areas.map((a: any) => a.area)).toEqual(["Europe", "North America", "East Asia", "Oceania"]);
+    expect(d.data.areas.map((a: any) => a.area)).toEqual(["Europe", "North America", "East Asia", "South Asia", "Oceania"]);
     expect(d.data.areas.find((a: any) => a.area === "East Asia").countries.sort()).toEqual(["China", "Japan", "South Korea"]);
   });
 

@@ -30,15 +30,14 @@
 //           a skyline that's a thin band across a wide panorama
 // `explore` is the id of the curated itinerary the hero's button opens,
 // exactly as the server stores it (`tpl-` + the slug in src/curated.ts),
-// never a path; without one, `search` is where the homepage's map search
-// goes instead.
+// never a path. Every destination has one (November 2026). A scene without
+// one could still give `search`, where the homepage's map search goes.
 export const SCENES = [
   {
     id: "switzerland",
     name: "Switzerland",
     subtitle: "Through the Alps",
-    explore: null,
-    search: { label: "Bernese Oberland, Switzerland", lat: 46.7296, lng: 7.9614 },
+    explore: "tpl-lake-brienz-giessbach",
     night: false,
     photo: { w: 4400, h: 1564, focus: 0.5, pan: 0.34, ay: 0.58, gy: 0.52 },
     place: "Lake Brienz from Oberried, Bernese Oberland",
@@ -72,8 +71,9 @@ export const SCENES = [
     id: "maldives",
     name: "Maldives",
     subtitle: "Island in the lagoon",
-    explore: null,
-    search: { label: "Maldives", lat: 4.1755, lng: 73.5093 },
+    // the photo is a resort island (private, booked separately); the plan
+    // is the islands anyone can visit: Malé and Hulhumalé
+    explore: "tpl-male-hulhumale-local",
     night: false,
     // symmetrical round its jetty, so the view drifts only a little
     photo: { w: 4000, h: 1840, focus: 0.5, phoneZoom: 1.8, pan: 0.16, drift: 0.4, ay: 0.66, gy: 0.6, tip: 0.5 },

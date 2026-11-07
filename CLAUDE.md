@@ -82,7 +82,10 @@ contradict the README, stop and ask. Don't quietly change the product.
   without them. `public/journey.js` holds the five destinations, photo
   geometry and automatic playback; `public/journey-hero.js` renders them.
   Switzerland, London, Sydney, Maldives and Shanghai loop independently of
-  page scrolling. Never capture wheel/touch input or pin the hero. Include
+  page scrolling. Each one's Explore opens a curated plan of its own
+  (`explore` in `journey.js`, a real `tpl-` id; November 2026): Lake Brienz,
+  London, Sydney, Malé & Hulhumalé (local islands; the photo's resort is
+  private and isn't a stop), Shanghai. Never capture wheel/touch input or pin the hero. Include
   a pause control; stop off screen, in hidden tabs, with reduced motion or
   Save-Data. Manual destination choices restart their hold without moving
   the page. Each photo stays one whole layer, never tiled or split.

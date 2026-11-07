@@ -34,6 +34,8 @@ export const PHOTOS = {
   "dest-seoul": {"src": "/img/covers/dest-seoul.jpg", "w": 1200, "h": 675, "alt": "Geunjeongjeon, the throne hall of Gyeongbokgung Palace, across its stone courtyard under a blue sky, Seoul", "author": "Basile Morin", "license": "CC BY-SA 4.0", "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0", "page": "https://commons.wikimedia.org/wiki/File:Front_view_of_the_Imperial_Throne_Hall_Geunjeongjeon_at_Gyeongbokgung_Palace_with_blue_sky_in_Seoul.jpg"},
   "dest-busan": {"src": "/img/covers/dest-busan.jpg", "w": 1200, "h": 750, "alt": "Brightly painted houses stacked up the hillside of Gamcheon Culture Village at sunset, Busan", "author": "Basile Morin", "license": "CC BY-SA 4.0", "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0", "page": "https://commons.wikimedia.org/wiki/File:Colorful_houses_in_Gamcheon_Culture_Village_at_sunset_in_Busan_South_Korea.jpg"},
   "dest-kyoto": {"src": "/img/covers/dest-kyoto.jpg", "w": 1200, "h": 900, "alt": "Kinkaku-ji, the gold-leafed Golden Pavilion, beside its pond and surrounded by pines, Kyoto", "author": "Jaycangel", "license": "CC BY-SA 3.0", "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0", "page": "https://commons.wikimedia.org/wiki/File:Kinkaku-ji_the_Golden_Temple_in_Kyoto_overlooking_the_lake_-_high_rez.JPG"},
+  "dest-lake-brienz": {"src": "/img/covers/dest-lake-brienz.jpg", "w": 1200, "h": 427, "alt": "Lake Brienz from Oberried in spring, the village's chalets on the shore and snow-capped Alps beyond, Bernese Oberland", "author": "Nicojonesgodel", "license": "CC BY-SA 4.0", "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0", "page": "https://commons.wikimedia.org/wiki/File:Panorama_of_Brienzersee.jpg"},
+  "dest-male": {"src": "/img/covers/dest-male.jpg", "w": 1200, "h": 702, "alt": "The Old Friday Mosque (Hukuru Miskiy) in Malé, its coral-stone walls under a low tin roof", "author": "Zairon", "license": "CC BY-SA 4.0", "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0", "page": "https://commons.wikimedia.org/wiki/File:Male'_Hukuru_Miskiy_1.jpg"},
   "dest-melbourne": {"src": "/img/covers/dest-melbourne.jpg", "w": 1200, "h": 661, "alt": "The Melbourne CBD skyline above the Yarra River and its tree-lined Northbank promenade", "author": "Dietmar Rabich", "license": "CC BY-SA 4.0", "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0", "page": "https://commons.wikimedia.org/wiki/File:Melbourne_(AU),_Northbank_--_2019_--_1422-7.jpg"},
 };
 
@@ -54,6 +56,8 @@ export const SHARED_COVERS = {
   "tpl-new-york-manhattan": "dest-new-york",
   "tpl-san-francisco-bay": "dest-san-francisco",
   "tpl-los-angeles-views-coast": "dest-los-angeles",
+  "tpl-lake-brienz-giessbach": "dest-lake-brienz",
+  "tpl-male-hulhumale-local": "dest-male",
 };
 
 export const photoFor = (key) => PHOTOS[key] ?? PHOTOS[SHARED_COVERS[key]] ?? null;

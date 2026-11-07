@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import { CURATED } from "../src/curated.ts";
+import { haversineKm } from "../src/geo.ts";
 import { chromePath, launch, type Page, sleep } from "./browser.ts";
 
 // The scroll-driven prototype was superseded by the user's homepage
@@ -150,15 +151,18 @@ describe("automatic journey playback", () => {
   // The links are built from the template's real id (`tpl-` + its slug, as
   // src/itineraries.ts seeds it), and each one must answer on the server:
   // a link that matched only the slug used to open "Itinerary not found".
-  it("links to existing itineraries, with map destinations for Switzerland and Maldives", async () => {
+  // Every destination has a plan of its own (November 2026): none falls
+  // back to a map search. The plan is in that destination: its stops are
+  // near the place the window shows.
+  const NEAR: Record<string, [number, number]> = { switzerland: [46.7296, 7.9614], london: [51.5072, -0.1276], sydney: [-33.8688, 151.2093], maldives: [4.1755, 73.5093], shanghai: [31.2304, 121.4737] };
+  it("links every destination to an existing itinerary in that place", async () => {
     const ids = new Set(CURATED.map((c) => `tpl-${c.slug}`));
     const linked = [];
     for (const s of J.SCENES) {
       const go = J.exploreFor(s);
-      if (!go.href) {
-        expect(go.search, s.id).toMatchObject({ label: expect.any(String), lat: expect.any(Number), lng: expect.any(Number) });
-        continue;
-      }
+      expect(go.href, s.id).toBeTruthy();
+      expect(go.search, s.id).toBeUndefined();
+      expect(s.explore, s.id).toMatch(/^tpl-/);
       expect(ids.has(s.explore), s.id).toBe(true);
       expect(go.href, s.id).toBe(`/itineraries/${s.explore}`);
       const r = await fetch(new URL(`/api${go.href}`, baseUrl));
@@ -167,9 +171,12 @@ describe("automatic journey playback", () => {
       expect(it.id, s.id).toBe(s.explore);
       expect(it.title, s.id).toBe(CURATED.find((c) => `tpl-${c.slug}` === s.explore)!.title);
       expect(it.stops.length, s.id).toBeGreaterThan(0);
+      // every stop within 60 km of the destination the window names
+      const [lat, lng] = NEAR[s.id];
+      for (const st of it.stops) expect(haversineKm({ lat, lng }, st), `${s.id}: ${st.title}`).toBeLessThan(60);
       linked.push(s.id);
     }
-    expect(linked).toEqual(["london", "sydney", "shanghai"]);
+    expect(linked).toEqual(["switzerland", "london", "sydney", "maldives", "shanghai"]);
   });
 });
 
@@ -256,29 +263,39 @@ describe.skipIf(!chromePath)("homepage journey in a real browser", () => {
   });
 
   // Every destination's "Explore" opens a real plan: its preview loads with
-  // the template's title and stops, and the not-found card never shows.
-  // Switzerland and the Maldives have no plan, and search the map instead.
-  it("opens a loaded itinerary from every destination that links to one", async () => {
+  // the template's title and stops, and the not-found card never shows, at
+  // both marking sizes, by a real click on the visible link.
+  for (const [w, hgt] of [[1920, 1080], [390, 844]]) it(`opens a loaded itinerary from every destination (${w}×${hgt})`, async () => {
     const opened = [];
+    // one page for all five (each back to the homepage by its brand link,
+    // in the app), so the run doesn't keep ten homepages open at once
+    const page = await open(true);
+    await page.viewport(w, hgt, w < 500);
     for (const [i, s] of J.SCENES.entries()) {
-      const page = await open(true);
+      if (i > 0) {
+        await page.tap(".topbar .brand");
+        await page.waitFor("location.pathname === '/' && window.__journey?.state().loaded[0]", 15000);
+      }
       await page.eval(`document.querySelectorAll('.jh-stop')[${i}].click()`);
       await page.waitFor(`window.__journey.state().shown === ${i}`);
-      await page.click(".jh-actions a");
-      if (!s.explore) {
-        await page.waitFor(`document.querySelector('.chip-place')?.textContent.includes(${JSON.stringify(s.search.label)})`, 10000);
-        expect(await page.eval("location.pathname"), s.id).toBe("/");
-        continue;
-      }
+      // the visible Explore link names this destination and points at its plan
+      await page.waitFor(`document.querySelector('.jh-explore')?.offsetParent && document.querySelector('.jh-explore').getAttribute('href') === ${JSON.stringify(`/itineraries/${s.explore}`)}`, 5000);
+      const link = await page.eval<any>(`(() => { const a = document.querySelector('.jh-explore'); a.setAttribute('data-test-explore', ''); return { text: a.textContent, href: a.getAttribute('href'), routed: a.hasAttribute('data-link') }; })()`);
+      expect(link.routed, s.id).toBe(true);
+      expect(link.text, s.id).toContain(s.name);
+      expect(link.href, s.id).toBe(`/itineraries/${s.explore}`);
+      await page.tap("[data-test-explore]");
       const title = CURATED.find((c) => `tpl-${c.slug}` === s.explore)!.title;
       await page.waitFor(`location.pathname === ${JSON.stringify(`/itineraries/${s.explore}`)}`);
       await page.waitFor(`!document.querySelector('.preview .boot')`, 10000);
       expect(await page.eval("document.querySelector('.invite-card h1')?.textContent ?? null"), s.id).toBeNull();
       expect(await page.eval("document.querySelector('.preview h1')?.textContent"), s.id).toBe(title);
       expect(await page.eval("document.querySelectorAll('.pv-stops li').length"), s.id).toBeGreaterThan(0);
+      // a plan, not the homepage's map search
+      expect(await page.eval("Boolean(document.querySelector('#explore-map, .chip-place'))"), s.id).toBe(false);
       opened.push(s.id);
     }
-    expect(opened).toEqual(["london", "sydney", "shanghai"]);
+    expect(opened).toEqual(["switzerland", "london", "sydney", "maldives", "shanghai"]);
   });
 
   it("stays still for reduced motion, loads only the chosen photos and supports rapid selection", async () => {
@@ -293,10 +310,12 @@ describe.skipIf(!chromePath)("homepage journey in a real browser", () => {
     expect(await page.eval("document.querySelector('.jh-pause').hidden")).toBe(true);
     // no tunnel runs with reduced motion
     expect(await page.eval("window.__journey.state().tunnel")).toBeNull();
+    // the still view's link still opens the chosen destination's own plan
+    expect(await page.eval("document.querySelector('.jh-actions a').getAttribute('href')")).toBe("/itineraries/tpl-male-hulhumale-local");
     await page.click(".jh-actions a");
-    await page.waitFor("/Maldives/.test(document.querySelector('.chip-place')?.textContent ?? '')");
-    expect(await page.eval("location.pathname")).toBe("/");
-    expect(await page.eval("scrollY > 0")).toBe(true);
+    await page.waitFor("location.pathname === '/itineraries/tpl-male-hulhumale-local'");
+    await page.waitFor("document.querySelector('.preview h1')?.textContent === " + JSON.stringify(CURATED.find((c) => c.slug === "male-hulhumale-local")!.title), 10000);
+    expect(await page.eval("document.querySelector('.invite-card h1')?.textContent ?? null")).toBeNull();
   });
 
   it("stops off screen, resumes on return, and responds to motion preference changes", async () => {

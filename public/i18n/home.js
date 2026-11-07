@@ -6,6 +6,7 @@ export const ZH = {
   // --- regions and countries (the server's English keys, shown translated)
   Europe: "欧洲",
   "East Asia": "东亚",
+  "South Asia": "南亚",
   "North America": "北美",
   Oceania: "大洋洲",
   Australia: "澳大利亚",
@@ -93,7 +94,7 @@ export const ZH = {
   "Try again": "重试",
   "No itineraries in this category yet.": "此类别暂无行程。",
   "Wayline doesn't have itineraries near {place} yet": "Wayline 暂时没有 {place} 附近的行程",
-  "Curated routes cover a set of cities across Europe, North America, East Asia and Oceania (see Explore ready-made trips). Below are individual places nearby, not complete itineraries.": "精选路线覆盖欧洲、北美、东亚和大洋洲的部分城市（见“探索现成行程”）。以下是附近的单个地点，并非完整行程。",
+  "Curated routes cover a set of cities across Europe, North America, Asia and Oceania (see Explore ready-made trips). Below are individual places nearby, not complete itineraries.": "精选路线覆盖欧洲、北美、亚洲和大洋洲的部分城市（见“探索现成行程”）。以下是附近的单个地点，并非完整行程。",
   "Nearby places need Google Maps configured on the server.": "显示附近地点需要服务器配置 Google Maps。",
   "Google Maps found no notable places nearby.": "Google Maps 在附近没有找到值得一去的地点。",
   "Individual places nearby": "附近的单个地点",
