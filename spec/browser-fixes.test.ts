@@ -357,6 +357,8 @@ describe.skipIf(!chromePath)("regressions: order, focus, header, entry points", 
     // no trips yet: "Plan your first trip"
     await page.goto(new URL("/trips", baseUrl).href);
     await page.waitFor(`document.querySelector('[data-create="first"]')`, 8000);
+    // A font swap moves the empty-state button; wait before measuring a real tap.
+    await page.eval(`document.fonts.ready.then(() => null)`);
     // what the tap meets, kept for the failure message (CI only ever lost it)
     await page.eval(`(() => { window.__tapLog = []; window.__btn0 = document.querySelector('[data-create="first"]'); const r = window.__btn0.getBoundingClientRect(); window.__tapLog.push('btn ' + [r.x, r.y, r.width, r.height].map(Math.round) + ' fonts ' + document.fonts.status + ' at ' + Math.round(performance.now())); for (const k of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'touchstart', 'pointercancel']) addEventListener(k, (e) => window.__tapLog.push(k + ' ' + (e.target?.dataset?.create ?? e.target?.tagName) + ' ' + Math.round(e.clientX) + ',' + Math.round(e.clientY) + ' same=' + (document.querySelector('[data-create="first"]') === window.__btn0) + ' at ' + Math.round(performance.now())), true); })()`);
     await page.tap('[data-create="first"]');
