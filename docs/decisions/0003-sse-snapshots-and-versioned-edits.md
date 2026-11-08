@@ -15,7 +15,7 @@ against an outdated version is refused instead of silently overwriting
 someone". At the time of this decision, the app was one Node process on one
 `shared-cpu-1x` Fly machine with 256 MB and no runtime dependencies
 (ADR 0001). The later AI integration added the OpenAI SDK, as recorded in
-[PROCESS](../../PROCESS.md#runtime-and-deployment); SSE itself still needs
+[engineering notes](../final-engineering-notes.md#runtime-and-deployment); SSE itself still needs
 no added dependency. Trips are small: a few days, tens of stops.
 
 ## Problem
