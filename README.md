@@ -19,9 +19,15 @@ A shared travel-planning workspace: a map, a day's timeline and friends working 
 
 ## What good means to me
 
-I wanted a tool I would keep using after the course. My standards are practical value, fitness for purpose and ease of use: a real need, a clear audience and a workflow understandable without a manual. I also want a product with its own character, beyond putting another product in a new skin.
+My three standards for a good product are practical value, fitness for purpose and ease of use. I also want a product with its own character.
 
-For friends planning somewhere unfamiliar, good means turning places we already want to visit into a shared day whose distances and timing make sense. Collecting recommendations separately and checking maps finds places; it leaves us to reconcile duplicates, travel and each other's changes. Wayline brings those decisions into one live plan. We can respond while someone edits, instead of exchanging another finished version. That is the work I want us to return for.
+For Wayline, good means friends can collaborate on the platform to complete an accurate shared plan easily and smoothly.
+
+**Practical value.** I wanted a tool I would keep using after the course. After collecting social-media recommendations and checking maps, we still have to connect everything ourselves. Wayline puts places, travel and time in one plan; food suggestions follow the route, nearby picks can fill free time, and export gives me an image to keep in my phone's album.
+
+**Fitness for purpose.** Planning together means everyone can change the same itinerary and respond while others edit, without passing ordinary decisions back to the owner. Travel data must respect our choices: [an unavailable route stays unknown](https://github.com/comp4020-agentic-coding-studio/comp4020-final-lyclccylcq/blob/main/CLAUDE.md#truthful-transportation). A plan that quietly replaces transit with driving would only look workable.
+
+**Ease of use.** My fitness-logging AI agent app taught me that a defined task should not need repeated conversation. Buttons and combined repair previews reduce the exchanges; mobile tabs keep the map, plan and assistant readable. The next action should be clear without a manual.
 
 ![The public homepage with its train-window scenery and destination entry](docs/readme-home-desktop.png)
 
@@ -39,9 +45,7 @@ Changes reach other editors within about a second. Outdated edits become visible
 
 *The same day across three tabs, at 390×844.*
 
-## Tools I want to use
-
-My fitness-logging AI agent app taught me: if one action can do the job, I do not want repeated conversation. Wayline uses task buttons and selectable previews. The assistant checks the day, suggests food along the route and finds nearby places. AI helps inspect and refine my choices. Unavailable travel information stays unknown.
+## Sharing belongs to the tool
 
 Publishing lets others read or reuse a snapshot. Ratings and reviews can remain as itinerary feedback. I want a travel workspace, rather than another Instagram; follows and social feeds are outside that purpose.
 
